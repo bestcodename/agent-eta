@@ -1,0 +1,776 @@
+#!/usr/bin/env python3
+"""List the background tasks of every agent session with their ETAs, shortest first.
+
+Claude Code, Codex and local goose runs work side by side, and each of them states an
+ETA for a long or background command, but only as chat text. This tool turns that ETA
+into one file per task and merges the files into a single list. See docs/agent-eta.md.
+
+    agent-eta [list] [--json]
+        Print the running tasks of all sessions. Overdue tasks come first, then the
+        rest by remaining time, and tasks without an ETA last. Dead entries are pruned.
+
+    agent-eta hook
+        Hook entry point for Claude Code (PostToolUse on Bash) and Codex (PreToolUse
+        and PostToolUse on Bash). Reads the hook payload on stdin, always exits 0 and
+        never prints, so it can neither block nor alter a tool call.
+
+    agent-eta run --eta DUR [--label TEXT] [--agent NAME] -- CMD...
+        Run CMD and list it for as long as it runs. For agents a hook does not reach.
+
+    agent-eta add --eta DUR --label TEXT [--agent NAME] [--pid PID]
+    agent-eta done ID...
+        Record a wait that is not a local process, such as a CI pipeline, and remove it
+        again. With --pid the entry lives exactly as long as that process.
+
+The state lives in /tmp/agent-eta-<uid>, overridable with AGENT_ETA_DIR. /tmp is the only
+directory that both the Codex sandbox and the host can write, and the files may vanish at
+reboot, because every session they describe does too.
+
+Every entry names a holder, which is how the reader decides on its own whether the task
+still runs, so a forgotten `done` does not leave a ghost behind:
+
+    pid   the process with this pid and this starttime still exists
+    lock  the writer still holds an flock on the entry file, which works across the pid
+          namespace the Codex sandbox puts every command into
+    pair  the matching Codex PostToolUse has not deleted it yet, the Codex app-server it
+          was recorded under still runs, and it is not past its expiry
+    none  it is not past its expiry
+"""
+
+import argparse
+import fcntl
+import json
+import os
+import re
+import secrets
+import signal
+import stat
+import subprocess
+import sys
+import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+BERLIN = ZoneInfo("Europe/Berlin")
+LABEL_MAX = 80
+# Codex hands a command back to the model after a 10 second yield by default. Anything
+# younger is an ordinary foreground command, and listing it would only make the list flicker.
+CODEX_MIN_AGE = 10
+# An entry without a live holder expires once it is overdue by its own length, but never
+# sooner than this. One without any ETA expires after UNKNOWN_TTL.
+OVERDUE_MIN = 3600
+UNKNOWN_TTL = 2 * 3600
+HOOK_LOG_MAX = 256 * 1024
+
+UNITS = {}
+for _seconds, _names in (
+        (86400, "d day days tag tage"),
+        (3600, "h hr hrs hour hours std stunde stunden"),
+        (60, "m min mins minute minutes minute minuten"),
+        (1, "s sec secs second seconds sek sekunde sekunden")):
+    for _name in _names.split():
+        UNITS[_name] = _seconds
+
+_PART = re.compile(r"\s*(\d+(?:[.,]\d+)?)\s*([a-zäöü]+)\.?", re.I)
+_SEP = re.compile(r"\s*(?:,|\bund\b|\band\b)?", re.I)
+_BARE_MINUTES = re.compile(r"(\d{2})\b")
+_MARKER = re.compile(r"(?:\bETA\b\s*:?\s*(?:ca\.\s*|~\s*)?|\bca\.\s*|\bungefähr\s+)", re.I)
+_WRAPPED = re.compile(r"\bagent-eta\s+run\b")
+
+
+class StateDirError(Exception):
+    pass
+
+
+# --- durations ------------------------------------------------------------------------
+
+def scan_duration(text, pos=0):
+    """Read a duration such as `1h30m` or `1 Stunde 30 Minuten` at pos.
+
+    Returns (seconds, end), or (None, pos) when no duration starts there.
+    """
+    total, found = 0.0, False
+    while True:
+        match = _PART.match(text, pos)
+        if not match or match.group(2).lower() not in UNITS:
+            break
+        unit = UNITS[match.group(2).lower()]
+        total += float(match.group(1).replace(",", ".")) * unit
+        found, pos = True, match.end()
+        # `1h05` is the format the list itself prints, so it has to read back.
+        if unit == 3600:
+            bare = _BARE_MINUTES.match(text, pos)
+            if bare:
+                total += int(bare.group(1)) * 60
+                pos = bare.end()
+                break
+        sep = _SEP.match(text, pos)
+        following = _PART.match(text, sep.end())
+        if not following or following.group(2).lower() not in UNITS:
+            break
+        pos = sep.end()
+    return (int(round(total)), pos) if found else (None, pos)
+
+
+def parse_eta_arg(text):
+    """The --eta argument. A bare number is seconds, as for timeout(1)."""
+    text = str(text).strip()
+    if re.fullmatch(r"\d+", text):
+        return int(text)
+    marker = _MARKER.match(text)
+    start = marker.end() if marker else 0
+    seconds, end = scan_duration(text, start)
+    if seconds is None or text[end:].strip():
+        raise ValueError("not a duration: %r" % text)
+    return seconds
+
+
+def find_eta(text):
+    """The first ETA a free text states, as (seconds, start, end), or None."""
+    text = str(text or "")
+    for marker in _MARKER.finditer(text):
+        seconds, end = scan_duration(text, marker.end())
+        if seconds is not None:
+            return seconds, marker.start(), end
+    return None
+
+
+def format_span(seconds):
+    """Remaining time as a short span: `<1m`, `4m`, `1h05`, `2d3h`, `-12m` or `?`."""
+    if seconds is None:
+        return "?"
+    sign = "-" if seconds < 0 else ""
+    left = abs(int(seconds))
+    if not sign and left < 60:
+        return "<1m"
+    hours, minutes = divmod(left // 60, 60)
+    if hours >= 24:
+        return sign + "%dd%dh" % divmod(hours, 24)
+    if hours:
+        return sign + "%dh%02d" % (hours, minutes)
+    return sign + "%dm" % minutes
+
+
+def format_due(due, now):
+    if not due:
+        return "-"
+    moment = datetime.fromtimestamp(due, BERLIN)
+    if abs(due - now) >= 86400:
+        return moment.strftime("%d.%m. %H:%M")
+    return moment.strftime("%H:%M")
+
+
+# --- labels ---------------------------------------------------------------------------
+
+def clip(text):
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= LABEL_MAX else text[:LABEL_MAX - 1] + "…"
+
+
+def strip_eta(text):
+    """The text without the ETA it states, and without the brackets left around it."""
+    found = find_eta(text)
+    if not found:
+        return text
+    _, start, end = found
+    text = text[:start] + text[end:]
+    text = re.sub(r"\(\s*\)|\[\s*\]", "", text)
+    return text.strip(" \t-–—,;:")
+
+
+def command_label(command):
+    """A shell command without its trailing `# ETA ...` comment."""
+    command = str(command or "")
+    hash_at = command.rfind("#")
+    if hash_at >= 0 and find_eta(command[hash_at:]):
+        command = command[:hash_at]
+    return clip(command)
+
+
+# --- processes ------------------------------------------------------------------------
+
+def proc_start(pid):
+    """Field 22 of /proc/<pid>/stat, the starttime in clock ticks, as Claude Code stores it."""
+    try:
+        with open("/proc/%d/stat" % int(pid), "r", encoding="utf-8", errors="replace") as handle:
+            data = handle.read()
+        return data.rsplit(")", 1)[1].split()[19]
+    except (OSError, ValueError, IndexError, TypeError):
+        return None
+
+
+def pid_alive(pid, start=None):
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    except (OSError, ValueError, TypeError, OverflowError):
+        return False
+    return start is None or proc_start(pid) == str(start)
+
+
+def parent_of(pid):
+    try:
+        with open("/proc/%d/stat" % pid, "r", encoding="utf-8", errors="replace") as handle:
+            return int(handle.read().rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def comm_of(pid):
+    try:
+        with open("/proc/%d/comm" % pid, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read().strip()
+    except OSError:
+        return None
+
+
+def ancestor(match, start=None, depth=8):
+    """The nearest ancestor pid for which match(pid) is true."""
+    pid = parent_of(os.getpid()) if start is None else start
+    for _ in range(depth):
+        if not pid or pid <= 1:
+            return None
+        if match(pid):
+            return pid
+        pid = parent_of(pid)
+    return None
+
+
+def find_task_pid(task_id, proc="/proc"):
+    """The top process of a Claude Code background task.
+
+    Claude Code points fd 1 of a background shell at .../tasks/<task id>.output, and every
+    child inherits it, so the earliest started of those processes is the shell itself.
+    """
+    suffix = "/tasks/%s.output" % task_id
+    uid = os.getuid()
+    best = None
+    for name in os.listdir(proc):
+        if not name.isdigit():
+            continue
+        try:
+            if os.stat(os.path.join(proc, name)).st_uid != uid:
+                continue
+            if not os.readlink(os.path.join(proc, name, "fd", "1")).endswith(suffix):
+                continue
+        except OSError:
+            continue
+        start = proc_start(int(name))
+        if start is None:
+            continue
+        if best is None or int(start) < int(best[1]):
+            best = (int(name), start)
+    return best
+
+
+# --- state ----------------------------------------------------------------------------
+
+def state_dir():
+    path = os.environ.get("AGENT_ETA_DIR") or "/tmp/agent-eta-%d" % os.getuid()
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        pass
+    info = os.lstat(path)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise StateDirError("%s is not a directory owned by uid %d" % (path, os.getuid()))
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        os.chmod(path, 0o700)
+    return path
+
+
+def entry_path(directory, entry_id):
+    return os.path.join(directory, entry_id + ".json")
+
+
+def safe_id(text):
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(text))[:120]
+
+
+def write_atomic(path, data):
+    """Write JSON through a temporary file in the same directory, then rename.
+
+    The reader may look at any moment, and a half-written entry would read as garbage.
+    """
+    tmp = "%s.tmp.%d" % (path, os.getpid())
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def write_locked(path, data):
+    """Write an entry that lives as long as the returned file stays open.
+
+    The lock is taken on the temporary file before the rename, so the entry is never
+    visible unlocked.
+    """
+    tmp = "%s.tmp.%d" % (path, os.getpid())
+    handle = open(tmp, "w", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        json.dump(data, handle, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.replace(tmp, path)
+    except BaseException:
+        handle.close()
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return handle
+
+
+def lock_held(path):
+    try:
+        handle = open(path, "r", encoding="utf-8")
+    except OSError:
+        return False
+    with handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        except OSError:
+            return False
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return False
+
+
+def remove(path):
+    try:
+        os.unlink(path)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def make_entry(entry_id, agent, label, eta, holder, source, session=None, cwd=None, now=None):
+    now = time.time() if now is None else now
+    return {
+        "version": 1,
+        "id": entry_id,
+        "agent": agent,
+        "session": session or {},
+        "cwd": cwd or os.getcwd(),
+        "label": clip(label),
+        "started": int(now),
+        "due": int(now + eta) if eta is not None else None,
+        "source": source,
+        "holder": holder,
+    }
+
+
+def expired(entry, now):
+    started = entry.get("started") or now
+    due = entry.get("due")
+    if due:
+        return now > due + max(OVERDUE_MIN, due - started)
+    return now > started + UNKNOWN_TTL
+
+
+def alive(entry, path, now):
+    holder = entry.get("holder") or {}
+    kind = holder.get("type")
+    if kind == "pid":
+        return pid_alive(holder.get("pid"), holder.get("start"))
+    if kind == "lock":
+        return lock_held(path)
+    if kind == "pair":
+        app = holder.get("app") or {}
+        if app.get("pid") and not pid_alive(app["pid"], app.get("start")):
+            return False
+    return not expired(entry, now)
+
+
+def load_entries(directory, now, prune=True):
+    """Every live entry with its path. Dead and unreadable entries are deleted."""
+    found = []
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".json") or name.startswith("."):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                entry = json.load(handle)
+            if not isinstance(entry, dict):
+                raise ValueError("not an object")
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError):
+            if prune:
+                remove(path)
+            continue
+        if alive(entry, path, now):
+            found.append((entry, path))
+        elif prune:
+            remove(path)
+    return found
+
+
+# --- sessions -------------------------------------------------------------------------
+
+def claude_home():
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+
+
+def codex_home():
+    return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+
+
+def claude_session(pid):
+    """The registry record of a live Claude Code session, or {}."""
+    try:
+        with open(os.path.join(claude_home(), "sessions", "%d.json" % int(pid)), "r",
+                  encoding="utf-8") as handle:
+            record = json.load(handle)
+    except (OSError, ValueError, TypeError):
+        return {}
+    if not isinstance(record, dict):
+        return {}
+    if record.get("procStart") and proc_start(pid) != str(record["procStart"]):
+        return {}
+    return record
+
+
+def codex_thread_names():
+    names = {}
+    try:
+        with open(os.path.join(codex_home(), "session_index.jsonl"), "r", encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(record, dict) and record.get("id"):
+                    names[record["id"]] = record.get("thread_name") or names.get(record["id"])
+    except OSError:
+        pass
+    return names
+
+
+def claude_pid():
+    try:
+        pid = int(os.environ.get("CLAUDE_PID", ""))
+        if pid_alive(pid):
+            return pid
+    except ValueError:
+        pass
+    sessions = os.path.join(claude_home(), "sessions")
+    return ancestor(lambda pid: os.path.exists(os.path.join(sessions, "%d.json" % pid)))
+
+
+def current_session():
+    """Agent name and session of the process calling `run` or `add`."""
+    codex_names = ("CODEX_THREAD_ID", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED")
+    if any(os.environ.get(name) for name in codex_names):
+        return "codex", {"id": os.environ.get("CODEX_THREAD_ID")}
+    if os.environ.get("CLAUDE_PID") or os.environ.get("CLAUDECODE"):
+        pid = claude_pid()
+        record = claude_session(pid) if pid else {}
+        return "claude", {"id": os.environ.get("CLAUDE_CODE_SESSION_ID") or record.get("sessionId"),
+                          "pid": pid, "name": record.get("name")}
+    return "other", {}
+
+
+def session_name(entry, thread_names):
+    session = entry.get("session") or {}
+    if entry.get("agent") == "claude" and session.get("pid"):
+        name = claude_session(session["pid"]).get("name")
+        if name:
+            return name
+    if entry.get("agent") == "codex" and session.get("id"):
+        name = thread_names.get(session["id"])
+        if name:
+            return name
+    return session.get("name") or os.path.basename(entry.get("cwd") or "") or "-"
+
+
+# --- list -----------------------------------------------------------------------------
+
+def visible(entry, now):
+    if entry.get("agent") == "codex" and entry.get("source") == "hook":
+        return now - (entry.get("started") or now) >= CODEX_MIN_AGE
+    return True
+
+
+def rows(directory, now):
+    entries = [entry for entry, _ in load_entries(directory, now) if visible(entry, now)]
+    names = codex_thread_names() if any(e.get("agent") == "codex" for e in entries) else {}
+    result = []
+    for entry in entries:
+        due = entry.get("due")
+        remaining = int(due - now) if due else None
+        row = dict(entry)
+        row["remaining"] = remaining
+        row["overdue"] = remaining is not None and remaining < 0
+        row["session_name"] = session_name(entry, names)
+        result.append(row)
+    return sorted(result, key=sort_key)
+
+
+def sort_key(row):
+    remaining = row["remaining"]
+    if remaining is None:
+        return (2, row.get("started") or 0)
+    return (0 if remaining < 0 else 1, remaining)
+
+
+def render(table, now):
+    if not table:
+        return "No background tasks.\n"
+    lines = [("REMAINING", "DUE", "AGENT", "SESSION", "TASK")]
+    for row in table:
+        lines.append((format_span(row["remaining"]), format_due(row.get("due"), now),
+                      row.get("agent") or "-", clip(row["session_name"])[:28], row.get("label") or "-"))
+    widths = [max(len(line[i]) for line in lines) for i in range(4)]
+    out = []
+    for line in lines:
+        out.append("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line[:4])) + "  " + line[4])
+    return "\n".join(out) + "\n"
+
+
+def cmd_list(args):
+    now = time.time()
+    table = rows(state_dir(), now)
+    if args.json:
+        json.dump({"now": int(now), "tasks": table}, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    else:
+        sys.stdout.write(render(table, now))
+    return 0
+
+
+# --- hook -----------------------------------------------------------------------------
+
+def trace(directory, *fields):
+    """One line per hook call in hook.log, without any command text."""
+    try:
+        path = os.path.join(directory, "hook.log")
+        try:
+            if os.path.getsize(path) > HOOK_LOG_MAX:
+                os.replace(path, path + ".1")
+        except OSError:
+            pass
+        stamp = datetime.now(BERLIN).strftime("%Y-%m-%d %H:%M:%S")
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write("\t".join([stamp] + [str(f) for f in fields]) + "\n")
+    except OSError:
+        pass
+
+
+def hook_command(payload):
+    command = (payload.get("tool_input") or {}).get("command")
+    if isinstance(command, list):
+        command = " ".join(str(part) for part in command)
+    return str(command or "")
+
+
+def claude_post(directory, payload):
+    response = payload.get("tool_response")
+    if not isinstance(response, dict) or not response.get("backgroundTaskId"):
+        return "foreground"
+    task = safe_id(response["backgroundTaskId"])
+    command = hook_command(payload)
+    if _WRAPPED.search(command):
+        return "wrapped"
+    found = find_task_pid(task)
+    if not found:
+        return "already-exited"
+    description = str((payload.get("tool_input") or {}).get("description") or "")
+    eta = find_eta(description) or find_eta(command)
+    pid = claude_pid()
+    record = claude_session(pid) if pid else {}
+    session = {"id": payload.get("session_id"), "pid": pid, "name": record.get("name")}
+    label = strip_eta(description) if description else command_label(command)
+    entry = make_entry("claude-" + task, "claude", label or command_label(command),
+                       eta[0] if eta else None,
+                       {"type": "pid", "pid": found[0], "start": found[1]},
+                       "hook", session, payload.get("cwd"))
+    write_atomic(entry_path(directory, entry["id"]), entry)
+    return "recorded"
+
+
+def codex_pre(directory, payload):
+    use_id = payload.get("tool_use_id")
+    if not use_id:
+        return "no-tool-use-id"
+    command = hook_command(payload)
+    if _WRAPPED.search(command):
+        return "wrapped"
+    eta = find_eta(command)
+    app = ancestor(lambda pid: comm_of(pid) == "codex")
+    holder = {"type": "pair", "app": {"pid": app, "start": proc_start(app)} if app else {}}
+    session = {"id": payload.get("session_id")}
+    entry = make_entry("codex-" + safe_id(use_id), "codex", command_label(command),
+                       eta[0] if eta else None, holder, "hook", session, payload.get("cwd"))
+    write_atomic(entry_path(directory, entry["id"]), entry)
+    return "recorded"
+
+
+def codex_post(directory, payload):
+    use_id = payload.get("tool_use_id")
+    if not use_id:
+        return "no-tool-use-id"
+    return "removed" if remove(entry_path(directory, "codex-" + safe_id(use_id))) else "unknown"
+
+
+def handle_hook(directory, payload):
+    event = payload.get("hook_event_name")
+    if payload.get("tool_name") != "Bash":
+        return "codex" if "turn_id" in payload else "claude", event, "not-bash"
+    # The payload decides first. Codex requires turn_id, Claude Code never sends it, and an
+    # environment variable could leak from whatever started the app.
+    if "turn_id" in payload:
+        if event == "PreToolUse":
+            return "codex", event, codex_pre(directory, payload)
+        if event == "PostToolUse":
+            return "codex", event, codex_post(directory, payload)
+        return "codex", event, "ignored"
+    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_PID"):
+        if event == "PostToolUse":
+            return "claude", event, claude_post(directory, payload)
+        return "claude", event, "ignored"
+    return "unknown", event, "ignored"
+
+
+def cmd_hook(args):
+    directory = None
+    try:
+        directory = state_dir()
+        raw = sys.stdin.read()
+        payload = json.loads(raw) if raw.strip() else {}
+        if not isinstance(payload, dict):
+            raise ValueError("payload is not an object")
+        agent, event, action = handle_hook(directory, payload)
+        trace(directory, event, agent, payload.get("session_id") or "-",
+              payload.get("tool_use_id") or "-", action)
+    except Exception as exc:  # A hook that fails would surface in every tool call.
+        if directory:
+            trace(directory, "error", type(exc).__name__)
+    return 0
+
+
+# --- run, add, done -------------------------------------------------------------------
+
+def cmd_run(args):
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if not command:
+        print("agent-eta run: no command given", file=sys.stderr)
+        return 2
+    agent, session = current_session()
+    directory = state_dir()
+    entry = make_entry("run-" + secrets.token_hex(4), args.agent or agent,
+                       args.label or " ".join(command), args.eta, {"type": "lock"}, "run", session)
+    path = entry_path(directory, entry["id"])
+    lock = write_locked(path, entry)
+    try:
+        try:
+            # Its own process group, so a Ctrl+C reaches the child once, through the
+            # forwarding below, rather than twice.
+            child = subprocess.Popen(command, process_group=0)
+        except FileNotFoundError:
+            print("agent-eta run: %s: command not found" % command[0], file=sys.stderr)
+            return 127
+        except PermissionError:
+            print("agent-eta run: %s: permission denied" % command[0], file=sys.stderr)
+            return 126
+
+        def forward(signum, _frame):
+            try:
+                child.send_signal(signum)
+            except ProcessLookupError:
+                pass
+
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(signum, forward)
+        code = child.wait()
+        return code if code >= 0 else 128 - code
+    finally:
+        remove(path)
+        lock.close()
+
+
+def cmd_add(args):
+    agent, session = current_session()
+    holder = None
+    if args.pid is not None:
+        start = proc_start(args.pid)
+        if start is None:
+            print("agent-eta add: no process %d" % args.pid, file=sys.stderr)
+            return 1
+        holder = {"type": "pid", "pid": args.pid, "start": start}
+    entry = make_entry("add-" + secrets.token_hex(4), args.agent or agent, args.label, args.eta,
+                       holder, "add", session)
+    write_atomic(entry_path(state_dir(), entry["id"]), entry)
+    print(entry["id"])
+    return 0
+
+
+def cmd_done(args):
+    directory = state_dir()
+    missing = [entry_id for entry_id in args.ids if not remove(entry_path(directory, safe_id(entry_id)))]
+    for entry_id in missing:
+        print("agent-eta done: no entry %s" % entry_id, file=sys.stderr)
+    return 1 if missing else 0
+
+
+# --- main -----------------------------------------------------------------------------
+
+def eta_type(text):
+    try:
+        return parse_eta_arg(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc))
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="agent-eta", description=__doc__.split("\n")[0])
+    sub = parser.add_subparsers(dest="cmd")
+    listing = sub.add_parser("list", help="print the running tasks of all sessions")
+    listing.add_argument("--json", action="store_true", help="machine-readable output")
+    sub.add_parser("hook", help="hook entry point for Claude Code and Codex")
+    run = sub.add_parser("run", help="run a command and list it while it runs")
+    run.add_argument("--eta", type=eta_type, required=True, help="25m, 1h30m, 7200, ca. 10 minutes")
+    run.add_argument("--label")
+    run.add_argument("--agent")
+    run.add_argument("command", nargs=argparse.REMAINDER)
+    add = sub.add_parser("add", help="record a wait that is not a local process")
+    add.add_argument("--eta", type=eta_type, required=True)
+    add.add_argument("--label", required=True)
+    add.add_argument("--agent")
+    add.add_argument("--pid", type=int)
+    done = sub.add_parser("done", help="remove entries recorded with add")
+    done.add_argument("ids", nargs="+")
+    return parser
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] == "--json":
+        argv.insert(0, "list")
+    args = build_parser().parse_args(argv)
+    handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done}
+    try:
+        return handlers[args.cmd](args)
+    except StateDirError as exc:
+        print("agent-eta: %s" % exc, file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
