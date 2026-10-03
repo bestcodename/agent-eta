@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""List the background tasks of every agent session with their ETAs, shortest first.
+"""List every running agent session with its state and ETA, and its background tasks.
 
 Claude Code, Codex and local goose runs work side by side, and each of them states an
 ETA for a long or background command, but only as chat text. This tool turns that ETA
 into one file per task and merges the files into a single list. See docs/agent-eta.md.
 
-    agent-eta [list] [--json]
-        Print the running tasks of all sessions. Overdue tasks come first, then the
-        rest by remaining time, and tasks without an ETA last. Dead entries are pruned.
+    agent-eta [list] [--json] [--tasks]
+        Print every running session with its state (waiting, working or idle), its
+        ETA and its background tasks underneath. Sessions waiting for an answer come
+        first, then working ones by remaining time, then idle ones. --tasks prints the
+        flat task list instead. Dead entries are pruned.
 
     agent-eta hook
-        Hook entry point for Claude Code (PostToolUse on Bash) and Codex (PreToolUse
-        and PostToolUse on Bash). Reads the hook payload on stdin, always exits 0 and
-        never prints, so it can neither block nor alter a tool call.
+        Hook entry point for Claude Code (PostToolUse on Bash) and Codex (PreToolUse and
+        PostToolUse on Bash, plus UserPromptSubmit, PermissionRequest, Stop and
+        Interrupt for the thread state). Reads the hook payload on stdin, always exits 0
+        and never prints, so it can neither block nor alter a tool call.
+
+    agent-eta turn --eta DUR [--label TEXT]
+    agent-eta turn --done
+        Set or clear the ETA of the calling session's current turn. It ends on its own
+        when the turn does.
 
     agent-eta run --eta DUR [--label TEXT] [--agent NAME] -- CMD...
         Run CMD and list it for as long as it runs. For agents a hook does not reach.
@@ -35,15 +43,21 @@ still runs, so a forgotten `done` does not leave a ghost behind:
     pair  the matching Codex PostToolUse has not deleted it yet, the Codex app-server it
           was recorded under still runs, and it is not past its expiry
     none  it is not past its expiry
+
+Claude Code reports the state of every session in ~/.claude/sessions/<pid>.json itself.
+Codex reports nothing outside its app, so its hooks keep one state file per thread in
+sessions/ under the state directory.
 """
 
 import argparse
 import fcntl
+import glob
 import json
 import os
 import re
 import secrets
 import signal
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -61,6 +75,25 @@ CODEX_MIN_AGE = 10
 OVERDUE_MIN = 3600
 UNKNOWN_TTL = 2 * 3600
 HOOK_LOG_MAX = 256 * 1024
+# A Codex thread whose hooks stayed silent this long is dropped. One that claims to work or
+# wait but stayed silent for SESSION_STALE most likely lost its Stop, and counts as idle.
+SESSION_IDLE_TTL = 12 * 3600
+SESSION_STALE = 6 * 3600
+# Claude Code's own words for a session state, mapped to the three this list shows.
+# "shell" is a foreground Bash command, measured against a running bash child on 2026-10-03.
+CLAUDE_STATES = {"busy": "working", "shell": "working", "waiting": "waiting", "idle": "idle"}
+# The Codex hook events that tell the state of a thread.
+CODEX_STATES = {"UserPromptSubmit": "working", "PreToolUse": "working", "PostToolUse": "working",
+                "PermissionRequest": "waiting", "Stop": "idle", "Interrupt": "idle"}
+TURN_ENDS = ("UserPromptSubmit", "Stop", "Interrupt", "SessionEnd")
+# Codex tools that put a question to the user. No hook sees them, and none sees a plan waiting
+# for approval either, so the reader looks for both in the thread's rollout transcript.
+# Measured on codex-cli 0.159.2.
+CODEX_QUESTION_TOOLS = ("request_user_input",)
+ROLLOUT_TAIL = 256 * 1024
+# Claude Code keeps a session's title in its transcript and rewrites it now and then. Only the
+# end of a transcript is read first, because a long one runs to tens of megabytes.
+TRANSCRIPT_TAIL = 2 * 1024 * 1024
 
 UNITS = {}
 for _seconds, _names in (
@@ -282,8 +315,36 @@ def state_dir():
     return path
 
 
+def sub_dir(directory, name):
+    """sessions/ or turns/ in the state directory, created on first write."""
+    path = os.path.join(directory, name)
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        pass
+    return path
+
+
 def entry_path(directory, entry_id):
     return os.path.join(directory, entry_id + ".json")
+
+
+def read_json(path):
+    """A JSON object from path, or None when it is missing or not an object."""
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def json_files(folder):
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return []
+    return [os.path.join(folder, name) for name in names if name.endswith(".json") and not name.startswith(".")]
 
 
 def safe_id(text):
@@ -447,8 +508,35 @@ def claude_session(pid):
     return record
 
 
-def codex_thread_names():
-    names = {}
+def codex_threads():
+    """Name and rollout path of every Codex thread, from the app's own state database.
+
+    `name` is set once Codex has named a thread or the user renamed it. Until then the app
+    shows the first prompt, which the database keeps as `title`, so its first line stands in.
+    """
+    paths = sorted(glob.glob(os.path.join(codex_home(), "state_*.sqlite")),
+                   key=lambda path: int(re.sub(r"\D", "", os.path.basename(path)) or 0))
+    if not paths:
+        return {}
+    threads = {}
+    try:
+        connection = sqlite3.connect("file:%s?mode=ro" % paths[-1], uri=True, timeout=1)
+        try:
+            for thread, name, title, rollout in connection.execute(
+                    "SELECT id, name, title, rollout_path FROM threads"):
+                first = next((line.strip() for line in str(title or "").splitlines() if line.strip()), "")
+                threads[thread] = {"name": name or first.rstrip(":") or None, "rollout": rollout}
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return {}
+    return threads
+
+
+def codex_thread_names(threads=None):
+    """Thread names by id, from session_index.jsonl and else from the state database."""
+    threads = codex_threads() if threads is None else threads
+    names = {thread: info["name"] for thread, info in threads.items() if info["name"]}
     try:
         with open(os.path.join(codex_home(), "session_index.jsonl"), "r", encoding="utf-8") as handle:
             for line in handle:
@@ -456,11 +544,49 @@ def codex_thread_names():
                     record = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(record, dict) and record.get("id"):
-                    names[record["id"]] = record.get("thread_name") or names.get(record["id"])
+                if isinstance(record, dict) and record.get("id") and record.get("thread_name"):
+                    names[record["id"]] = record["thread_name"]
     except OSError:
         pass
     return names
+
+
+def claude_title(session_id):
+    """The latest custom or generated title in a Claude Code transcript, or None."""
+    paths = glob.glob(os.path.join(claude_home(), "projects", "*", "%s.jsonl" % glob.escape(str(session_id))))
+    if not paths:
+        return None
+    try:
+        size = os.path.getsize(paths[0])
+        with open(paths[0], "rb") as handle:
+            for start in ((max(0, size - TRANSCRIPT_TAIL), 0) if size > TRANSCRIPT_TAIL else (0,)):
+                handle.seek(start)
+                titles = {}
+                for line in handle.read(size - start).splitlines():
+                    if b'-title"' not in line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+                    if record.get("type") == "custom-title" and record.get("customTitle"):
+                        titles["custom"] = record["customTitle"]
+                    elif record.get("type") == "ai-title" and record.get("aiTitle"):
+                        titles["ai"] = record["aiTitle"]
+                if titles:
+                    return titles.get("custom") or titles.get("ai")
+    except OSError:
+        pass
+    return None
+
+
+def claude_name(record):
+    """The name a Claude Code session shows. A name the registry only derived from the
+    directory, such as `ai-0b`, gives way to the title in the transcript."""
+    name = record.get("name")
+    if record.get("nameSource") == "derived" or not name:
+        name = claude_title(record.get("sessionId")) or name
+    return name or os.path.basename(record.get("cwd") or "") or "-"
 
 
 def claude_pid():
@@ -490,14 +616,180 @@ def current_session():
 def session_name(entry, thread_names):
     session = entry.get("session") or {}
     if entry.get("agent") == "claude" and session.get("pid"):
-        name = claude_session(session["pid"]).get("name")
-        if name:
-            return name
+        record = claude_session(session["pid"])
+        if record:
+            return claude_name(record)
     if entry.get("agent") == "codex" and session.get("id"):
         name = thread_names.get(session["id"])
         if name:
             return name
     return session.get("name") or os.path.basename(entry.get("cwd") or "") or "-"
+
+
+def claude_sessions():
+    """Every live Claude Code session, with the state Claude Code writes to its registry."""
+    found = []
+    for path in json_files(os.path.join(claude_home(), "sessions")):
+        name = os.path.basename(path)[:-5]
+        if not name.isdigit() or not pid_alive(int(name)):
+            continue
+        pid = int(name)
+        record = claude_session(pid)
+        if not record:
+            continue
+        status = record.get("status")
+        since = record.get("statusUpdatedAt") or record.get("startedAt")
+        found.append({
+            "agent": "claude",
+            "id": record.get("sessionId"),
+            "pid": pid,
+            "name": claude_name(record),
+            "state": CLAUDE_STATES.get(status, status or "unknown"),
+            "waiting_for": record.get("waitingFor") if status == "waiting" else None,
+            "since": since / 1000 if isinstance(since, (int, float)) else None,
+            "cwd": record.get("cwd"),
+        })
+    return found
+
+
+def codex_session_path(directory, thread):
+    return os.path.join(sub_dir(directory, "sessions"), "codex-%s.json" % safe_id(thread))
+
+
+def codex_rollout(thread, hint=None):
+    """The rollout transcript of a Codex thread, from the hook payload or by its file name."""
+    if hint and os.path.isfile(hint):
+        return hint
+    pattern = os.path.join(codex_home(), "sessions", "*", "*", "*", "rollout-*-%s.jsonl" % glob.escape(thread))
+    matches = glob.glob(pattern)
+    return max(matches) if matches else None
+
+
+def parse_stamp(text):
+    try:
+        return datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def codex_pending(path):
+    """What a Codex thread waits for according to its transcript, as (reason, since), or None.
+
+    Reads the end of the rollout transcript. A tool call is a `response_item` and its answer
+    follows as the matching `*_output` with the same call_id, so a `request_user_input` call
+    without one is an open question. In plan mode a turn ends with an `item_completed` event of
+    type `Plan` before its `task_complete`, and the app then asks whether to implement the plan,
+    so a last finished turn that carries a plan waits for its approval.
+    """
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - ROLLOUT_TAIL))
+            data = handle.read()
+    except (OSError, TypeError):
+        return None
+    asked, planned, finished = {}, set(), None
+    for line in data.splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        payload = record.get("payload") if isinstance(record, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        kind = payload.get("type")
+        if record.get("type") == "response_item":
+            if kind in ("function_call", "custom_tool_call") and payload.get("name") in CODEX_QUESTION_TOOLS:
+                asked[payload.get("call_id")] = record.get("timestamp")
+            elif kind in ("function_call_output", "custom_tool_call_output"):
+                asked.pop(payload.get("call_id"), None)
+            elif kind == "message" and payload.get("role") == "user":
+                finished = None
+        elif record.get("type") == "event_msg":
+            if kind == "item_completed" and (payload.get("item") or {}).get("type") == "Plan":
+                planned.add(payload.get("turn_id"))
+            elif kind == "task_complete":
+                finished = (payload.get("turn_id"), record.get("timestamp"))
+            elif kind in ("task_started", "user_message"):
+                finished = None
+    if asked:
+        return "question", parse_stamp(list(asked.values())[-1]) or 0
+    if finished and finished[0] in planned:
+        return "plan approval", parse_stamp(finished[1]) or 0
+    return None
+
+
+def codex_sessions(directory, now, names, prune=True, threads=None):
+    """Every Codex thread its hooks have reported, while its app-server runs.
+
+    A thread whose hooks stayed silent for SESSION_IDLE_TTL is dropped, and one that has
+    claimed to work or wait for SESSION_STALE without a word counts as idle. A thread that is
+    not idle and has an unanswered question in its transcript waits for that answer.
+    """
+    found = []
+    for path in json_files(os.path.join(directory, "sessions")):
+        record = read_json(path)
+        app = (record or {}).get("app") or {}
+        updated = (record or {}).get("updated") or 0
+        if (record is None or not record.get("id") or now - updated > SESSION_IDLE_TTL
+                or (app.get("pid") and not pid_alive(app["pid"], app.get("start")))):
+            if prune:
+                remove(path)
+            continue
+        state, since = record.get("state") or "unknown", record.get("since")
+        waiting_for = record.get("waiting_for")
+        if threads is None:
+            threads = codex_threads()
+        hint = record.get("transcript") or (threads.get(record["id"]) or {}).get("rollout")
+        pending = codex_pending(codex_rollout(record["id"], hint))
+        # An open question only counts inside a turn, and a plan only once its turn has ended.
+        if pending and (pending[0] == "question") == (state != "idle"):
+            state, since, waiting_for = "waiting", pending[1] or since, pending[0]
+        elif state != "idle" and now - updated > SESSION_STALE:
+            state, since = "idle", updated
+        found.append({
+            "agent": "codex",
+            "id": record["id"],
+            "pid": None,
+            "name": names.get(record["id"]) or os.path.basename(record.get("cwd") or "") or "-",
+            "state": state,
+            "waiting_for": waiting_for if state == "waiting" else None,
+            "since": since,
+            "cwd": record.get("cwd"),
+        })
+    return found
+
+
+def session_key(agent, session):
+    """Claude Code sessions are matched by pid, which survives a /clear, Codex threads by id."""
+    if agent == "claude" and session.get("pid"):
+        return ("claude", int(session["pid"]))
+    if session.get("id"):
+        return (agent, session["id"])
+    return None
+
+
+def turn_path(directory, agent, session):
+    key = session_key(agent, session)
+    return os.path.join(sub_dir(directory, "turns"), "%s-%s.json" % (key[0], safe_id(key[1])))
+
+
+def load_turns(directory, now, sessions, prune=True):
+    """The turn ETA of every session by session key. A turn whose session went idle is over."""
+    by_key = {session_key(s["agent"], s): s for s in sessions}
+    found = {}
+    for path in json_files(os.path.join(directory, "turns")):
+        record = read_json(path)
+        key = session_key(record.get("agent"), record.get("session") or {}) if record else None
+        owner = by_key.get(key)
+        ended = (owner is None or expired(record, now)
+                 or (owner["state"] == "idle" and (owner["since"] or 0) >= (record.get("started") or 0)))
+        if ended:
+            if prune:
+                remove(path)
+            continue
+        found[key] = record
+    return found
 
 
 # --- list -----------------------------------------------------------------------------
@@ -544,14 +836,104 @@ def render(table, now):
     return "\n".join(out) + "\n"
 
 
+def sessions_view(directory, now, tasks=None):
+    """Every running session with its state, its ETA and its tasks, in display order.
+
+    The ETA of a session is the turn ETA its agent set with `agent-eta turn`, or else the
+    latest due time among its tasks. A task whose session is not known, such as a local run,
+    stands as a session of its own.
+    """
+    tasks = rows(directory, now) if tasks is None else tasks
+    threads = codex_threads()
+    names = codex_thread_names(threads)
+    sessions = claude_sessions() + codex_sessions(directory, now, names, threads=threads)
+    turns = load_turns(directory, now, sessions)
+    by_key = {}
+    for session in sessions:
+        session["tasks"] = []
+        by_key[session_key(session["agent"], session)] = session
+    for task in tasks:
+        key = session_key(task.get("agent"), task.get("session") or {}) or ("task", task["id"])
+        owner = by_key.get(key)
+        if owner is None:
+            session = task.get("session") or {}
+            owner = by_key[key] = {
+                "agent": task.get("agent"), "id": session.get("id"), "pid": session.get("pid"),
+                "name": task["session_name"], "state": "working" if task.get("agent") != "other" else "-",
+                "waiting_for": None, "since": task.get("started"), "cwd": task.get("cwd"), "tasks": []}
+            sessions.append(owner)
+        owner["tasks"].append(task)
+    for session in sessions:
+        turn = turns.get(session_key(session["agent"], session))
+        dues = [t["due"] for t in session["tasks"] if t.get("due")]
+        if turn and turn.get("due"):
+            session.update(due=turn["due"], eta_source="turn", turn_label=turn.get("label") or None)
+        elif dues:
+            session.update(due=max(dues), eta_source="tasks", turn_label=None)
+        else:
+            session.update(due=None, eta_source=None, turn_label=turn.get("label") if turn else None)
+        session["remaining"] = int(session["due"] - now) if session["due"] else None
+        session["overdue"] = session["remaining"] is not None and session["remaining"] < 0
+    return sorted(sessions, key=session_sort_key)
+
+
+def session_sort_key(session):
+    """Waiting for an answer first, then working, then idle, each by its ETA like the tasks."""
+    if session["state"] == "waiting":
+        rank = 0
+    elif session["state"] == "idle" and not session["tasks"]:
+        rank = 2
+    else:
+        rank = 1
+    remaining = session["remaining"]
+    if remaining is None:
+        return (rank, 2, -(session.get("since") or 0) if rank == 2 else session.get("since") or 0)
+    return (rank, 0 if remaining < 0 else 1, remaining)
+
+
+def render_sessions(sessions, now):
+    if not sessions:
+        return "No agent sessions.\n"
+    lines = [("STATE", "FOR", "REMAINING", "DUE", "AGENT", "SESSION")]
+    for session in sessions:
+        state = session["state"]
+        held = format_span(now - session["since"]) if session.get("since") and state != "-" else "-"
+        text = clip(session["name"])
+        if session.get("turn_label"):
+            text += " · " + session["turn_label"]
+        if session.get("waiting_for"):
+            text += " (%s)" % session["waiting_for"]
+        if session["due"]:
+            remaining = format_span(session["remaining"])
+        elif state == "idle":
+            remaining = "0"
+        elif state == "working":
+            remaining = "?"
+        else:
+            remaining = "-"
+        lines.append((state, held, remaining, format_due(session["due"], now), session["agent"] or "-", text))
+        for task in session["tasks"]:
+            lines.append(("", "", format_span(task["remaining"]), format_due(task.get("due"), now), "",
+                          "└ " + (task.get("label") or "-")))
+    widths = [max(len(line[i]) for line in lines) for i in range(5)]
+    return "\n".join("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line[:5])) + "  " + line[5]
+                     for line in lines) + "\n"
+
+
 def cmd_list(args):
     now = time.time()
-    table = rows(state_dir(), now)
+    directory = state_dir()
+    table = rows(directory, now)
+    sessions = [] if args.tasks else sessions_view(directory, now, table)
     if args.json:
-        json.dump({"now": int(now), "tasks": table}, sys.stdout, indent=2, sort_keys=True)
+        for session in sessions:
+            session["tasks"] = [task["id"] for task in session["tasks"]]
+        json.dump({"now": int(now), "sessions": sessions, "tasks": table}, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
-    else:
+    elif args.tasks:
         sys.stdout.write(render(table, now))
+    else:
+        sys.stdout.write(render_sessions(sessions, now))
     return 0
 
 
@@ -629,19 +1011,69 @@ def codex_post(directory, payload):
     return "removed" if remove(entry_path(directory, "codex-" + safe_id(use_id))) else "unknown"
 
 
+def codex_state(directory, payload, state, waiting_for=None, now=None):
+    """Record the state of a Codex thread. `since` moves only when the state changes."""
+    thread = payload.get("session_id")
+    if not thread:
+        return "no-session-id"
+    now = time.time() if now is None else now
+    path = codex_session_path(directory, thread)
+    record = read_json(path) or {}
+    if record.get("state") != state or record.get("waiting_for") != waiting_for:
+        record["since"] = int(now)
+    record.update({"version": 1, "agent": "codex", "id": thread, "state": state, "waiting_for": waiting_for,
+                   "updated": int(now), "cwd": payload.get("cwd") or record.get("cwd"),
+                   "transcript": payload.get("transcript_path") or record.get("transcript")})
+    app = ancestor(lambda pid: comm_of(pid) == "codex")
+    if app:
+        record["app"] = {"pid": app, "start": proc_start(app)}
+    write_atomic(path, record)
+    return state
+
+
+def codex_event(directory, payload):
+    event = payload.get("hook_event_name")
+    thread = payload.get("session_id")
+    actions = []
+    if event in ("PreToolUse", "PostToolUse"):
+        if payload.get("tool_name") != "Bash":
+            actions.append("not-bash")
+        elif event == "PreToolUse":
+            actions.append(codex_pre(directory, payload))
+        else:
+            actions.append(codex_post(directory, payload))
+    if event in TURN_ENDS and thread and remove(turn_path(directory, "codex", {"id": thread})):
+        actions.append("turn-cleared")
+    if event == "SessionEnd" and thread:
+        remove(codex_session_path(directory, thread))
+        actions.append("ended")
+    elif event in CODEX_STATES:
+        state = CODEX_STATES[event]
+        actions.append(codex_state(directory, payload, state, "permission" if state == "waiting" else None))
+    return "+".join(actions) or "ignored"
+
+
+def claude_env():
+    return bool(os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_PID"))
+
+
+def is_codex(payload):
+    """The payload decides first. Codex sends turn_id and keeps its transcripts under
+    ~/.codex, while Claude Code does neither, and an environment variable could leak from
+    whatever started the app. Interrupt and SessionEnd may carry neither, and Claude Code
+    has no hook here for them."""
+    if "turn_id" in payload or "/.codex/" in str(payload.get("transcript_path") or ""):
+        return True
+    return not claude_env() and payload.get("hook_event_name") in ("Interrupt", "SessionEnd", "PermissionRequest")
+
+
 def handle_hook(directory, payload):
     event = payload.get("hook_event_name")
-    if payload.get("tool_name") != "Bash":
-        return "codex" if "turn_id" in payload else "claude", event, "not-bash"
-    # The payload decides first. Codex requires turn_id, Claude Code never sends it, and an
-    # environment variable could leak from whatever started the app.
-    if "turn_id" in payload:
-        if event == "PreToolUse":
-            return "codex", event, codex_pre(directory, payload)
-        if event == "PostToolUse":
-            return "codex", event, codex_post(directory, payload)
-        return "codex", event, "ignored"
-    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_PID"):
+    if is_codex(payload):
+        return "codex", event, codex_event(directory, payload)
+    if claude_env():
+        if payload.get("tool_name") != "Bash":
+            return "claude", event, "not-bash"
         if event == "PostToolUse":
             return "claude", event, claude_post(directory, payload)
         return "claude", event, "ignored"
@@ -729,6 +1161,22 @@ def cmd_done(args):
     return 1 if missing else 0
 
 
+def cmd_turn(args):
+    agent, session = current_session()
+    if agent not in ("claude", "codex") or session_key(agent, session) is None:
+        print("agent-eta turn: not called from a Claude Code or Codex session", file=sys.stderr)
+        return 1
+    path = turn_path(state_dir(), agent, session)
+    if args.done:
+        remove(path)
+        return 0
+    if args.eta is None:
+        print("agent-eta turn: --eta or --done is required", file=sys.stderr)
+        return 2
+    write_atomic(path, make_entry("turn", agent, args.label or "", args.eta, None, "turn", session))
+    return 0
+
+
 # --- main -----------------------------------------------------------------------------
 
 def eta_type(text):
@@ -741,8 +1189,9 @@ def eta_type(text):
 def build_parser():
     parser = argparse.ArgumentParser(prog="agent-eta", description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="cmd")
-    listing = sub.add_parser("list", help="print the running tasks of all sessions")
+    listing = sub.add_parser("list", help="print every running session with its state, ETA and tasks")
     listing.add_argument("--json", action="store_true", help="machine-readable output")
+    listing.add_argument("--tasks", action="store_true", help="the flat task list instead of the sessions")
     sub.add_parser("hook", help="hook entry point for Claude Code and Codex")
     run = sub.add_parser("run", help="run a command and list it while it runs")
     run.add_argument("--eta", type=eta_type, required=True, help="25m, 1h30m, 7200, ca. 10 minutes")
@@ -754,6 +1203,10 @@ def build_parser():
     add.add_argument("--label", required=True)
     add.add_argument("--agent")
     add.add_argument("--pid", type=int)
+    turn = sub.add_parser("turn", help="set or clear the ETA of the calling session's current turn")
+    turn.add_argument("--eta", type=eta_type)
+    turn.add_argument("--label")
+    turn.add_argument("--done", action="store_true")
     done = sub.add_parser("done", help="remove entries recorded with add")
     done.add_argument("ids", nargs="+")
     return parser
@@ -761,10 +1214,11 @@ def build_parser():
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or argv[0] == "--json":
+    if not argv or argv[0] in ("--json", "--tasks"):
         argv.insert(0, "list")
     args = build_parser().parse_args(argv)
-    handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done}
+    handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done,
+                "turn": cmd_turn}
     try:
         return handlers[args.cmd](args)
     except StateDirError as exc:

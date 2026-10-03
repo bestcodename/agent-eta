@@ -208,7 +208,8 @@ class Commands(StateTest):
         self.assertIn("CI pipeline", self.cli().stdout)
         self.assertEqual(self.cli("done", entry_id).returncode, 0)
         self.assertEqual(self.cli("done", entry_id).returncode, 1)
-        self.assertEqual(self.cli().stdout, "No background tasks.\n")
+        self.assertEqual(self.cli().stdout, "No agent sessions.\n")
+        self.assertEqual(self.cli("--tasks").stdout, "No background tasks.\n")
 
     def test_add_with_a_pid_ends_with_that_process(self):
         sleeper = subprocess.Popen(["sleep", "30"])
@@ -302,7 +303,7 @@ class Hooks(StateTest):
 
     def test_codex_skips_a_wrapped_command(self):
         self.hook(self.codex_payload("PreToolUse", command="~/.local/bin/agent-eta run --eta 2m -- make"))
-        self.assertEqual(os.listdir(self.dir), ["hook.log"])
+        self.assertEqual([n for n in os.listdir(self.dir) if n.endswith(".json")], [])
 
     def test_codex_wins_over_a_leaked_claude_environment(self):
         self.hook(self.codex_payload("PreToolUse"), self.claude_env())
@@ -318,6 +319,205 @@ class Hooks(StateTest):
     def test_hook_log_carries_no_command_text(self):
         self.hook(self.codex_payload("PreToolUse", command="curl -H 'secret-token' x  # ETA 1m"))
         self.assertNotIn("secret-token", pathlib.Path(self.dir, "hook.log").read_text())
+
+
+class Sessions(StateTest):
+    def register(self, pid=None, status="busy", since=None, **fields):
+        """A Claude Code registry record for a live pid, as Claude Code 2.1.288 writes it."""
+        pid = os.getpid() if pid is None else pid
+        record = {"pid": pid, "sessionId": "s-%d" % pid, "name": "session-%d" % pid, "cwd": "/work",
+                  "procStart": eta.proc_start(pid), "status": status,
+                  "statusUpdatedAt": int((time.time() if since is None else since) * 1000)}
+        record.update(fields)
+        (self.claude / "sessions" / ("%d.json" % pid)).write_text(json.dumps(record))
+        return record
+
+    def sleeper(self):
+        child = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        return child
+
+    def view(self, now=None):
+        return eta.sessions_view(self.dir, time.time() if now is None else now)
+
+    def hook(self, payload, env=None):
+        done = self.cli("hook", stdin=json.dumps(payload), env=env)
+        self.assertEqual((done.returncode, done.stdout), (0, ""))
+
+    def codex_event(self, event, thread="thread-1", **fields):
+        payload = {"hook_event_name": event, "session_id": thread, "turn_id": "t-1", "cwd": "/work/shop"}
+        payload.update(fields)
+        return payload
+
+    def test_claude_sessions_come_from_the_registry(self):
+        self.register(status="waiting", waitingFor="dialog open")
+        dead = self.dead_pid()
+        (self.claude / "sessions" / ("%d.json" % dead)).write_text(json.dumps({"pid": dead, "status": "busy"}))
+        sessions = self.view()
+        self.assertEqual([(s["agent"], s["state"], s["waiting_for"]) for s in sessions],
+                         [("claude", "waiting", "dialog open")])
+
+    def test_order_is_waiting_then_working_by_eta_then_idle(self):
+        now = time.time()
+        idle, working, waiting = self.sleeper(), self.sleeper(), self.sleeper()
+        self.register(idle.pid, "idle", now - 600)
+        self.register(working.pid, "busy", now - 60)
+        self.register(waiting.pid, "waiting", now - 30)
+        self.register(status="busy", since=now - 60)
+        self.put("ci", agent="claude", eta=300, session={"pid": working.pid}, now=now)
+        names = [s["name"] for s in self.view(now)]
+        self.assertEqual(names, ["session-%d" % waiting.pid, "session-%d" % working.pid,
+                                 "session-%d" % os.getpid(), "session-%d" % idle.pid])
+        self.assertEqual(self.view(now)[1]["eta_source"], "tasks")
+
+    def test_a_task_without_a_known_session_stands_alone(self):
+        self.put("local-run", agent="local", eta=600, label="qwen on ai")
+        sessions = self.view()
+        self.assertEqual([(s["agent"], s["state"], len(s["tasks"])) for s in sessions], [("local", "working", 1)])
+        self.assertIn("└ qwen on ai", eta.render_sessions(sessions, time.time()))
+
+    def test_codex_thread_state_follows_its_hooks(self):
+        (self.codex / "session_index.jsonl").write_text(json.dumps({"id": "thread-1", "thread_name": "Shop"}) + "\n")
+        expected = (("UserPromptSubmit", "working", None), ("PermissionRequest", "waiting", "permission"),
+                    ("PreToolUse", "working", None), ("Stop", "idle", None))
+        for event, state, reason in expected:
+            with self.subTest(event=event):
+                self.hook(self.codex_event(event, tool_name="Bash", tool_use_id="call_9",
+                                     tool_input={"command": "sleep 1"}))
+                [session] = self.view()
+                self.assertEqual((session["name"], session["state"], session["waiting_for"]), ("Shop", state, reason))
+        self.hook(self.codex_event("SessionEnd"))
+        self.assertEqual(self.view(), [])
+
+    def test_codex_open_question_in_the_transcript_means_waiting(self):
+        folder = self.codex / "sessions" / "2026" / "10" / "03"
+        folder.mkdir(parents=True)
+        rollout = folder / "rollout-2026-10-03T03-19-50-thread-1.jsonl"
+        def item(**payload):
+            return json.dumps({"timestamp": "2026-10-03T21:59:39.000Z", "type": "response_item", "payload": payload})
+        rollout.write_text("\n".join([
+            item(type="custom_tool_call", name="exec", call_id="c1"),
+            item(type="custom_tool_call_output", call_id="c1"),
+            item(type="function_call", name="request_user_input", call_id="q1")]) + "\n")
+        self.hook(self.codex_event("PreToolUse", tool_name="Bash", tool_use_id="c1", tool_input={"command": "ls"}))
+        [session] = self.view()
+        self.assertEqual((session["state"], session["waiting_for"]), ("waiting", "question"))
+        self.assertEqual(session["since"], eta.parse_stamp("2026-10-03T21:59:39.000Z"))
+        with rollout.open("a") as handle:
+            handle.write(item(type="function_call_output", call_id="q1") + "\n")
+        self.assertEqual([s["state"] for s in self.view()], ["working"])
+        rollout.write_text(item(type="function_call", name="request_user_input", call_id="q2") + "\n")
+        self.hook(self.codex_event("Stop"))
+        self.assertEqual([s["state"] for s in self.view()], ["idle"])
+
+    def test_a_derived_claude_name_gives_way_to_the_transcript_title(self):
+        self.register(name="ai-0b", nameSource="derived")
+        folder = self.claude / "projects" / "-work"
+        folder.mkdir(parents=True)
+        transcript = folder / ("s-%d.jsonl" % os.getpid())
+        transcript.write_text(json.dumps({"type": "ai-title", "aiTitle": "ETA overview"}) + "\n")
+        self.assertEqual([s["name"] for s in self.view()], ["ETA overview"])
+        with transcript.open("a") as handle:
+            handle.write(json.dumps({"type": "custom-title", "customTitle": "Agent ETA"}) + "\n")
+            handle.write(json.dumps({"type": "ai-title", "aiTitle": "Later title"}) + "\n")
+        self.assertEqual([s["name"] for s in self.view()], ["Agent ETA"])
+        self.register(name="chosen", nameSource="user")
+        self.assertEqual([s["name"] for s in self.view()], ["chosen"])
+
+    def test_codex_name_comes_from_the_state_database(self):
+        import sqlite3
+        connection = sqlite3.connect(str(self.codex / "state_5.sqlite"))
+        connection.execute("CREATE TABLE threads (id TEXT, name TEXT, title TEXT, rollout_path TEXT)")
+        connection.executemany("INSERT INTO threads VALUES (?, ?, ?, ?)", [
+            ("thread-1", None, "in the dsp project add new ui features:\n\nmake every gain level", "/nope"),
+            ("thread-2", "Run sleep 120", "run sleep 120", "/nope")])
+        connection.commit()
+        connection.close()
+        self.hook(self.codex_event("UserPromptSubmit"))
+        self.hook(self.codex_event("UserPromptSubmit", thread="thread-2"))
+        self.assertEqual(sorted(s["name"] for s in self.view()),
+                         ["Run sleep 120", "in the dsp project add new ui features"])
+
+    def test_remaining_reads_zero_when_idle_and_unknown_when_working(self):
+        now = time.time()
+        idle, working, waiting = self.sleeper(), self.sleeper(), self.sleeper()
+        self.register(idle.pid, "idle", now - 60)
+        self.register(working.pid, "busy", now - 60)
+        self.register(waiting.pid, "waiting", now - 60)
+        lines = eta.render_sessions(self.view(now), now).splitlines()[1:]
+        cells = {line.split()[0]: line.split()[2] for line in lines}
+        self.assertEqual(cells, {"idle": "0", "working": "?", "waiting": "-"})
+
+    def test_codex_plan_waits_for_approval_once_its_turn_ended(self):
+        folder = self.codex / "sessions" / "2026" / "10" / "03"
+        folder.mkdir(parents=True)
+        rollout = folder / "rollout-2026-10-03T03-19-50-thread-1.jsonl"
+        def event(stamp, **payload):
+            return json.dumps({"timestamp": "2026-10-03T23:40:%s.000Z" % stamp, "type": "event_msg",
+                               "payload": payload}) + "\n"
+        rollout.write_text(event("00", type="task_started", turn_id="t-1") +
+                           event("55", type="item_completed", turn_id="t-1", item={"type": "Plan", "id": "p"}))
+        self.hook(self.codex_event("UserPromptSubmit"))
+        self.assertEqual([s["state"] for s in self.view()], ["working"])
+        with rollout.open("a") as handle:
+            handle.write(event("56", type="task_complete", turn_id="t-1"))
+        self.hook(self.codex_event("Stop"))
+        [session] = self.view()
+        self.assertEqual((session["state"], session["waiting_for"]), ("waiting", "plan approval"))
+        self.assertEqual(session["since"], eta.parse_stamp("2026-10-03T23:40:56.000Z"))
+        with rollout.open("a") as handle:
+            handle.write(event("59", type="task_started", turn_id="t-2"))
+        self.hook(self.codex_event("UserPromptSubmit"))
+        self.assertEqual([s["state"] for s in self.view()], ["working"])
+        with rollout.open("a") as handle:
+            handle.write(event("59", type="task_complete", turn_id="t-2"))
+        self.hook(self.codex_event("Stop"))
+        self.assertEqual([s["state"] for s in self.view()], ["idle"])
+
+    def test_codex_interrupt_without_turn_id_is_still_codex(self):
+        self.hook(self.codex_event("UserPromptSubmit"))
+        self.hook({"hook_event_name": "Interrupt", "session_id": "thread-1"})
+        self.assertEqual([s["state"] for s in self.view()], ["idle"])
+
+    def test_a_silent_codex_thread_turns_idle_then_drops(self):
+        self.hook(self.codex_event("UserPromptSubmit"))
+        now = time.time()
+        self.assertEqual([s["state"] for s in self.view(now + eta.SESSION_STALE + 5)], ["idle"])
+        self.assertEqual(self.view(now + eta.SESSION_IDLE_TTL + 5), [])
+
+    def test_claude_turn_eta_ends_with_the_turn(self):
+        self.register(status="busy", since=time.time() - 5)
+        env = dict(self.env, CLAUDECODE="1", CLAUDE_PID=str(os.getpid()))
+        done = self.cli("turn", "--eta", "20m", "--label", "session view", env=env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        [session] = self.view()
+        self.assertEqual((session["eta_source"], session["turn_label"]), ("turn", "session view"))
+        self.assertAlmostEqual(session["remaining"], 1200, delta=5)
+        self.register(status="idle", since=time.time() + 1)
+        [session] = self.view()
+        self.assertEqual((session["due"], session["turn_label"]), (None, None))
+        self.assertEqual(os.listdir(os.path.join(self.dir, "turns")), [])
+
+    def test_codex_turn_eta_ends_with_stop(self):
+        self.hook(self.codex_event("UserPromptSubmit"))
+        env = dict(self.env, CODEX_THREAD_ID="thread-1", CODEX_SANDBOX="seccomp")
+        self.assertEqual(self.cli("turn", "--eta", "ca. 10 minutes", env=env).returncode, 0)
+        self.assertEqual([s["eta_source"] for s in self.view()], ["turn"])
+        self.hook(self.codex_event("Stop"))
+        self.assertEqual([s["due"] for s in self.view()], [None])
+
+    def test_turn_outside_a_session_fails(self):
+        self.assertEqual(self.cli("turn", "--eta", "5m").returncode, 1)
+        env = dict(self.env, CODEX_THREAD_ID="thread-1")
+        self.assertEqual(self.cli("turn", env=env).returncode, 2)
+        self.assertEqual(self.cli("turn", "--done", env=env).returncode, 0)
+
+    def test_json_names_the_tasks_of_each_session(self):
+        self.put("ci", agent="local", eta=600)
+        data = json.loads(self.cli("--json").stdout)
+        self.assertEqual([s["tasks"] for s in data["sessions"]], [["ci"]])
+        self.assertEqual([t["id"] for t in data["tasks"]], ["ci"])
 
 
 if __name__ == "__main__":
