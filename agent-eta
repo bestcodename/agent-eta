@@ -79,6 +79,10 @@ HOOK_LOG_MAX = 256 * 1024
 # wait but stayed silent for SESSION_STALE most likely lost its Stop, and counts as idle.
 SESSION_IDLE_TTL = 12 * 3600
 SESSION_STALE = 6 * 3600
+# An idle session without a running task counts as dormant after this long. Neither agent says
+# whether anyone still looks at a session, and a process that lives on for days in a terminal
+# tab or the Claude Code daemon looks just like one in use, so time is the signal.
+DORMANT_AFTER = 12 * 3600
 # Claude Code's own words for a session state, mapped to the three this list shows.
 # "shell" is a foreground Bash command, measured against a running bash child on 2026-10-03.
 CLAUDE_STATES = {"busy": "working", "shell": "working", "waiting": "waiting", "idle": "idle"}
@@ -91,6 +95,8 @@ TURN_ENDS = ("UserPromptSubmit", "Stop", "Interrupt", "SessionEnd")
 # Measured on codex-cli 0.159.2.
 CODEX_QUESTION_TOOLS = ("request_user_input",)
 ROLLOUT_TAIL = 256 * 1024
+# How a Codex turn that ended with an error reads in the list, by its codex_error_info.
+CODEX_ERRORS = {"usage_limit_exceeded": "usage limit"}
 # Claude Code keeps a session's title in its transcript and rewrites it now and then. Only the
 # end of a transcript is read first, because a long one runs to tens of megabytes.
 TRANSCRIPT_TAIL = 2 * 1024 * 1024
@@ -182,6 +188,11 @@ def format_span(seconds):
     if hours:
         return sign + "%dh%02d" % (hours, minutes)
     return sign + "%dm" % minutes
+
+
+def due_cell(remaining, due, now):
+    """The DUE cell, which reads `?` wherever REMAINING does."""
+    return "?" if remaining == "?" else format_due(due, now)
 
 
 def format_due(due, now):
@@ -688,7 +699,7 @@ def codex_pending(path):
             data = handle.read()
     except (OSError, TypeError):
         return None
-    asked, planned, finished = {}, set(), None
+    asked, planned, finished, resets = {}, set(), None, None
     for line in data.splitlines():
         try:
             record = json.loads(line)
@@ -709,14 +720,36 @@ def codex_pending(path):
             if kind == "item_completed" and (payload.get("item") or {}).get("type") == "Plan":
                 planned.add(payload.get("turn_id"))
             elif kind == "task_complete":
-                finished = (payload.get("turn_id"), record.get("timestamp"))
+                finished = (payload.get("turn_id"), record.get("timestamp"), payload.get("error"))
             elif kind in ("task_started", "user_message"):
                 finished = None
+            elif kind == "token_count":
+                resets = exhausted_until(payload.get("rate_limits")) or resets
     if asked:
-        return "question", parse_stamp(list(asked.values())[-1]) or 0
+        return "question", parse_stamp(list(asked.values())[-1]) or 0, None
+    if finished and isinstance(finished[2], dict):
+        code = str(finished[2].get("codex_error_info") or "error")
+        reason = CODEX_ERRORS.get(code, code.replace("_", " "))
+        return reason, parse_stamp(finished[1]) or 0, resets if code == "usage_limit_exceeded" else None
     if finished and finished[0] in planned:
-        return "plan approval", parse_stamp(finished[1]) or 0
+        return "plan approval", parse_stamp(finished[1]) or 0, None
     return None
+
+
+def exhausted_until(limits):
+    """When the latest exhausted Codex usage window resets, from a token_count rate_limits record.
+
+    A record without window data, such as the one Codex writes right after a limit was hit,
+    yields None, so the reader keeps the value of the record before it.
+    """
+    if not isinstance(limits, dict):
+        return None
+    windows = [limits.get("primary"), limits.get("secondary")]
+    if not any(isinstance(window, dict) for window in windows):
+        return None
+    resets = [window.get("resets_at") for window in windows
+              if isinstance(window, dict) and (window.get("used_percent") or 0) >= 100 and window.get("resets_at")]
+    return max(resets) if resets else 0
 
 
 def codex_sessions(directory, now, names, prune=True, threads=None):
@@ -742,8 +775,15 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
             threads = codex_threads()
         hint = record.get("transcript") or (threads.get(record["id"]) or {}).get("rollout")
         pending = codex_pending(codex_rollout(record["id"], hint))
+        resume_at = None
+        # A turn that ended with an error fires no Stop hook, so the transcript decides on its own.
         # An open question only counts inside a turn, and a plan only once its turn has ended.
-        if pending and (pending[0] == "question") == (state != "idle"):
+        if pending and pending[2] and pending[2] <= now:
+            # The usage limit has reset, so the thread only waits for its next prompt.
+            state, since = "idle", pending[2]
+        elif pending and pending[0] not in ("question", "plan approval"):
+            state, since, waiting_for, resume_at = "stopped", pending[1] or since, pending[0], pending[2]
+        elif pending and (pending[0] == "question") == (state != "idle"):
             state, since, waiting_for = "waiting", pending[1] or since, pending[0]
         elif state != "idle" and now - updated > SESSION_STALE:
             state, since = "idle", updated
@@ -753,9 +793,10 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
             "pid": None,
             "name": names.get(record["id"]) or os.path.basename(record.get("cwd") or "") or "-",
             "state": state,
-            "waiting_for": waiting_for if state == "waiting" else None,
+            "waiting_for": waiting_for if state in ("waiting", "stopped") else None,
             "since": since,
             "cwd": record.get("cwd"),
+            "resume_at": resume_at,
         })
     return found
 
@@ -775,7 +816,8 @@ def turn_path(directory, agent, session):
 
 
 def load_turns(directory, now, sessions, prune=True):
-    """The turn ETA of every session by session key. A turn whose session went idle is over."""
+    """The turn ETA of every session by session key. A turn whose session went idle or
+    stopped is over."""
     by_key = {session_key(s["agent"], s): s for s in sessions}
     found = {}
     for path in json_files(os.path.join(directory, "turns")):
@@ -783,7 +825,8 @@ def load_turns(directory, now, sessions, prune=True):
         key = session_key(record.get("agent"), record.get("session") or {}) if record else None
         owner = by_key.get(key)
         ended = (owner is None or expired(record, now)
-                 or (owner["state"] == "idle" and (owner["since"] or 0) >= (record.get("started") or 0)))
+                 or (owner["state"] in ("idle", "stopped")
+                     and (owner["since"] or 0) >= (record.get("started") or 0)))
         if ended:
             if prune:
                 remove(path)
@@ -827,7 +870,7 @@ def render(table, now):
         return "No background tasks.\n"
     lines = [("REMAINING", "DUE", "AGENT", "SESSION", "TASK")]
     for row in table:
-        lines.append((format_span(row["remaining"]), format_due(row.get("due"), now),
+        lines.append((format_span(row["remaining"]), due_cell(format_span(row["remaining"]), row.get("due"), now),
                       row.get("agent") or "-", clip(row["session_name"])[:28], row.get("label") or "-"))
     widths = [max(len(line[i]) for line in lines) for i in range(4)]
     out = []
@@ -841,7 +884,8 @@ def sessions_view(directory, now, tasks=None):
 
     The ETA of a session is the turn ETA its agent set with `agent-eta turn`, or else the
     latest due time among its tasks. A task whose session is not known, such as a local run,
-    stands as a session of its own.
+    stands as a session of its own. A Codex command from before its thread stopped never gets
+    its PostToolUse, so its entry is deleted here.
     """
     tasks = rows(directory, now) if tasks is None else tasks
     threads = codex_threads()
@@ -852,9 +896,14 @@ def sessions_view(directory, now, tasks=None):
     for session in sessions:
         session["tasks"] = []
         by_key[session_key(session["agent"], session)] = session
+    kept = []
     for task in tasks:
         key = session_key(task.get("agent"), task.get("session") or {}) or ("task", task["id"])
         owner = by_key.get(key)
+        if owner and stopped_before(owner, task):
+            remove(entry_path(directory, task["id"]))
+            continue
+        kept.append(task)
         if owner is None:
             session = task.get("session") or {}
             owner = by_key[key] = {
@@ -866,7 +915,9 @@ def sessions_view(directory, now, tasks=None):
     for session in sessions:
         turn = turns.get(session_key(session["agent"], session))
         dues = [t["due"] for t in session["tasks"] if t.get("due")]
-        if turn and turn.get("due"):
+        if session.get("resume_at"):
+            session.update(due=session["resume_at"], eta_source="limit", turn_label=None)
+        elif turn and turn.get("due"):
             session.update(due=turn["due"], eta_source="turn", turn_label=turn.get("label") or None)
         elif dues:
             session.update(due=max(dues), eta_source="tasks", turn_label=None)
@@ -874,26 +925,69 @@ def sessions_view(directory, now, tasks=None):
             session.update(due=None, eta_source=None, turn_label=turn.get("label") if turn else None)
         session["remaining"] = int(session["due"] - now) if session["due"] else None
         session["overdue"] = session["remaining"] is not None and session["remaining"] < 0
-    return sorted(sessions, key=session_sort_key)
+    tasks[:] = kept
+    return sorted(sessions, key=lambda session: (dormant(session, now), session_sort_key(session)))
+
+
+def stopped_before(session, task):
+    """Whether a Codex command was started in a turn that has since failed. Codex polls such a
+    command no more, so it is over even while its app-server lives on."""
+    return (session["state"] == "stopped" and (task.get("holder") or {}).get("type") == "pair"
+            and (task.get("started") or 0) <= (session.get("since") or 0))
 
 
 def session_sort_key(session):
-    """Waiting for an answer first, then working, then idle, each by its ETA like the tasks."""
+    """By how soon a session needs you. Waiting for an answer first, then at rest with the most
+    recently active first, then working by its ETA like the tasks, then stopped until a usage
+    limit resets."""
     if session["state"] == "waiting":
         rank = 0
-    elif session["state"] == "idle" and not session["tasks"]:
-        rank = 2
-    else:
+    elif at_rest(session) and not session["tasks"]:
         rank = 1
+    elif session["state"] == "stopped":
+        rank = 3
+    else:
+        rank = 2
     remaining = session["remaining"]
     if remaining is None:
-        return (rank, 2, -(session.get("since") or 0) if rank == 2 else session.get("since") or 0)
+        return (rank, 2, -(session.get("since") or 0) if rank == 1 else session.get("since") or 0)
     return (rank, 0 if remaining < 0 else 1, remaining)
 
 
-def render_sessions(sessions, now):
-    if not sessions:
+def at_rest(session):
+    """Idle, or stopped by an error with no reset left to wait for. Nothing runs either way."""
+    return session["state"] == "idle" or (session["state"] == "stopped" and not session.get("due"))
+
+
+def dormant(session, now):
+    return (at_rest(session) and not session["tasks"]
+            and now - (session.get("since") or now) > DORMANT_AFTER)
+
+
+def render_sessions(sessions, now, show_dormant=False):
+    """The session table. Dormant sessions follow in a section of their own with
+    show_dormant, and are otherwise only counted in a closing line."""
+    active = [s for s in sessions if not dormant(s, now)]
+    resting = [s for s in sessions if dormant(s, now)]
+    if not active and not resting:
         return "No agent sessions.\n"
+    shown = active + resting if show_dormant else active
+    lines = session_lines(shown, now)
+    widths = [max(len(line[i]) for line in lines) for i in range(5)]
+    text = ["  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line[:5])) + "  " + line[5] for line in lines]
+    if not active:
+        text = text[:1] + ["(no active sessions)"] + text[1:]
+    if resting and show_dormant:
+        text.insert(len(text) - len(session_lines(resting, now)) + 1,
+                    "\nDormant, idle for more than %s:" % "%dh" % (DORMANT_AFTER // 3600))
+    elif resting:
+        text.append("\n%d dormant session%s, idle for more than %s. agent-eta --all lists %s." % (
+            len(resting), "" if len(resting) == 1 else "s", "%dh" % (DORMANT_AFTER // 3600),
+            "it" if len(resting) == 1 else "them"))
+    return "\n".join(text) + "\n"
+
+
+def session_lines(sessions, now):
     lines = [("STATE", "FOR", "REMAINING", "DUE", "AGENT", "SESSION")]
     for session in sessions:
         state = session["state"]
@@ -905,35 +999,36 @@ def render_sessions(sessions, now):
             text += " (%s)" % session["waiting_for"]
         if session["due"]:
             remaining = format_span(session["remaining"])
-        elif state == "idle":
+        elif at_rest(session):
             remaining = "0"
         elif state == "working":
             remaining = "?"
         else:
             remaining = "-"
-        lines.append((state, held, remaining, format_due(session["due"], now), session["agent"] or "-", text))
+        lines.append((state, held, remaining, due_cell(remaining, session["due"], now), session["agent"] or "-", text))
         for task in session["tasks"]:
-            lines.append(("", "", format_span(task["remaining"]), format_due(task.get("due"), now), "",
+            left = format_span(task["remaining"])
+            lines.append(("", "", left, due_cell(left, task.get("due"), now), "",
                           "└ " + (task.get("label") or "-")))
-    widths = [max(len(line[i]) for line in lines) for i in range(5)]
-    return "\n".join("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line[:5])) + "  " + line[5]
-                     for line in lines) + "\n"
+    return lines
 
 
 def cmd_list(args):
     now = time.time()
     directory = state_dir()
     table = rows(directory, now)
-    sessions = [] if args.tasks else sessions_view(directory, now, table)
+    # The session view also deletes tasks that ended unseen, so --tasks runs it as well.
+    sessions = sessions_view(directory, now, table)
     if args.json:
         for session in sessions:
+            session["dormant"] = dormant(session, now)
             session["tasks"] = [task["id"] for task in session["tasks"]]
         json.dump({"now": int(now), "sessions": sessions, "tasks": table}, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
     elif args.tasks:
         sys.stdout.write(render(table, now))
     else:
-        sys.stdout.write(render_sessions(sessions, now))
+        sys.stdout.write(render_sessions(sessions, now, args.all))
     return 0
 
 
@@ -1192,6 +1287,7 @@ def build_parser():
     listing = sub.add_parser("list", help="print every running session with its state, ETA and tasks")
     listing.add_argument("--json", action="store_true", help="machine-readable output")
     listing.add_argument("--tasks", action="store_true", help="the flat task list instead of the sessions")
+    listing.add_argument("--all", action="store_true", help="also list dormant sessions, idle for more than 12h")
     sub.add_parser("hook", help="hook entry point for Claude Code and Codex")
     run = sub.add_parser("run", help="run a command and list it while it runs")
     run.add_argument("--eta", type=eta_type, required=True, help="25m, 1h30m, 7200, ca. 10 minutes")
@@ -1214,7 +1310,7 @@ def build_parser():
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or argv[0] in ("--json", "--tasks"):
+    if not argv or argv[0] in ("--json", "--tasks", "--all"):
         argv.insert(0, "list")
     args = build_parser().parse_args(argv)
     handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done,
