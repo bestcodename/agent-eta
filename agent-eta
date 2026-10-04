@@ -511,23 +511,42 @@ def claude_home():
     return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 
 
+def claude_accounts():
+    """Every Claude Code config directory to read, as (account, directory). With more than one
+    account in the registry of scripts/claude-account, that is each registered account by its
+    name, and otherwise the one directory of this environment without a name."""
+    path = os.environ.get("CLAUDE_ACCOUNTS_FILE") or os.path.expanduser("~/.config/claude-account/accounts.json")
+    data = read_json(path) or {}
+    accounts = [a for a in data.get("accounts") or [] if isinstance(a, dict) and a.get("name") and a.get("dir")]
+    if len(accounts) < 2:
+        return [(None, claude_home())]
+    return [(a["name"], os.path.expanduser(a["dir"])) for a in accounts]
+
+
+def agent_label(agent, account):
+    return "%s/%s" % (agent, account) if account else agent
+
+
 def codex_home():
     return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
 
 
-def claude_session(pid):
-    """The registry record of a live Claude Code session, or {}."""
-    try:
-        with open(os.path.join(claude_home(), "sessions", "%d.json" % int(pid)), "r",
-                  encoding="utf-8") as handle:
-            record = json.load(handle)
-    except (OSError, ValueError, TypeError):
-        return {}
-    if not isinstance(record, dict):
-        return {}
-    if record.get("procStart") and proc_start(pid) != str(record["procStart"]):
-        return {}
-    return record
+def claude_session(pid, home=None):
+    """The registry record of a live Claude Code session, or {}. Without home it is looked up
+    in every account's directory."""
+    for directory in [home] if home else [directory for _, directory in claude_accounts()]:
+        try:
+            with open(os.path.join(directory, "sessions", "%d.json" % int(pid)), "r",
+                      encoding="utf-8") as handle:
+                record = json.load(handle)
+        except (OSError, ValueError, TypeError):
+            continue
+        if not isinstance(record, dict):
+            continue
+        if record.get("procStart") and proc_start(pid) != str(record["procStart"]):
+            continue
+        return record
+    return {}
 
 
 def codex_threads():
@@ -575,7 +594,8 @@ def codex_thread_names(threads=None):
 
 def claude_title(session_id):
     """The latest custom or generated title in a Claude Code transcript, or None."""
-    paths = glob.glob(os.path.join(claude_home(), "projects", "*", "%s.jsonl" % glob.escape(str(session_id))))
+    paths = [path for _, directory in claude_accounts()
+             for path in glob.glob(os.path.join(directory, "projects", "*", "%s.jsonl" % glob.escape(str(session_id))))]
     if not paths:
         return None
     try:
@@ -629,7 +649,7 @@ def current_session():
         return "codex", {"id": os.environ.get("CODEX_THREAD_ID")}
     if os.environ.get("CLAUDE_PID") or os.environ.get("CLAUDECODE"):
         pid = claude_pid()
-        record = claude_session(pid) if pid else {}
+        record = claude_session(pid, claude_home()) if pid else {}
         return "claude", {"id": os.environ.get("CLAUDE_CODE_SESSION_ID") or record.get("sessionId"),
                           "pid": pid, "name": record.get("name")}
     return "other", {}
@@ -649,20 +669,29 @@ def session_name(entry, thread_names):
 
 
 def claude_sessions():
-    """Every live Claude Code session, with the state Claude Code writes to its registry."""
+    """Every live Claude Code session of every account, with the state Claude Code writes to its
+    registry."""
     found = []
-    for path in json_files(os.path.join(claude_home(), "sessions")):
+    for account, directory in claude_accounts():
+        found.extend(account_sessions(account, directory))
+    return found
+
+
+def account_sessions(account, directory):
+    found = []
+    for path in json_files(os.path.join(directory, "sessions")):
         name = os.path.basename(path)[:-5]
         if not name.isdigit() or not pid_alive(int(name)):
             continue
         pid = int(name)
-        record = claude_session(pid)
+        record = claude_session(pid, directory)
         if not record:
             continue
         status = record.get("status")
         since = record.get("statusUpdatedAt") or record.get("startedAt")
         found.append({
             "agent": "claude",
+            "account": account,
             "id": record.get("sessionId"),
             "pid": pid,
             "name": claude_name(record),
@@ -824,15 +853,17 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
 
 
 def claude_usage():
-    """The Claude Code usage windows as scripts/claude-usage/statusline.py last recorded them."""
-    state = read_json(os.path.join(claude_home(), "usage-state.json")) or {}
-    windows = state.get("windows") if isinstance(state.get("windows"), dict) else {}
+    """The Claude Code usage windows of every account as scripts/claude-usage/statusline.py last
+    recorded them, each account as an agent of its own."""
     found = []
-    for name, minutes in CLAUDE_WINDOWS.items():
-        window = windows.get(name)
-        if isinstance(window, dict) and isinstance(window.get("used_percentage"), (int, float)):
-            found.append(usage_window("claude", minutes, window["used_percentage"], window.get("resets_at"),
-                                      state.get("windows_seen_at")))
+    for account, directory in claude_accounts():
+        state = read_json(os.path.join(directory, "usage-state.json")) or {}
+        windows = state.get("windows") if isinstance(state.get("windows"), dict) else {}
+        for name, minutes in CLAUDE_WINDOWS.items():
+            window = windows.get(name)
+            if isinstance(window, dict) and isinstance(window.get("used_percentage"), (int, float)):
+                found.append(usage_window(agent_label("claude", account), minutes, window["used_percentage"],
+                                          window.get("resets_at"), state.get("windows_seen_at")))
     return found
 
 
@@ -1060,13 +1091,14 @@ def render(table, now):
     return "\n".join(out) + "\n"
 
 
-def sessions_view(directory, now, tasks=None):
+def sessions_view(directory, now, tasks=None, usage=None):
     """Every running session with its state, its ETA and its tasks, in display order.
 
     The ETA of a session is the turn ETA its agent set with `agent-eta turn`, or else the
     latest due time among its tasks. A task whose session is not known, such as a local run,
     stands as a session of its own. A Codex command from before its thread stopped never gets
-    its PostToolUse, so its entry is deleted here.
+    its PostToolUse, so its entry is deleted here. A session that does not work while its
+    account has a reached usage limit counts as stopped until that limit resets.
     """
     tasks = rows(directory, now) if tasks is None else tasks
     threads = codex_threads()
@@ -1093,6 +1125,7 @@ def sessions_view(directory, now, tasks=None):
                 "waiting_for": None, "since": task.get("started"), "cwd": task.get("cwd"), "tasks": []}
             sessions.append(owner)
         owner["tasks"].append(task)
+    limit_stops(sessions, usage_view(now) if usage is None else usage, now)
     for session in sessions:
         turn = turns.get(session_key(session["agent"], session))
         dues = [t["due"] for t in session["tasks"] if t.get("due")]
@@ -1108,6 +1141,20 @@ def sessions_view(directory, now, tasks=None):
         session["overdue"] = session["remaining"] is not None and session["remaining"] < 0
     tasks[:] = kept
     return sorted(sessions, key=lambda session: (dormant(session, now), session_sort_key(session)))
+
+
+def limit_stops(sessions, usage, now):
+    """Mark every session that does not work while its account has a reached usage limit as
+    stopped until that limit resets, as Codex marks a thread whose turn hit one. A working
+    session stays as it is, since it may run on extra usage or the reading may lag behind a
+    reset. A dormant one stays dormant, and one already stopped with a reset of its own keeps
+    that one."""
+    blocked = {agent: summary["resets_at"] for agent, summary, _ in usage_sections(usage)[1]}
+    for session in sessions:
+        resets_at = blocked.get(agent_label(session["agent"], session.get("account")))
+        if (resets_at and session["state"] != "working" and not session.get("resume_at")
+                and not dormant(session, now)):
+            session.update(state="stopped", waiting_for="usage limit", resume_at=resets_at)
 
 
 def stopped_before(session, task):
@@ -1176,7 +1223,8 @@ def render_sessions(sessions, now, show_dormant=False):
 
 
 def section(session):
-    """0 for a session that needs you, 1 for a working one, 2 for one stopped by a usage limit."""
+    """0 for a session that needs you, 1 for a working one, 2 for one stopped by a usage limit,
+    its own or its account's."""
     return max(session_sort_key(session)[0] - 1, 0)
 
 
@@ -1198,7 +1246,8 @@ def session_lines(sessions, now):
             remaining = "?"
         else:
             remaining = "-"
-        lines.append((state, held, remaining, due_cell(remaining, session["due"], now), session["agent"] or "-", text))
+        lines.append((state, held, remaining, due_cell(remaining, session["due"], now),
+                      agent_label(session["agent"], session.get("account")) or "-", text))
         for task in session["tasks"]:
             left = format_span(task["remaining"])
             lines.append(("", "", left, due_cell(left, task.get("due"), now), "",
@@ -1210,20 +1259,21 @@ def cmd_list(args):
     now = time.time()
     directory = state_dir()
     table = rows(directory, now)
+    usage = usage_view(now)
     # The session view also deletes tasks that ended unseen, so --tasks runs it as well.
-    sessions = sessions_view(directory, now, table)
+    sessions = sessions_view(directory, now, table, usage)
     if args.json:
         for session in sessions:
             session["dormant"] = dormant(session, now)
             session["tasks"] = [task["id"] for task in session["tasks"]]
-        json.dump({"now": int(now), "sessions": sessions, "tasks": table, "usage": usage_view(now)}, sys.stdout,
+        json.dump({"now": int(now), "sessions": sessions, "tasks": table, "usage": usage}, sys.stdout,
                   indent=2, sort_keys=True)
         sys.stdout.write("\n")
     elif args.tasks:
         sys.stdout.write(render(table, now))
     else:
-        sys.stdout.write(render_sessions(sessions, now, args.all) + SECTION_RULE + "\n" +
-                         render_usage(usage_view(now), now))
+        # A blank line sets the usage table apart, since `---` only splits sections inside a table.
+        sys.stdout.write(render_sessions(sessions, now, args.all) + "\n" + render_usage(usage, now))
     return 0
 
 

@@ -30,7 +30,8 @@ eta = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(eta)
 
 AGENT_VARS = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SANDBOX",
-              "CODEX_SANDBOX_NETWORK_DISABLED", "AGENT_ETA_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME")
+              "CODEX_SANDBOX_NETWORK_DISABLED", "AGENT_ETA_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
+              "CLAUDE_ACCOUNTS_FILE")
 
 
 class Durations(unittest.TestCase):
@@ -86,12 +87,15 @@ class StateTest(unittest.TestCase):
         self.codex = self.root / "codex"
         self.codex.mkdir()
         self.env = {k: v for k, v in os.environ.items() if k not in AGENT_VARS}
+        self.accounts = self.root / "accounts.json"
         self.env.update(AGENT_ETA_DIR=self.dir, CLAUDE_CONFIG_DIR=str(self.claude),
-                        CODEX_HOME=str(self.codex), PYTHONDONTWRITEBYTECODE="1")
+                        CODEX_HOME=str(self.codex), CLAUDE_ACCOUNTS_FILE=str(self.accounts),
+                        PYTHONDONTWRITEBYTECODE="1")
         self.saved = {k: os.environ.get(k) for k in AGENT_VARS}
         for key in AGENT_VARS:
             os.environ.pop(key, None)
-        os.environ.update(AGENT_ETA_DIR=self.dir, CLAUDE_CONFIG_DIR=str(self.claude), CODEX_HOME=str(self.codex))
+        os.environ.update(AGENT_ETA_DIR=self.dir, CLAUDE_CONFIG_DIR=str(self.claude), CODEX_HOME=str(self.codex),
+                          CLAUDE_ACCOUNTS_FILE=str(self.accounts))
         self.addCleanup(self.restore)
         eta.state_dir()
 
@@ -116,6 +120,16 @@ class StateTest(unittest.TestCase):
     def cli(self, *args, stdin=None, env=None):
         return subprocess.run([sys.executable, str(_SRC), *args], input=stdin, capture_output=True,
                               text=True, env=env or self.env, timeout=30)
+
+    def second_account(self):
+        """Register the fixture's directory as account work and a second one as private, the way
+        scripts/claude-account writes its registry, and return the second directory."""
+        private = self.root / "claude-private"
+        (private / "sessions").mkdir(parents=True)
+        self.accounts.write_text(json.dumps({"accounts": [
+            {"name": "work", "email": "w@example.com", "dir": str(self.claude)},
+            {"name": "private", "email": "p@example.org", "dir": str(private)}]}))
+        return private
 
     def dead_pid(self):
         child = subprocess.Popen(["true"])
@@ -210,7 +224,7 @@ class Commands(StateTest):
         self.assertEqual(self.cli("done", entry_id).returncode, 1)
         self.assertEqual(self.cli().stdout.splitlines()[1:], [
             eta.EMPTY_SECTIONS[0], "---", eta.EMPTY_SECTIONS[1], "---", eta.EMPTY_SECTIONS[2], "---",
-            eta.EMPTY_SECTIONS[3], "---", "USAGE  USED  ELAPSED  PACE  REMAINING  DUE  READ",
+            eta.EMPTY_SECTIONS[3], "", "USAGE  USED  ELAPSED  PACE  REMAINING  DUE  READ",
             eta.EMPTY_USAGE[0], "---", eta.EMPTY_USAGE[1]])
         self.assertEqual(self.cli("--tasks").stdout, "No background tasks.\n")
 
@@ -360,6 +374,26 @@ class Sessions(StateTest):
         sessions = self.view()
         self.assertEqual([(s["agent"], s["state"], s["waiting_for"]) for s in sessions],
                          [("claude", "waiting", "dialog open")])
+
+    def test_every_registered_account_is_read_and_labelled(self):
+        self.register(status="idle")
+        self.assertEqual(eta.render_sessions(self.view(), time.time()).splitlines()[1].split()[4], "claude")
+        private = self.second_account()
+        other = self.sleeper()
+        record = self.register(other.pid, "waiting", name="x", nameSource="derived")
+        os.rename(self.claude / "sessions" / ("%d.json" % other.pid), private / "sessions" / ("%d.json" % other.pid))
+        folder = private / "projects" / "-work"
+        folder.mkdir(parents=True)
+        (folder / ("%s.jsonl" % record["sessionId"])).write_text(json.dumps({"type": "custom-title",
+                                                                             "customTitle": "Private chat"}) + "\n")
+        sessions = self.view()
+        self.assertEqual([(s["account"], s["name"]) for s in sessions],
+                         [("private", "Private chat"), ("work", "session-%d" % os.getpid())])
+        agents = [line.split()[4] for line in eta.render_sessions(sessions, time.time()).splitlines()[1:]
+                  if line != eta.SECTION_RULE and line not in eta.EMPTY_SECTIONS]
+        self.assertEqual(agents, ["claude/private", "claude/work"])
+        self.assertEqual(eta.claude_session(other.pid)["sessionId"], record["sessionId"])
+        self.assertEqual(eta.claude_session(other.pid, str(self.claude)), {})
 
     def test_order_is_waiting_then_idle_then_working_by_eta_then_stopped(self):
         now = time.time()
@@ -541,6 +575,38 @@ class Sessions(StateTest):
             handle.write(event(type="task_started", turn_id="t-2"))
         self.assertEqual([s["state"] for s in self.view(now)], ["working"])
 
+    def test_an_account_at_its_usage_limit_stops_its_resting_sessions(self):
+        now = time.time()
+        private = self.second_account()
+        idle, waiting, working = self.sleeper(), self.sleeper(), self.sleeper()
+        self.register(idle.pid, "idle", now - 600)
+        self.register(waiting.pid, "waiting", now - 60, waitingFor="permission")
+        self.register(working.pid, "busy", now - 30)
+        self.register(status="idle", since=now - 900)
+        os.rename(self.claude / "sessions" / ("%d.json" % os.getpid()), private / "sessions" / ("%d.json" % os.getpid()))
+        old = self.sleeper()
+        self.register(old.pid, "idle", now - 2 * eta.DORMANT_AFTER)
+        reset = int(now + 3 * 3600)
+        (self.claude / "usage-state.json").write_text(json.dumps({"windows_seen_at": now, "windows": {
+            "five_hour": {"used_percentage": 100.0, "resets_at": reset},
+            "seven_day": {"used_percentage": 40.0, "resets_at": now + 86400}}}))
+        sessions = {s["pid"]: s for s in self.view(now)}
+        for pid in (idle.pid, waiting.pid):
+            self.assertEqual((sessions[pid]["state"], sessions[pid]["waiting_for"], sessions[pid]["due"]),
+                             ("stopped", "usage limit", reset))
+        # A working session may run on extra usage, and the other account has room left.
+        self.assertEqual(sessions[working.pid]["state"], "working")
+        self.assertEqual(sessions[os.getpid()]["state"], "idle")
+        self.assertTrue(eta.dormant(sessions[old.pid], now))
+        text = eta.render_sessions(self.view(now), now).split(eta.SECTION_RULE + "\n")
+        self.assertEqual(sorted(line.split()[1] for line in text[2].splitlines()), ["10m", "1m"])
+        self.assertTrue(all(line.endswith("(usage limit)") for line in text[2].splitlines()))
+        self.assertFalse(any(eta.dormant(s, now + 2 * eta.DORMANT_AFTER) for s in self.view(now)
+                             if s["state"] == "stopped"))
+        # Once the window has reset, the reading says nothing any more and the sessions rest again.
+        self.assertEqual(sorted(s["state"] for s in self.view(reset + 1)),
+                         ["idle", "idle", "idle", "waiting", "working"])
+
     def test_exhausted_until_takes_the_latest_full_window(self):
         self.assertIsNone(eta.exhausted_until({"limit_id": "premium", "primary": None}))
         self.assertEqual(eta.exhausted_until({"primary": {"used_percent": 40, "resets_at": 5}}), 0)
@@ -655,6 +721,16 @@ class Usage(StateTest):
         agent = eta.render_usage(eta.usage_view(now), now).splitlines()[1].split()
         # The 7-day window has the highest share and the worst pace, the 5-hour window the soonest reset.
         self.assertEqual(agent[:6], ["claude", "88%", "-", "ahead", "+59%", "3h00"])
+
+    def test_each_account_has_a_usage_row_of_its_own(self):
+        now = 1_000_000
+        private = self.second_account()
+        for directory, used in ((self.claude, 30.0), (private, 70.0)):
+            (directory / "usage-state.json").write_text(json.dumps({"windows_seen_at": now, "windows": {
+                "five_hour": {"used_percentage": used, "resets_at": now + 3600}}}))
+        rows = [line.split()[:2] for line in eta.render_usage(eta.usage_view(now), now).splitlines()
+                if line.startswith("claude")]
+        self.assertEqual(sorted(rows), [["claude/private", "70%"], ["claude/work", "30%"]])
 
     def test_codex_takes_the_latest_reading_with_windows(self):
         now = 1_000_000
