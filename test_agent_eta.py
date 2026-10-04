@@ -371,6 +371,18 @@ class Sessions(StateTest):
                                  "session-%d" % working.pid, "session-%d" % os.getpid()])
         self.assertEqual(self.view(now)[2]["eta_source"], "tasks")
 
+    def test_sections_split_attention_work_and_usage_limits(self):
+        def session(name, state, remaining=None, due=None):
+            return {"name": name, "state": state, "remaining": remaining, "since": 0, "due": due, "tasks": [],
+                    "agent": "codex", "turn_label": None, "waiting_for": None}
+        sessions = [session("ask", "waiting"), session("rest", "idle"),
+                    session("work", "working", 600, 1600), session("limit", "stopped", 60, 1060)]
+        names = [line.split()[-1] if line != eta.SECTION_RULE else line
+                 for line in eta.render_sessions(sessions, 1000).splitlines()[1:]]
+        self.assertEqual(names, ["ask", "rest", "---", "work", "---", "limit"])
+        names = [line.split()[-1] for line in eta.render_sessions(sessions[2:3], 1000).splitlines()[1:]]
+        self.assertEqual(names, ["work"])
+
     def test_a_usage_limit_sorts_after_work_and_a_reset_one_with_idle(self):
         def session(name, state, remaining=None, since=0, due=None):
             return {"name": name, "state": state, "remaining": remaining, "since": since, "due": due, "tasks": []}
@@ -454,7 +466,7 @@ class Sessions(StateTest):
         self.register(idle.pid, "idle", now - 60)
         self.register(working.pid, "busy", now - 60)
         self.register(waiting.pid, "waiting", now - 60)
-        lines = eta.render_sessions(self.view(now), now).splitlines()[1:]
+        lines = [line for line in eta.render_sessions(self.view(now), now).splitlines()[1:] if line != eta.SECTION_RULE]
         cells = {line.split()[0]: tuple(line.split()[2:4]) for line in lines}
         self.assertEqual(cells, {"idle": ("0", "-"), "working": ("?", "?"), "waiting": ("-", "-")})
 
@@ -545,9 +557,9 @@ class Sessions(StateTest):
         self.assertNotIn("session-%d" % old.pid, short)
         self.assertIn("1 dormant session, idle for more than 12h. agent-eta --all lists it.", short)
         full = eta.render_sessions(sessions, now, show_dormant=True).splitlines()
-        heading = full.index("Dormant, idle for more than 12h:")
-        self.assertIn("session-%d" % old.pid, full[heading + 1])
-        self.assertTrue(all("session-%d" % old.pid not in line for line in full[:heading]))
+        rule = len(full) - 1 - full[::-1].index(eta.SECTION_RULE)
+        self.assertIn("session-%d" % old.pid, full[rule + 1])
+        self.assertTrue(all("session-%d" % old.pid not in line for line in full[:rule]))
         data = json.loads(self.cli("--json").stdout)
         self.assertEqual(sorted(s["dormant"] for s in data["sessions"]), [False, False, True])
 

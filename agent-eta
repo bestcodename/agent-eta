@@ -83,6 +83,8 @@ SESSION_STALE = 6 * 3600
 # whether anyone still looks at a session, and a process that lives on for days in a terminal
 # tab or the Claude Code daemon looks just like one in use, so time is the signal.
 DORMANT_AFTER = 12 * 3600
+# The line between the sections of the session table.
+SECTION_RULE = "---"
 # Claude Code's own words for a session state, mapped to the three this list shows.
 # "shell" is a foreground Bash command, measured against a running bash child on 2026-10-03.
 CLAUDE_STATES = {"busy": "working", "shell": "working", "waiting": "waiting", "idle": "idle"}
@@ -965,26 +967,41 @@ def dormant(session, now):
 
 
 def render_sessions(sessions, now, show_dormant=False):
-    """The session table. Dormant sessions follow in a section of their own with
-    show_dormant, and are otherwise only counted in a closing line."""
+    """The session table, in sections split by a `---` line. Sessions that need you, waiting
+    or idle, come first, then working ones, then those stopped until a usage limit resets.
+    Dormant sessions follow in a last section with show_dormant, and are otherwise only
+    counted in a closing line."""
     active = [s for s in sessions if not dormant(s, now)]
     resting = [s for s in sessions if dormant(s, now)]
     if not active and not resting:
         return "No agent sessions.\n"
-    shown = active + resting if show_dormant else active
-    lines = session_lines(shown, now)
-    widths = [max(len(line[i]) for line in lines) for i in range(5)]
-    text = ["  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line[:5])) + "  " + line[5] for line in lines]
+    groups = [[s for s in active if section(s) == index] for index in range(3)]
+    groups = [group for group in groups if group]
+    if show_dormant and resting:
+        groups.append(resting)
+    blocks = [session_lines(group, now)[1:] for group in groups]
+    header = session_lines([], now)
+    widths = [max(len(line[i]) for line in header + sum(blocks, [])) for i in range(5)]
+    def row(line):
+        return "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line[:5])) + "  " + line[5]
+    text = [row(header[0])]
     if not active:
-        text = text[:1] + ["(no active sessions)"] + text[1:]
-    if resting and show_dormant:
-        text.insert(len(text) - len(session_lines(resting, now)) + 1,
-                    "\nDormant, idle for more than %s:" % "%dh" % (DORMANT_AFTER // 3600))
-    elif resting:
-        text.append("\n%d dormant session%s, idle for more than %s. agent-eta --all lists %s." % (
+        text.append("(no active sessions)")
+    for index, block in enumerate(blocks):
+        if index or not active:
+            text.append(SECTION_RULE)
+        text.extend(row(line) for line in block)
+    if resting and not show_dormant:
+        text.append(SECTION_RULE)
+        text.append("%d dormant session%s, idle for more than %s. agent-eta --all lists %s." % (
             len(resting), "" if len(resting) == 1 else "s", "%dh" % (DORMANT_AFTER // 3600),
             "it" if len(resting) == 1 else "them"))
     return "\n".join(text) + "\n"
+
+
+def section(session):
+    """0 for a session that needs you, 1 for a working one, 2 for one stopped by a usage limit."""
+    return max(session_sort_key(session)[0] - 1, 0)
 
 
 def session_lines(sessions, now):
