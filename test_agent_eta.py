@@ -210,7 +210,8 @@ class Commands(StateTest):
         self.assertEqual(self.cli("done", entry_id).returncode, 1)
         self.assertEqual(self.cli().stdout.splitlines()[1:], [
             eta.EMPTY_SECTIONS[0], "---", eta.EMPTY_SECTIONS[1], "---", eta.EMPTY_SECTIONS[2], "---",
-            eta.EMPTY_SECTIONS[3]])
+            eta.EMPTY_SECTIONS[3], "---", "USAGE  USED  ELAPSED  PACE  REMAINING  DUE  READ",
+            eta.EMPTY_USAGE[0], "---", eta.EMPTY_USAGE[1]])
         self.assertEqual(self.cli("--tasks").stdout, "No background tasks.\n")
 
     def test_add_with_a_pid_ends_with_that_process(self):
@@ -616,6 +617,84 @@ class Sessions(StateTest):
         data = json.loads(self.cli("--json").stdout)
         self.assertEqual([s["tasks"] for s in data["sessions"]], [["ci"]])
         self.assertEqual([t["id"] for t in data["tasks"]], ["ci"])
+
+
+class Usage(StateTest):
+    def rollout(self, name, *readings):
+        folder = self.codex / "sessions" / "2026" / "10" / "04"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / ("rollout-2026-10-04T00-00-00-%s.jsonl" % name)
+        path.write_text("".join(json.dumps({"timestamp": stamp, "type": "event_msg",
+                                            "payload": {"type": "token_count", "rate_limits": limits}}) + "\n"
+                                for stamp, limits in readings))
+        return path
+
+    def test_claude_windows_come_from_the_statusline_state(self):
+        now = 1_000_000
+        (self.claude / "usage-state.json").write_text(json.dumps({"windows_seen_at": now - 120, "windows": {
+            "five_hour": {"used_percentage": 62.0, "resets_at": now + 3 * 3600},
+            "seven_day": {"used_percentage": 10.0, "resets_at": now + 6 * 86400}}}))
+        five, seven = eta.usage_view(now)
+        self.assertEqual((five["agent"], five["minutes"], five["used"], round(five["elapsed"]), five["ahead"]),
+                         ("claude", 300, 62.0, 40, True))
+        self.assertEqual((seven["minutes"], round(seven["elapsed"]), seven["ahead"]), (10080, 14, False))
+        self.assertEqual((round(five["pace"]), five["remaining"], five["reached"]), (22, 3 * 3600, False))
+        lines = eta.render_usage([five, seven], now).splitlines()
+        self.assertEqual(lines[0].split(), ["USAGE", "USED", "ELAPSED", "PACE", "REMAINING", "DUE", "READ"])
+        self.assertEqual(lines[1].split()[:6] + lines[1].split()[-1:],
+                         ["claude", "62%", "-", "ahead", "+22%", "3h00", "2m"])
+        self.assertEqual(lines[2].split()[:6], ["└", "5h", "62%", "40%", "ahead", "+22%"])
+        self.assertEqual(lines[3].split()[:6], ["└", "7d", "10%", "14%", "ok", "-4%"])
+        self.assertEqual(lines[4:], ["---", eta.EMPTY_USAGE[1]])
+
+    def test_the_agent_row_holds_the_worst_per_column(self):
+        now = 1_000_000
+        (self.claude / "usage-state.json").write_text(json.dumps({"windows_seen_at": now, "windows": {
+            "five_hour": {"used_percentage": 43.0, "resets_at": now + 3 * 3600},
+            "seven_day": {"used_percentage": 88.0, "resets_at": now + 5 * 86400}}}))
+        agent = eta.render_usage(eta.usage_view(now), now).splitlines()[1].split()
+        # The 7-day window has the highest share and the worst pace, the 5-hour window the soonest reset.
+        self.assertEqual(agent[:6], ["claude", "88%", "-", "ahead", "+59%", "3h00"])
+
+    def test_codex_takes_the_latest_reading_with_windows(self):
+        now = 1_000_000
+        codex = {"limit_id": "codex", "primary": {"used_percent": 39.0, "window_minutes": 300, "resets_at": now + 600},
+                 "secondary": {"used_percent": 90.0, "window_minutes": 10080, "resets_at": now + 86400}}
+        older = dict(codex, primary=dict(codex["primary"], used_percent=20.0))
+        premium = {"limit_id": "premium", "primary": None, "secondary": None}
+        self.rollout("a", ("2026-10-04T01:00:00.000Z", older))
+        self.rollout("b", ("2026-10-04T01:45:00.000Z", codex), ("2026-10-04T01:46:00.000Z", premium))
+        five, seven = [w for w in eta.usage_view(now) if w["agent"] == "codex"]
+        self.assertEqual((five["minutes"], five["used"], round(five["elapsed"])), (300, 39.0, 97))
+        self.assertEqual(five["seen_at"], eta.parse_stamp("2026-10-04T01:45:00.000Z"))
+        self.assertEqual((seven["minutes"], seven["used"], five["ahead"]), (10080, 90.0, False))
+
+    def test_a_window_past_its_reset_is_unknown(self):
+        now = 1_000_000
+        (self.claude / "usage-state.json").write_text(json.dumps({"windows_seen_at": now - 7200, "windows": {
+            "five_hour": {"used_percentage": 100.0, "resets_at": now - 60}}}))
+        [window] = eta.usage_view(now)
+        self.assertEqual((window["used"], window["elapsed"], window["ahead"]), (None, None, False))
+        self.assertEqual(eta.render_usage([window], now).splitlines()[2].split(),
+                         ["└", "5h", "?", "?", "?", "?", "?"])
+
+    def test_sections_split_by_reached_limits_and_sort_by_reset(self):
+        def window(agent, minutes, used, remaining):
+            return {"agent": agent, "minutes": minutes, "used": used, "remaining": remaining,
+                    "reached": used >= 100, "seen_at": None}
+        windows = [window("later", 300, 10, 700), window("first", 10080, 80, 9000), window("first", 300, 20, 600),
+                   window("late", 300, 100, 3000), window("soon", 300, 50, 900), window("soon", 10080, 100, 1200)]
+        open_, blocked = eta.usage_sections(windows)
+        self.assertEqual([(agent, summary["minutes"]) for agent, summary, _ in open_], [("first", 300), ("later", 300)])
+        self.assertEqual([w["minutes"] for w in open_[0][2]], [300, 10080])
+        self.assertEqual([(agent, summary["minutes"]) for agent, summary, _ in blocked], [("soon", 10080), ("late", 300)])
+        self.assertEqual([w["minutes"] for w in blocked[0][2]], [300, 10080])
+
+    def test_json_carries_the_usage(self):
+        (self.claude / "usage-state.json").write_text(json.dumps({"windows": {
+            "five_hour": {"used_percentage": 5.0, "resets_at": time.time() + 3600}}}))
+        [window] = json.loads(self.cli("--json").stdout)["usage"]
+        self.assertEqual((window["agent"], window["minutes"], window["used"]), ("claude", 300, 5.0))
 
 
 if __name__ == "__main__":

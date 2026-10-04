@@ -88,6 +88,8 @@ SECTION_RULE = "---"
 # What an empty section of the session table says instead of its rows.
 EMPTY_SECTIONS = ("(no waiting or idle sessions)", "(no working sessions)",
                   "(no sessions stopped by a usage limit)", "(no dormant sessions)")
+# The same for the two sections of the usage table.
+EMPTY_USAGE = ("(no usage limit with room left)", "(no usage limit reached)")
 # Claude Code's own words for a session state, mapped to the three this list shows.
 # "shell" is a foreground Bash command, measured against a running bash child on 2026-10-03.
 CLAUDE_STATES = {"busy": "working", "shell": "working", "waiting": "waiting", "idle": "idle"}
@@ -100,6 +102,10 @@ TURN_ENDS = ("UserPromptSubmit", "Stop", "Interrupt", "SessionEnd")
 # Measured on codex-cli 0.159.2.
 CODEX_QUESTION_TOOLS = ("request_user_input",)
 ROLLOUT_TAIL = 256 * 1024
+# How long each Claude Code usage window lasts in minutes, by its name in usage-state.json.
+CLAUDE_WINDOWS = {"five_hour": 300, "seven_day": 10080}
+# How many of the most recently written Codex rollouts are searched for the latest usage reading.
+USAGE_ROLLOUTS = 5
 # How a Codex turn that ended with an error reads in the list, by its codex_error_info.
 CODEX_ERRORS = {"usage_limit_exceeded": "usage limit"}
 # Claude Code keeps a session's title in its transcript and rewrites it now and then. Only the
@@ -688,6 +694,27 @@ def parse_stamp(text):
         return None
 
 
+def tail_records(path, size=ROLLOUT_TAIL):
+    """The records at the end of a rollout transcript that carry a payload object, or None
+    when the file cannot be read."""
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - size))
+            data = handle.read()
+    except (OSError, TypeError):
+        return None
+    records = []
+    for line in data.splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict) and isinstance(record.get("payload"), dict):
+            records.append(record)
+    return records
+
+
 def codex_pending(path):
     """What a Codex thread waits for according to its transcript, as (reason, since), or None.
 
@@ -697,22 +724,12 @@ def codex_pending(path):
     type `Plan` before its `task_complete`, and the app then asks whether to implement the plan,
     so a last finished turn that carries a plan waits for its approval.
     """
-    try:
-        with open(path, "rb") as handle:
-            handle.seek(0, os.SEEK_END)
-            handle.seek(max(0, handle.tell() - ROLLOUT_TAIL))
-            data = handle.read()
-    except (OSError, TypeError):
+    records = tail_records(path)
+    if records is None:
         return None
     asked, planned, finished, resets = {}, set(), None, None
-    for line in data.splitlines():
-        try:
-            record = json.loads(line)
-        except ValueError:
-            continue
-        payload = record.get("payload") if isinstance(record, dict) else None
-        if not isinstance(payload, dict):
-            continue
+    for record in records:
+        payload = record["payload"]
         kind = payload.get("type")
         if record.get("type") == "response_item":
             if kind in ("function_call", "custom_tool_call") and payload.get("name") in CODEX_QUESTION_TOOLS:
@@ -804,6 +821,165 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
             "resume_at": resume_at,
         })
     return found
+
+
+def claude_usage():
+    """The Claude Code usage windows as scripts/claude-usage/statusline.py last recorded them."""
+    state = read_json(os.path.join(claude_home(), "usage-state.json")) or {}
+    windows = state.get("windows") if isinstance(state.get("windows"), dict) else {}
+    found = []
+    for name, minutes in CLAUDE_WINDOWS.items():
+        window = windows.get(name)
+        if isinstance(window, dict) and isinstance(window.get("used_percentage"), (int, float)):
+            found.append(usage_window("claude", minutes, window["used_percentage"], window.get("resets_at"),
+                                      state.get("windows_seen_at")))
+    return found
+
+
+def codex_usage():
+    """The Codex usage windows of the latest `token_count` reading that carries windows, from
+    the most recently written rollout transcripts."""
+    pattern = os.path.join(codex_home(), "sessions", "*", "*", "*", "rollout-*.jsonl")
+    paths = sorted(glob.glob(pattern), key=modified, reverse=True)[:USAGE_ROLLOUTS]
+    seen_at, limits = 0, None
+    for path in paths:
+        for record in tail_records(path) or []:
+            payload = record["payload"]
+            reading = payload.get("rate_limits") if payload.get("type") == "token_count" else None
+            if not isinstance(reading, dict):
+                continue
+            if not any(isinstance(reading.get(key), dict) for key in ("primary", "secondary")):
+                continue
+            stamp = parse_stamp(record.get("timestamp")) or 0
+            if stamp >= seen_at:
+                seen_at, limits = stamp, reading
+    if not limits:
+        return []
+    return [usage_window("codex", window["window_minutes"], window["used_percent"], window.get("resets_at"),
+                         seen_at)
+            for window in (limits.get("primary"), limits.get("secondary"))
+            if isinstance(window, dict) and window.get("window_minutes")
+            and isinstance(window.get("used_percent"), (int, float))]
+
+
+def modified(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0
+
+
+def usage_window(agent, minutes, used, resets_at, seen_at):
+    return {"agent": agent, "minutes": int(minutes), "used": float(used), "resets_at": resets_at,
+            "seen_at": seen_at}
+
+
+def usage_view(now):
+    """Every usage window with the share of it that has passed, both in percent, how far the
+    usage runs ahead of the time in percentage points, the time left until its reset and
+    whether its limit is reached. A window whose reset lies in the past has started over since
+    its reading, so none of that is known then."""
+    windows = claude_usage() + codex_usage()
+    for window in windows:
+        resets_at, length = window["resets_at"], window["minutes"] * 60
+        if resets_at and resets_at > now:
+            window["elapsed"] = max(0.0, min(100.0, 100.0 * (1 - (resets_at - now) / length)))
+            window["pace"] = window["used"] - window["elapsed"]
+            window["remaining"] = int(resets_at - now)
+        else:
+            window["used"] = window["elapsed"] = window["pace"] = window["remaining"] = None
+        window["ahead"] = window["pace"] is not None and window["pace"] > 0
+        window["reached"] = window["used"] is not None and window["used"] >= 100
+    return windows
+
+
+def usage_sections(windows):
+    """The agents whose usage limits all have room left and the agents with a reached limit, each
+    with the soonest reset first and their windows in the same order. Each entry is (agent,
+    summary, windows). The summary of an open agent is its window that resets first, and that of
+    a blocked one the reached window that resets last, since that reset ends the block."""
+    def until_reset(window):
+        return (window["remaining"] is None, window["remaining"] or 0)
+    by_agent = {}
+    for window in windows:
+        by_agent.setdefault(window["agent"], []).append(window)
+    open_, blocked = [], []
+    for agent, group in by_agent.items():
+        group.sort(key=until_reset)
+        reached = [window for window in group if window["reached"]]
+        if reached:
+            blocked.append((agent, max(reached, key=lambda window: window["remaining"]), group))
+        else:
+            open_.append((agent, group[0], group))
+    for entries in (open_, blocked):
+        entries.sort(key=lambda entry: until_reset(entry[1]))
+    return open_, blocked
+
+
+def render_usage(windows, now):
+    """The usage table in two sections, agents with room left in every window and agents with a
+    reached limit. Each agent's row holds the worst of its windows per column, and its windows
+    follow as `└` rows. PACE is the usage ahead of the time in percentage points, REMAINING and
+    DUE say when a window resets, and READ how old the reading is."""
+    sections = usage_sections(windows)
+    lines = [("USAGE", "USED", "ELAPSED", "PACE", "REMAINING", "DUE", "READ")]
+    blocks = []
+    for entries in sections:
+        block = []
+        for agent, summary, group in entries:
+            age = format_span(now - summary["seen_at"]) if summary.get("seen_at") else "?"
+            block.append((agent,) + agent_cells(summary, group, now) + (age,))
+            block.extend(("└ " + format_window(window["minutes"]),) + usage_cells(window, now) + ("",)
+                         for window in group)
+        blocks.append(block)
+    widths = [max(len(line[i]) for line in lines + sum(blocks, [])) for i in range(len(lines[0]))]
+    def row(line):
+        return "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line)).rstrip()
+    text = [row(lines[0])]
+    for index, block in enumerate(blocks):
+        if index:
+            text.append(SECTION_RULE)
+        if block:
+            text.extend(row(line) for line in block)
+        else:
+            text.append(EMPTY_USAGE[index])
+    return "\n".join(text) + "\n"
+
+
+def agent_cells(summary, group, now):
+    """USED, ELAPSED, PACE, REMAINING and DUE of an agent's row. USED is its highest used share and
+    PACE its worst pace, each from whichever window holds it, so ELAPSED belongs to no single
+    window and stays blank. REMAINING and DUE are those of the summary window, which orders the
+    agents."""
+    known = [window for window in group if window["pace"] is not None]
+    if not known:
+        return ("?", "-", "?", "?", "?")
+    worst = max(known, key=lambda window: window["pace"])
+    used = max(window["used"] for window in known)
+    reset = usage_cells(summary, now)[3:]
+    return (percent(used), "-", usage_cells(worst, now)[2]) + reset
+
+
+def usage_cells(window, now):
+    """USED, ELAPSED, PACE, REMAINING and DUE of one usage window."""
+    if window["elapsed"] is None:
+        return (percent(window["used"]), "?", "?", "?", "?")
+    pace = "%s %+d%%" % ("ahead" if window["ahead"] else "ok", round(window["pace"]))
+    return (percent(window["used"]), percent(window["elapsed"]), pace, format_span(window["remaining"]),
+            format_due(window["resets_at"], now))
+
+
+def format_window(minutes):
+    """A window length as `5h` or `7d`."""
+    if minutes % 1440 == 0:
+        return "%dd" % (minutes // 1440)
+    if minutes % 60 == 0:
+        return "%dh" % (minutes // 60)
+    return "%dm" % minutes
+
+
+def percent(value):
+    return "?" if value is None else "%d%%" % round(value)
 
 
 def session_key(agent, session):
@@ -1040,12 +1216,14 @@ def cmd_list(args):
         for session in sessions:
             session["dormant"] = dormant(session, now)
             session["tasks"] = [task["id"] for task in session["tasks"]]
-        json.dump({"now": int(now), "sessions": sessions, "tasks": table}, sys.stdout, indent=2, sort_keys=True)
+        json.dump({"now": int(now), "sessions": sessions, "tasks": table, "usage": usage_view(now)}, sys.stdout,
+                  indent=2, sort_keys=True)
         sys.stdout.write("\n")
     elif args.tasks:
         sys.stdout.write(render(table, now))
     else:
-        sys.stdout.write(render_sessions(sessions, now, args.all))
+        sys.stdout.write(render_sessions(sessions, now, args.all) + SECTION_RULE + "\n" +
+                         render_usage(usage_view(now), now))
     return 0
 
 
