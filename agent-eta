@@ -85,6 +85,9 @@ SESSION_STALE = 6 * 3600
 DORMANT_AFTER = 12 * 3600
 # The line between the sections of the session table.
 SECTION_RULE = "---"
+# What an empty section of the session table says instead of its rows.
+EMPTY_SECTIONS = ("(no waiting or idle sessions)", "(no working sessions)",
+                  "(no sessions stopped by a usage limit)", "(no dormant sessions)")
 # Claude Code's own words for a session state, mapped to the three this list shows.
 # "shell" is a foreground Bash command, measured against a running bash child on 2026-10-03.
 CLAUDE_STATES = {"busy": "working", "shell": "working", "waiting": "waiting", "idle": "idle"}
@@ -968,34 +971,31 @@ def dormant(session, now):
 
 def render_sessions(sessions, now, show_dormant=False):
     """The session table, in sections split by a `---` line. Sessions that need you, waiting
-    or idle, come first, then working ones, then those stopped until a usage limit resets.
-    Dormant sessions follow in a last section with show_dormant, and are otherwise only
-    counted in a closing line."""
+    or idle, come first, then working ones, then those stopped until a usage limit resets,
+    then dormant ones. An empty section says so in a line of its own, and dormant sessions
+    are only counted unless show_dormant asks for them."""
     active = [s for s in sessions if not dormant(s, now)]
     resting = [s for s in sessions if dormant(s, now)]
-    if not active and not resting:
-        return "No agent sessions.\n"
-    groups = [[s for s in active if section(s) == index] for index in range(3)]
-    groups = [group for group in groups if group]
-    if show_dormant and resting:
-        groups.append(resting)
+    groups = [[s for s in active if section(s) == index] for index in range(3)] + [resting]
     blocks = [session_lines(group, now)[1:] for group in groups]
+    if resting and not show_dormant:
+        blocks[3] = []
     header = session_lines([], now)
     widths = [max(len(line[i]) for line in header + sum(blocks, [])) for i in range(5)]
     def row(line):
         return "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line[:5])) + "  " + line[5]
     text = [row(header[0])]
-    if not active:
-        text.append("(no active sessions)")
     for index, block in enumerate(blocks):
-        if index or not active:
+        if index:
             text.append(SECTION_RULE)
-        text.extend(row(line) for line in block)
-    if resting and not show_dormant:
-        text.append(SECTION_RULE)
-        text.append("%d dormant session%s, idle for more than %s. agent-eta --all lists %s." % (
-            len(resting), "" if len(resting) == 1 else "s", "%dh" % (DORMANT_AFTER // 3600),
-            "it" if len(resting) == 1 else "them"))
+        if block:
+            text.extend(row(line) for line in block)
+        elif index == 3 and resting:
+            text.append("%d dormant session%s, idle for more than %s. agent-eta --all lists %s." % (
+                len(resting), "" if len(resting) == 1 else "s", "%dh" % (DORMANT_AFTER // 3600),
+                "it" if len(resting) == 1 else "them"))
+        else:
+            text.append(EMPTY_SECTIONS[index])
     return "\n".join(text) + "\n"
 
 

@@ -208,7 +208,9 @@ class Commands(StateTest):
         self.assertIn("CI pipeline", self.cli().stdout)
         self.assertEqual(self.cli("done", entry_id).returncode, 0)
         self.assertEqual(self.cli("done", entry_id).returncode, 1)
-        self.assertEqual(self.cli().stdout, "No agent sessions.\n")
+        self.assertEqual(self.cli().stdout.splitlines()[1:], [
+            eta.EMPTY_SECTIONS[0], "---", eta.EMPTY_SECTIONS[1], "---", eta.EMPTY_SECTIONS[2], "---",
+            eta.EMPTY_SECTIONS[3]])
         self.assertEqual(self.cli("--tasks").stdout, "No background tasks.\n")
 
     def test_add_with_a_pid_ends_with_that_process(self):
@@ -377,11 +379,12 @@ class Sessions(StateTest):
                     "agent": "codex", "turn_label": None, "waiting_for": None}
         sessions = [session("ask", "waiting"), session("rest", "idle"),
                     session("work", "working", 600, 1600), session("limit", "stopped", 60, 1060)]
-        names = [line.split()[-1] if line != eta.SECTION_RULE else line
-                 for line in eta.render_sessions(sessions, 1000).splitlines()[1:]]
-        self.assertEqual(names, ["ask", "rest", "---", "work", "---", "limit"])
-        names = [line.split()[-1] for line in eta.render_sessions(sessions[2:3], 1000).splitlines()[1:]]
-        self.assertEqual(names, ["work"])
+        def names(chosen):
+            return [line if line in (eta.SECTION_RULE,) + eta.EMPTY_SECTIONS else line.split()[-1]
+                    for line in eta.render_sessions(chosen, 1000).splitlines()[1:]]
+        self.assertEqual(names(sessions), ["ask", "rest", "---", "work", "---", "limit", "---", eta.EMPTY_SECTIONS[3]])
+        self.assertEqual(names(sessions[2:3]), [eta.EMPTY_SECTIONS[0], "---", "work", "---", eta.EMPTY_SECTIONS[2],
+                                                "---", eta.EMPTY_SECTIONS[3]])
 
     def test_a_usage_limit_sorts_after_work_and_a_reset_one_with_idle(self):
         def session(name, state, remaining=None, since=0, due=None):
@@ -466,7 +469,7 @@ class Sessions(StateTest):
         self.register(idle.pid, "idle", now - 60)
         self.register(working.pid, "busy", now - 60)
         self.register(waiting.pid, "waiting", now - 60)
-        lines = [line for line in eta.render_sessions(self.view(now), now).splitlines()[1:] if line != eta.SECTION_RULE]
+        lines = [line for line in eta.render_sessions(self.view(now), now).splitlines()[1:] if line != eta.SECTION_RULE and line not in eta.EMPTY_SECTIONS]
         cells = {line.split()[0]: tuple(line.split()[2:4]) for line in lines}
         self.assertEqual(cells, {"idle": ("0", "-"), "working": ("?", "?"), "waiting": ("-", "-")})
 
@@ -524,8 +527,7 @@ class Sessions(StateTest):
         [session] = self.view(now)
         self.assertEqual((session["state"], session["waiting_for"]), ("stopped", "usage limit"))
         self.assertEqual((session["due"], session["eta_source"]), (resets, "limit"))
-        line = eta.render_sessions([session], now).splitlines()[1]
-        self.assertEqual(line.split()[0], "stopped")
+        [line] = [line for line in eta.render_sessions([session], now).splitlines() if line.startswith("stopped")]
         self.assertIn("(usage limit)", line)
         # The command from the failed turn ends with it, so the thread rests once the window resets.
         [session] = self.view(now + 11)
@@ -567,7 +569,8 @@ class Sessions(StateTest):
         now = time.time()
         self.register(status="idle", since=now - eta.DORMANT_AFTER - 60)
         text = eta.render_sessions(self.view(now), now)
-        self.assertIn("(no active sessions)", text)
+        self.assertIn("(no waiting or idle sessions)", text)
+        self.assertIn("(no working sessions)", text)
         self.assertIn("1 dormant session", text)
 
     def test_codex_interrupt_without_turn_id_is_still_codex(self):
