@@ -239,12 +239,27 @@ export function groupSessions(listing, showDormant) {
     return groups.filter(group => group.count > 0);
 }
 
+// The window lengths in minutes that order the agents, the 7-day window deciding before the 5-hour one.
+const USAGE_SORT_WINDOWS = [10080, 300];
+
 function untilReset(window) {
-    return window.remaining === null || window.remaining === undefined ? Infinity : window.remaining;
+    return !window || window.remaining === null || window.remaining === undefined ? Infinity : window.remaining;
+}
+
+function compareAgents(a, b) {
+    for (const minutes of USAGE_SORT_WINDOWS) {
+        const left = untilReset(a.windows.find(window => window.minutes === minutes));
+        const right = untilReset(b.windows.find(window => window.minutes === minutes));
+        if (left !== right) {
+            return left < right ? -1 : 1;
+        }
+    }
+    return 0;
 }
 
 // The usage windows per agent, as agent-eta's usage table orders them. Agents with room left come
-// first and those with a reached limit last, each by the reset that matters to it.
+// first and those with a reached limit last, each part by the reset of the 7-day window and then
+// by that of the 5-hour window, the soonest first.
 export function usageGroups(usage) {
     const byAgent = new Map();
     for (const window of usage || []) {
@@ -270,7 +285,7 @@ export function usageGroups(usage) {
             resetBy,
         });
     }
-    groups.sort((a, b) => (a.reached - b.reached) || (untilReset(a.resetBy) - untilReset(b.resetBy)));
+    groups.sort((a, b) => (a.reached - b.reached) || compareAgents(a, b));
     return groups;
 }
 

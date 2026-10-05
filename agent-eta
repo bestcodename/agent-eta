@@ -111,6 +111,8 @@ CODEX_QUESTION_TOOLS = ("request_user_input",)
 ROLLOUT_TAIL = 256 * 1024
 # How long each Claude Code usage window lasts in minutes, by its name in usage-state.json.
 CLAUDE_WINDOWS = {"five_hour": 300, "seven_day": 10080}
+# The window lengths in minutes that order the agents of a usage section, the first deciding first.
+USAGE_SORT_WINDOWS = (10080, 300)
 # How many of the most recently written Codex rollouts with a usage reading are searched for the
 # latest one, and how many rollouts are opened at most to find them. Codex writes batches of
 # short threads whose readings are all null, and those must not hide the last real one.
@@ -1234,11 +1236,16 @@ def usage_view(now):
 
 def usage_sections(windows):
     """The agents whose usage limits all have room left and the agents with a reached limit, each
-    with the soonest reset first and their windows in the same order. Each entry is (agent,
-    summary, windows). The summary of an open agent is its window that resets first, and that of
-    a blocked one the reached window that resets last, since that reset ends the block."""
+    ordered by the reset of the 7-day window and then by that of the 5-hour window, the soonest
+    first, with their windows ordered by reset as well. Each entry is (agent, summary, windows).
+    The summary of an open agent is its window that resets first, and that of a blocked one the
+    reached window that resets last, since that reset ends the block."""
     def until_reset(window):
-        return (window["remaining"] is None, window["remaining"] or 0)
+        return (window is None or window["remaining"] is None, (window or {}).get("remaining") or 0)
+
+    def agent_order(entry):
+        windows = {window["minutes"]: window for window in entry[2]}
+        return tuple(until_reset(windows.get(minutes)) for minutes in USAGE_SORT_WINDOWS)
     by_agent = {}
     for window in windows:
         by_agent.setdefault(window["agent"], []).append(window)
@@ -1251,7 +1258,7 @@ def usage_sections(windows):
         else:
             open_.append((agent, group[0], group))
     for entries in (open_, blocked):
-        entries.sort(key=lambda entry: until_reset(entry[1]))
+        entries.sort(key=agent_order)
     return open_, blocked
 
 
