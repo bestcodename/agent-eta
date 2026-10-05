@@ -470,6 +470,43 @@ class Sessions(StateTest):
         self.hook(self.codex_event("Stop"))
         self.assertEqual([s["state"] for s in self.view()], ["idle"])
 
+    def test_codex_permission_ends_once_the_script_open_at_the_request_has_output(self):
+        folder = self.codex / "sessions" / "2026" / "10" / "04"
+        folder.mkdir(parents=True)
+        rollout = folder / "rollout-2026-10-04T02-55-00-thread-1.jsonl"
+        request = eta.parse_stamp("2026-10-04T00:55:34.000Z")
+        def item(second, **payload):
+            stamp = "2026-10-04T00:55:%02d.500Z" % second
+            return json.dumps({"timestamp": stamp, "type": "response_item", "payload": payload}) + "\n"
+        def write(*lines):
+            with rollout.open("a") as handle:
+                handle.write("".join(lines))
+        def state():
+            [session] = eta.sessions_view(self.dir, request + 60)
+            return session["state"], session["waiting_for"], session["since"]
+        write(item(20, type="custom_tool_call", name="exec", call_id="c0"),
+              item(34, type="custom_tool_call", name="exec", call_id="c1"))
+        eta.codex_state(self.dir, self.codex_event("PermissionRequest", transcript_path=str(rollout)),
+                        "waiting", "permission", now=request)
+        self.assertEqual(state(), ("waiting", "permission", int(request)))
+        write(item(36, type="custom_tool_call_output", call_id="c0"))
+        self.assertEqual(state()[:2], ("waiting", "permission"))
+        write(item(41, type="custom_tool_call_output", call_id="c1"))
+        self.assertEqual(state(), ("working", None, eta.parse_stamp("2026-10-04T00:55:41.500Z")))
+        write(item(45, type="function_call", name="request_user_input", call_id="q1"))
+        self.assertEqual(state()[:2], ("waiting", "question"))
+
+    def test_codex_permission_without_its_call_in_the_transcript_stays_waiting(self):
+        folder = self.codex / "sessions" / "2026" / "10" / "04"
+        folder.mkdir(parents=True)
+        rollout = folder / "rollout-2026-10-04T02-55-00-thread-1.jsonl"
+        late = {"timestamp": "2099-01-01T00:00:00.000Z", "type": "response_item",
+                "payload": {"type": "custom_tool_call", "name": "exec", "call_id": "c9"}}
+        answer = dict(late, payload={"type": "custom_tool_call_output", "call_id": "c9"})
+        rollout.write_text(json.dumps(late) + "\n" + json.dumps(answer) + "\n")
+        self.hook(self.codex_event("PermissionRequest", transcript_path=str(rollout)))
+        self.assertEqual([(s["state"], s["waiting_for"]) for s in self.view()], [("waiting", "permission")])
+
     def test_a_derived_claude_name_gives_way_to_the_transcript_title(self):
         self.register(name="ai-0b", nameSource="derived")
         folder = self.claude / "projects" / "-work"

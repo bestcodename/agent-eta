@@ -787,6 +787,34 @@ def codex_pending(path):
     return None
 
 
+def codex_permission_answered(path, since):
+    """When the permission request a Codex thread raised at `since` was answered, or None.
+
+    Code mode runs every command inside a script, which the transcript records as a tool call.
+    The script's output can only follow once each approval inside it was decided, by the user
+    or by the auto-review agent, so the output of the call open at the request answers it. The
+    hook stamps `since` in whole seconds, hence the one second of slack. Without that call in the
+    transcript the request stays open.
+    """
+    records = tail_records(path)
+    if not records:
+        return None
+    call, outputs = None, {}
+    for record in records:
+        payload = record["payload"]
+        if record.get("type") != "response_item":
+            continue
+        stamp = parse_stamp(record.get("timestamp"))
+        if stamp is None:
+            continue
+        kind = payload.get("type")
+        if kind in ("function_call", "custom_tool_call") and stamp <= since + 1:
+            call = payload.get("call_id")
+        elif kind in ("function_call_output", "custom_tool_call_output"):
+            outputs[payload.get("call_id")] = stamp
+    return outputs.get(call) if call else None
+
+
 def exhausted_until(limits):
     """When the latest exhausted Codex usage window resets, from a token_count rate_limits record.
 
@@ -825,8 +853,15 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
         if threads is None:
             threads = codex_threads()
         hint = record.get("transcript") or (threads.get(record["id"]) or {}).get("rollout")
-        pending = codex_pending(codex_rollout(record["id"], hint))
+        rollout = codex_rollout(record["id"], hint)
+        pending = codex_pending(rollout)
         resume_at = None
+        # PermissionRequest sets waiting and only the next hook call clears it, which can be
+        # minutes after the auto-review agent or the user decided.
+        if state == "waiting" and waiting_for == "permission":
+            answered = codex_permission_answered(rollout, since or updated)
+            if answered:
+                state, since, waiting_for = "working", answered, None
         # A turn that ended with an error fires no Stop hook, so the transcript decides on its own.
         # An open question only counts inside a turn, and a plan only once its turn has ended.
         if pending and pending[2] and pending[2] <= now:
