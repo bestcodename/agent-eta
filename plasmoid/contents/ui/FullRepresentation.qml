@@ -40,6 +40,7 @@ PlasmaExtras.Representation {
                 icon.name: "view-refresh"
                 display: PlasmaComponents3.AbstractButton.IconOnly
                 text: i18n("Refresh")
+                visible: !root.inPanel
                 onClicked: root.refresh()
                 PlasmaComponents3.ToolTip.text: text
                 PlasmaComponents3.ToolTip.visible: hovered
@@ -48,6 +49,7 @@ PlasmaExtras.Representation {
                 icon.name: "configure"
                 display: PlasmaComponents3.AbstractButton.IconOnly
                 text: i18n("Configure…")
+                visible: !root.inPanel
                 onClicked: Plasmoid.internalAction("configure").trigger()
                 PlasmaComponents3.ToolTip.text: text
                 PlasmaComponents3.ToolTip.visible: hovered

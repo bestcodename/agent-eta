@@ -21,6 +21,8 @@ PlasmoidItem {
     // A poll rebuilds every row, which would close an open context menu, so polling pauses meanwhile.
     property bool menuOpen: false
     readonly property var summary: Logic.summary(listing)
+    // In a panel, and so in the system tray, whose popup header brings the Refresh and Configure buttons.
+    readonly property bool inPanel: [PlasmaCore.Types.Horizontal, PlasmaCore.Types.Vertical].includes(Plasmoid.formFactor)
     readonly property string command: Plasmoid.configuration.command || "\"$HOME/.local/bin/agent-eta\""
 
     Plasmoid.icon: "chronometer"
@@ -34,8 +36,7 @@ PlasmoidItem {
     // On the desktop or in plasmawindowed the overview itself. In a panel it stays unset, because the
     // system tray only shows the popup of an applet without a preferred representation, and Plasma
     // then picks the icon on its own.
-    preferredRepresentation: [PlasmaCore.Types.Horizontal, PlasmaCore.Types.Vertical].includes(Plasmoid.formFactor)
-        ? null : fullRepresentation
+    preferredRepresentation: inPanel ? null : fullRepresentation
     compactRepresentation: CompactRepresentation {}
     fullRepresentation: FullRepresentation {}
 
