@@ -31,9 +31,11 @@ PlasmoidItem {
     toolTipSubText: failure ? failure : Logic.tooltipLines(listing, 7).join("<br>")
     toolTipTextFormat: Text.StyledText
 
-    // In a panel or the tray the icon, on the desktop or in plasmawindowed the overview itself.
+    // On the desktop or in plasmawindowed the overview itself. In a panel it stays unset, because the
+    // system tray only shows the popup of an applet without a preferred representation, and Plasma
+    // then picks the icon on its own.
     preferredRepresentation: [PlasmaCore.Types.Horizontal, PlasmaCore.Types.Vertical].includes(Plasmoid.formFactor)
-        ? compactRepresentation : fullRepresentation
+        ? null : fullRepresentation
     compactRepresentation: CompactRepresentation {}
     fullRepresentation: FullRepresentation {}
 

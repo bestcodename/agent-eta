@@ -12,6 +12,14 @@ KCM.SimpleKCM {
     property alias cfg_notifyWaiting: notifyWaiting.checked
     property alias cfg_notifyOverdue: notifyOverdue.checked
     property alias cfg_notifyReset: notifyReset.checked
+    // Plasma also hands every page the defaults, and warns about each one the page does not declare.
+    property string cfg_commandDefault
+    property int cfg_pollClosedDefault
+    property int cfg_pollOpenDefault
+    property bool cfg_showUsageDefault
+    property bool cfg_notifyWaitingDefault
+    property bool cfg_notifyOverdueDefault
+    property bool cfg_notifyResetDefault
 
     Kirigami.FormLayout {
         QQC2.TextField {
