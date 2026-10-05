@@ -53,10 +53,10 @@ test("rows say what is left, what ran over and where the session stands", () => 
     assert.equal(logic.etaText({state: "working", due: null}), "no ETA");
     assert.equal(logic.etaText({state: "idle", due: null}), "");
     const waiting = session({state: "waiting", waiting_for: "permission", account: "ndcnet"});
-    assert.equal(logic.detailLine(waiting, NOW), "claude/ndcnet · shop · waiting (permission) for 2m");
+    assert.equal(logic.detailLine(waiting, NOW), "claude/ndcnet · shop · waiting (permission) for 2m (03:10)");
     const failed = session({agent: "dsh", account: null, model: "qwen3-coder", state: "waiting",
                             waiting_for: "turn failed (TIMEOUT)"});
-    assert.equal(logic.detailLine(failed, NOW), "dsh · qwen3-coder · shop · waiting (turn failed (TIMEOUT)) for 2m");
+    assert.equal(logic.detailLine(failed, NOW), "dsh · qwen3-coder · shop · waiting (turn failed (TIMEOUT)) for 2m (03:10)");
     assert.equal(logic.title(session({turn_label: "tests"})), "shop · tests");
 });
 
@@ -78,6 +78,7 @@ test("countdowns read like `12h 13m` and follow the clock time of a reset", () =
     assert.equal(logic.resetText(reset, reset - 3 * 86400), "in 3d 0h (06.10. 00:00)");
     assert.equal(logic.resetText(reset, reset + 60), "00:00");
     assert.equal(logic.resetText(null, NOW), "-");
+    assert.equal(logic.sinceText(NOW - 3900, NOW), "1h 5m (02:07)");
 });
 
 test("the tray orb is a traffic light over the sessions that are not dormant", () => {

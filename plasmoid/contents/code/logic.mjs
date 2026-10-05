@@ -80,6 +80,11 @@ export function resetText(epoch, now) {
     return left ? `in ${left} (${formatClock(epoch, now)})` : formatClock(epoch, now);
 }
 
+// How long a state has lasted, as `1h 5m (17:25)` with the clock time it began.
+export function sinceText(epoch, now) {
+    return `${formatIn(now - epoch)} (${formatClock(epoch, now)})`;
+}
+
 // A usage window length as `5h` or `7d`.
 export function formatWindow(minutes) {
     if (minutes % 1440 === 0) {
@@ -145,7 +150,7 @@ export function detailLine(session, now) {
         state += ` (${session.waiting_for})`;
     }
     if (session.since && session.state !== "-") {
-        state += ` for ${formatSpan(now - session.since)}`;
+        state += ` for ${sinceText(session.since, now)}`;
     }
     parts.push(state);
     if (session.due) {
