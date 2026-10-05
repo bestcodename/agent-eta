@@ -145,6 +145,20 @@ test("usage groups put reached limits last and order windows by reset", () => {
     assert.equal(groups[0].ahead, true);
 });
 
+test("an agent's usage line names its highest share and its soonest reset", () => {
+    const reset = NOW + 2940;
+    const [open, blocked] = logic.usageGroups([
+        {agent: "claude", minutes: 10080, used: 56, remaining: 380832, resets_at: NOW + 380832, reached: false},
+        {agent: "claude", minutes: 300, used: 20, remaining: 2940, resets_at: reset, reached: false},
+        {agent: "codex", minutes: 300, used: 100, remaining: 44_000, resets_at: NOW + 44_000, reached: true},
+    ]);
+    assert.equal(logic.usageHeadline(open, NOW), `56% · resets ${logic.resetText(reset, NOW)}`);
+    assert.match(logic.usageHeadline(open, NOW), /^56% · resets in 49m \(/);
+    assert.match(logic.usageHeadline(blocked, NOW), /^blocked · resets in 12h 13m \(/);
+    const [stale] = logic.usageGroups([{agent: "codex", minutes: 300, used: null, remaining: null, reached: false}]);
+    assert.equal(logic.usageHeadline(stale, NOW), "?");
+});
+
 test("the nearest window owner wins, and the project name picks among PhpStorm windows", () => {
     const windows = [
         {index: 0, pid: 55593, title: "sdwa5 – checkout.php"},

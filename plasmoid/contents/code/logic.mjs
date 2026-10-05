@@ -274,6 +274,19 @@ export function usageGroups(usage) {
     return groups;
 }
 
+// The line beside an agent's name in the usage block. An agent with room left shows its highest
+// used share and the reset that comes first, as in `56% · resets in 49m (18:30)`, and a blocked one
+// the reset that ends the block. Without a known reset the share stands alone.
+export function usageHeadline(group, now) {
+    if (group.reached) {
+        return `blocked · resets ${resetText(group.resetBy.resets_at, now)}`;
+    }
+    const next = group.resetBy;
+    return next && untilReset(next) !== Infinity
+        ? `${percent(group.used)} · resets ${resetText(next.resets_at, now)}`
+        : percent(group.used);
+}
+
 function titleProject(title) {
     return String(title || "").split(" – ")[0].trim();
 }

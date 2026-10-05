@@ -9,7 +9,8 @@ import "../code/logic.mjs" as Logic
 // One agent's usage windows. Each bar fills with the used share, and its tick marks the share of
 // the window that has passed, so a fill past the tick runs out before the reset. Red means the
 // limit is reached, orange that the usage runs ahead of the time. Every reset carries its
-// countdown, as in `resets in 49m (18:30)`.
+// countdown, as in `resets in 49m (18:30)`, and the agent's own line names its
+// highest share with the reset that comes first.
 ColumnLayout {
     id: usageRow
 
@@ -28,9 +29,7 @@ ColumnLayout {
             textFormat: Text.PlainText
         }
         PlasmaComponents3.Label {
-            text: usageRow.group.reached
-                ? i18n("blocked · resets %1", Logic.resetText(usageRow.group.resetBy.resets_at, usageRow.now))
-                : Logic.percent(usageRow.group.used)
+            text: Logic.usageHeadline(usageRow.group, usageRow.now)
             color: usageRow.group.reached ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
             textFormat: Text.PlainText
         }
