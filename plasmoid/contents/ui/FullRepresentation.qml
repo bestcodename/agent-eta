@@ -75,7 +75,11 @@ PlasmaExtras.Representation {
     PlasmaComponents3.ScrollView {
         id: scroll
         anchors.fill: parent
-        contentWidth: availableWidth
+        // Rows only ever wrap or elide, so nothing needs a horizontal bar. It showed anyway with the
+        // content as wide as the view, which is QTBUG-83890, and Plasma's own Bluetooth applet works
+        // around it the same way.
+        PlasmaComponents3.ScrollBar.horizontal.policy: PlasmaComponents3.ScrollBar.AlwaysOff
+        contentWidth: availableWidth - contentItem.leftMargin - contentItem.rightMargin
 
         ColumnLayout {
             width: scroll.availableWidth
