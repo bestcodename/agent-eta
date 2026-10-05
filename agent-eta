@@ -125,6 +125,8 @@ TRANSCRIPT_TAIL = 2 * 1024 * 1024
 # that has the session loaded holds open. Measured on @deepseek-ai/dsh 0.1.5-rc.2 on 2026-10-05.
 DSH_LOG = "session.v3.jsonl.zstd"
 DSH_LOCK = "session.lock"
+# Where the web UI keeps its session list. Archiving a session only adds its id here, and dsh keeps it loaded.
+DSH_WORKSPACE = os.path.join("storages", "workspace.json")
 DSH_PORT = 3080
 DSH_CACHE = "dsh-cache.json"
 DSH_CACHE_VERSION = 1
@@ -570,6 +572,13 @@ def codex_home():
 
 def dsh_home():
     return os.environ.get("DSH_HOME") or os.path.expanduser("~/.dsh")
+
+
+def dsh_archived():
+    """The ids of the sessions archived in the dsh web UI."""
+    shared = (read_json(os.path.join(dsh_home(), DSH_WORKSPACE)) or {}).get("global")
+    ids = shared.get("archivedSessionIds") if isinstance(shared, dict) else None
+    return {i for i in ids if isinstance(i, str)} if isinstance(ids, list) else set()
 
 
 def claude_session(pid, home=None):
@@ -1092,11 +1101,12 @@ def dsh_summary(records):
 
 
 def dsh_sessions(directory, now):
-    """Every dsh session a running dsh process has loaded, and the bash calls running in them as
-    tasks without an ETA. A log is decoded again only once its size or mtime has changed, and
+    """Every dsh session a running dsh process has loaded and nobody archived, and the bash calls
+    running in them as tasks without an ETA. A log is decoded again only once its size or mtime has changed, and
     what it said is kept in the state directory meanwhile, so a poll every two seconds costs no
     decoding while a session sits still."""
     loaded = dsh_processes()
+    archived = dsh_archived()
     # Its own subdirectory, since every JSON file at the top of the state directory is a task.
     path = os.path.join(directory, "cache", DSH_CACHE)
     cache = read_json(path) or {}
@@ -1104,6 +1114,8 @@ def dsh_sessions(directory, now):
     known = known if isinstance(known, dict) else {}
     logs, sessions, tasks = {}, [], []
     for folder, (pid, url) in sorted(loaded.items()):
+        if os.path.basename(folder) in archived:
+            continue
         log = os.path.join(folder, DSH_LOG)
         try:
             info = os.stat(log)

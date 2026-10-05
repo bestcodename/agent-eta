@@ -170,6 +170,22 @@ class Sessions(StateTest):
         self.assertEqual(listed["pids"][0], child.pid)
         self.assertEqual(listed["section"], 1)
 
+    def test_a_session_archived_in_the_web_ui_is_left_out_though_dsh_keeps_it_loaded(self):
+        now = time.time()
+        archived = self.write_log("session-1", [record("turn/start", now - 120, turn=1), bash("c-1", now - 60)])
+        kept = self.write_log("session-2", [], cwd="/work/other")
+        self.load(archived, kept)
+        workspace = self.dsh / "storages" / "workspace.json"
+        workspace.parent.mkdir()
+        workspace.write_text(json.dumps({"global": {"archivedSessionIds": ["session-1"]}}))
+        sessions = self.view(now)
+        self.assertEqual([s["id"] for s in sessions], ["session-2"])
+        self.assertEqual([t["id"] for s in sessions for t in s["tasks"]], [])
+        workspace.write_text(json.dumps({"global": {"archivedSessionIds": []}}))
+        self.assertEqual(sorted(s["id"] for s in self.view(now)), ["session-1", "session-2"])
+        workspace.write_text("not json")
+        self.assertEqual(len(self.view(now)), 2)
+
     def test_add_from_a_dsh_shell_attaches_to_its_session(self):
         folder = self.write_log("session-1", [record("turn/start", time.time() - 60, turn=1)])
         self.load(folder)
