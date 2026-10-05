@@ -83,6 +83,12 @@ SESSION_STALE = 6 * 3600
 # whether anyone still looks at a session, and a process that lives on for days in a terminal
 # tab or the Claude Code daemon looks just like one in use, so time is the signal.
 DORMANT_AFTER = 12 * 3600
+# The JSON section of a dormant session, after the three of section().
+DORMANT_SECTION = 3
+# Where PhpStorm projects live. A session below it belongs to the project at its first level.
+PROJECTS_ROOT = "~/PhpstormProjects"
+# How many processes up from a session's own one --json lists, for the tray to find its window.
+LINEAGE_DEPTH = 12
 # The line between the sections of the session table.
 SECTION_RULE = "---"
 # What an empty section of the session table says instead of its rows.
@@ -283,6 +289,17 @@ def comm_of(pid):
             return handle.read().strip()
     except OSError:
         return None
+
+
+def lineage(pid, depth=LINEAGE_DEPTH):
+    """The pid and its ancestors, nearest first, up to but without pid 1 and the user's systemd.
+    The tray matches a window's pid against them, since a terminal or an IDE owns the window
+    rather than the agent process itself."""
+    found = []
+    while pid and pid > 1 and len(found) < depth and comm_of(pid) not in (None, "systemd"):
+        found.append(pid)
+        pid = parent_of(pid)
+    return found
 
 
 def ancestor(match, start=None, depth=8):
@@ -1092,6 +1109,16 @@ def load_turns(directory, now, sessions, prune=True):
 
 # --- list -----------------------------------------------------------------------------
 
+def progress(started, due, now):
+    """The share of the time from started to due that has passed, from 0 to 1, or None without a
+    due time. An overdue ETA stays at 1, and `overdue` says that it ran over."""
+    if not due:
+        return None
+    if not started or due <= started:
+        return 1.0 if now >= due else 0.0
+    return max(0.0, min(1.0, (now - started) / (due - started)))
+
+
 def visible(entry, now):
     if entry.get("agent") == "codex" and entry.get("source") == "hook":
         return now - (entry.get("started") or now) >= CODEX_MIN_AGE
@@ -1108,6 +1135,7 @@ def rows(directory, now):
         row = dict(entry)
         row["remaining"] = remaining
         row["overdue"] = remaining is not None and remaining < 0
+        row["progress"] = progress(entry.get("started"), due, now)
         row["session_name"] = session_name(entry, names)
         result.append(row)
     return sorted(result, key=sort_key)
@@ -1171,17 +1199,22 @@ def sessions_view(directory, now, tasks=None, usage=None):
     limit_stops(sessions, usage_view(now) if usage is None else usage, now)
     for session in sessions:
         turn = turns.get(session_key(session["agent"], session))
-        dues = [t["due"] for t in session["tasks"] if t.get("due")]
+        timed = [t for t in session["tasks"] if t.get("due")]
         if session.get("resume_at"):
-            session.update(due=session["resume_at"], eta_source="limit", turn_label=None)
+            session.update(due=session["resume_at"], eta_source="limit", turn_label=None,
+                           eta_started=session.get("since"))
         elif turn and turn.get("due"):
-            session.update(due=turn["due"], eta_source="turn", turn_label=turn.get("label") or None)
-        elif dues:
-            session.update(due=max(dues), eta_source="tasks", turn_label=None)
+            session.update(due=turn["due"], eta_source="turn", turn_label=turn.get("label") or None,
+                           eta_started=turn.get("started"))
+        elif timed:
+            last = max(timed, key=lambda task: task["due"])
+            session.update(due=last["due"], eta_source="tasks", turn_label=None, eta_started=last.get("started"))
         else:
-            session.update(due=None, eta_source=None, turn_label=turn.get("label") if turn else None)
+            session.update(due=None, eta_source=None, turn_label=turn.get("label") if turn else None,
+                           eta_started=None)
         session["remaining"] = int(session["due"] - now) if session["due"] else None
         session["overdue"] = session["remaining"] is not None and session["remaining"] < 0
+        session["progress"] = progress(session["eta_started"], session["due"], now)
     tasks[:] = kept
     return sorted(sessions, key=lambda session: (dormant(session, now), session_sort_key(session)))
 
@@ -1298,6 +1331,60 @@ def session_lines(sessions, now):
     return lines
 
 
+def project_root(cwd, projects=None):
+    """The project a working directory belongs to. Below PROJECTS_ROOT that is the directory at
+    its first level, since PhpStorm opens a project there and never a subdirectory, elsewhere the
+    nearest directory with a `.git`, and otherwise the working directory itself."""
+    if not cwd:
+        return None
+    path = os.path.abspath(cwd)
+    base = os.path.abspath(os.path.expanduser(projects or PROJECTS_ROOT))
+    inner = os.path.relpath(path, base)
+    if inner != os.curdir and inner != os.pardir and not inner.startswith(os.pardir + os.sep):
+        return os.path.join(base, inner.split(os.sep)[0])
+    probe = path
+    # A worktree's .git is a file. An empty .git directory, as one in /tmp, is no repository.
+    while not (os.path.isfile(os.path.join(probe, ".git"))
+               or os.path.isfile(os.path.join(probe, ".git", "HEAD"))):
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            return path
+        probe = parent
+    return probe
+
+
+def project_name(root):
+    """The name PhpStorm shows for a project, which leads its window titles. It is the one in
+    `.idea/.name` after a rename, and the directory name otherwise."""
+    if not root:
+        return None
+    try:
+        with open(os.path.join(root, ".idea", ".name"), "r", encoding="utf-8") as handle:
+            name = handle.read().strip()
+    except (OSError, UnicodeDecodeError):
+        name = ""
+    return name or os.path.basename(root.rstrip(os.sep))
+
+
+def session_json(session, now):
+    """A session as --json prints it. Its tasks are named by id, and besides the session view it
+    carries what the tray widget needs: whether it is dormant, its section in the order of the
+    session table, the process lineage to find its window by and the project it works in. A Codex
+    thread has no process of its own, since the tray opens it by its id."""
+    pid = None
+    if session["agent"] != "codex":
+        holders = [(t.get("holder") or {}) for t in session["tasks"]]
+        pid = session.get("pid") or next((h.get("pid") for h in holders if h.get("type") == "pid"), None)
+    root = project_root(session.get("cwd"))
+    session["dormant"] = dormant(session, now)
+    session["section"] = DORMANT_SECTION if session["dormant"] else section(session)
+    session["pids"] = lineage(int(pid)) if pid else []
+    session["project_root"] = root
+    session["project_name"] = project_name(root)
+    session["tasks"] = [task["id"] for task in session["tasks"]]
+    return session
+
+
 def cmd_list(args):
     now = time.time()
     directory = state_dir()
@@ -1306,9 +1393,7 @@ def cmd_list(args):
     # The session view also deletes tasks that ended unseen, so --tasks runs it as well.
     sessions = sessions_view(directory, now, table, usage)
     if args.json:
-        for session in sessions:
-            session["dormant"] = dormant(session, now)
-            session["tasks"] = [task["id"] for task in session["tasks"]]
+        sessions = [session_json(session, now) for session in sessions]
         json.dump({"now": int(now), "sessions": sessions, "tasks": table, "usage": usage}, sys.stdout,
                   indent=2, sort_keys=True)
         sys.stdout.write("\n")

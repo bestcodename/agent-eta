@@ -1,0 +1,20 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "bestcodename"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Every running Claude Code, Codex and local-model session with its state, ETA and usage, from agent-eta",
+        "EnabledByDefault": true,
+        "Icon": "chronometer",
+        "Id": "com.github.bestcodename.agenteta",
+        "Name": "Agent ETA",
+        "Version": "0.67.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-NotificationArea": "true",
+    "X-Plasma-NotificationAreaCategory": "ApplicationStatus"
+}

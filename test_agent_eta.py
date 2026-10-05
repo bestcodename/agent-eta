@@ -69,6 +69,12 @@ class Durations(unittest.TestCase):
         self.assertEqual(eta.command_label("grep -c '#' file"), "grep -c '#' file")
         self.assertEqual(len(eta.clip("x" * 200)), eta.LABEL_MAX)
 
+    def test_progress_is_the_elapsed_share_of_the_eta(self):
+        for started, due, now, share in ((100, 200, 150, 0.5), (100, 200, 250, 1.0), (100, 200, 50, 0.0),
+                                         (100, None, 150, None), (None, 200, 150, 0.0), (200, 200, 200, 1.0)):
+            with self.subTest(started=started, due=due, now=now):
+                self.assertEqual(eta.progress(started, due, now), share)
+
     def test_spans(self):
         for seconds, text in ((None, "?"), (30, "<1m"), (240, "4m"), (3900, "1h05"),
                               (-720, "-12m"), (-30, "-0m"), (97200, "1d3h")):
@@ -696,6 +702,8 @@ class Sessions(StateTest):
         [session] = self.view()
         self.assertEqual((session["eta_source"], session["turn_label"]), ("turn", "session view"))
         self.assertAlmostEqual(session["remaining"], 1200, delta=5)
+        self.assertAlmostEqual(session["eta_started"], time.time(), delta=5)
+        self.assertLess(session["progress"], 0.01)
         self.register(status="idle", since=time.time() + 1)
         [session] = self.view()
         self.assertEqual((session["due"], session["turn_label"]), (None, None))
@@ -720,6 +728,50 @@ class Sessions(StateTest):
         data = json.loads(self.cli("--json").stdout)
         self.assertEqual([s["tasks"] for s in data["sessions"]], [["ci"]])
         self.assertEqual([t["id"] for t in data["tasks"]], ["ci"])
+
+    def test_json_carries_section_progress_lineage_and_project(self):
+        child = self.sleeper()
+        repo = self.root / "repo"
+        (repo / ".git").mkdir(parents=True)
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        (repo / "src").mkdir()
+        self.register(pid=child.pid, status="waiting", cwd=str(repo / "src"))
+        self.register(status="idle", since=time.time() - eta.DORMANT_AFTER - 60)
+        holder = {"type": "pid", "pid": child.pid, "start": eta.proc_start(child.pid)}
+        self.put("ci", agent="local", eta=600, now=time.time() - 300, holder=holder)
+        data = json.loads(self.cli("--json").stdout)
+        by_state = {s["state"]: s for s in data["sessions"]}
+        waiting, local, idle = by_state["waiting"], by_state["working"], by_state["idle"]
+        self.assertEqual([s["section"] for s in (waiting, local, idle)], [0, 1, eta.DORMANT_SECTION])
+        self.assertEqual(waiting["pids"][:2], [child.pid, os.getpid()])
+        self.assertNotIn(1, waiting["pids"])
+        self.assertEqual((waiting["project_root"], waiting["project_name"]), (str(repo), "repo"))
+        self.assertEqual((waiting["progress"], waiting["eta_started"]), (None, None))
+        self.assertEqual(local["pids"][0], child.pid)
+        self.assertEqual(local["eta_started"], data["tasks"][0]["started"])
+        self.assertAlmostEqual(local["progress"], 0.5, delta=0.02)
+        self.assertAlmostEqual(data["tasks"][0]["progress"], 0.5, delta=0.02)
+
+    def test_project_root_is_the_first_level_below_the_projects_or_the_repository(self):
+        projects = self.root / "projects"
+        (projects / "shop" / "app" / "code").mkdir(parents=True)
+        (self.root / "plain").mkdir()
+        self.assertEqual(eta.project_root(str(projects / "shop" / "app" / "code"), str(projects)),
+                         str(projects / "shop"))
+        self.assertEqual(eta.project_root(str(projects), str(projects)), str(projects))
+        self.assertEqual(eta.project_root(str(self.root / "plain"), str(projects)), str(self.root / "plain"))
+        (self.root / "plain" / ".git").mkdir()
+        (self.root / "plain" / "sub").mkdir()
+        self.assertEqual(eta.project_root(str(self.root / "plain" / "sub"), str(projects)),
+                         str(self.root / "plain" / "sub"))
+        self.assertIsNone(eta.project_root(None))
+
+    def test_project_name_follows_a_phpstorm_rename(self):
+        root = self.root / "shop"
+        (root / ".idea").mkdir(parents=True)
+        self.assertEqual(eta.project_name(str(root)), "shop")
+        (root / ".idea" / ".name").write_text("Shop Live\n")
+        self.assertEqual(eta.project_name(str(root)), "Shop Live")
 
 
 class Usage(StateTest):

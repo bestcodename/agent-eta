@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+      http://www.kde.org/standards/kcfg/1.0/kcfg.xsd" >
+  <kcfgfile name=""/>
+
+  <group name="General">
+    <!-- plasmashell's PATH has no ~/.local/bin, and the command runs through /bin/sh -c. -->
+    <entry name="command" type="String">
+      <default>"$HOME/.local/bin/agent-eta"</default>
+    </entry>
+    <entry name="pollClosed" type="Int">
+      <default>5</default>
+    </entry>
+    <entry name="pollOpen" type="Int">
+      <default>2</default>
+    </entry>
+    <entry name="showUsage" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="notifyWaiting" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="notifyOverdue" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="notifyReset" type="Bool">
+      <default>true</default>
+    </entry>
+  </group>
+</kcfg>
