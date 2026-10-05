@@ -20,10 +20,29 @@ PlasmaComponents3.ItemDelegate {
 
     onClicked: root.act("jump", session, null)
 
+    // The only right-click handler of the row. A handler on each task row as well would fire next to
+    // this one, and whichever came last decided the menu. A session without an id of its own, such as
+    // one made up of `agent-eta add` entries, offers its only task from anywhere on the row.
     TapHandler {
         acceptedButtons: Qt.RightButton
-        onTapped: eventPoint => row.menuRequested(row.session, null, row, eventPoint.position.x,
-                                                   eventPoint.position.y)
+        onTapped: eventPoint => {
+            const x = eventPoint.position.x, y = eventPoint.position.y;
+            let task = row.taskAt(x, y);
+            if (!task && !row.session.id && (row.session.taskItems || []).length === 1) {
+                task = row.session.taskItems[0];
+            }
+            row.menuRequested(row.session, task, row, x, y);
+        }
+    }
+
+    function taskAt(x, y) {
+        for (let i = 0; i < tasks.count; i++) {
+            const item = tasks.itemAt(i);
+            if (item && item.contains(row.mapToItem(item, x, y))) {
+                return item.task;
+            }
+        }
+        return null;
     }
 
     contentItem: RowLayout {
@@ -75,6 +94,7 @@ PlasmaComponents3.ItemDelegate {
             }
 
             Repeater {
+                id: tasks
                 model: row.session.taskItems
 
                 delegate: TaskRow {
@@ -82,7 +102,6 @@ PlasmaComponents3.ItemDelegate {
                     Layout.fillWidth: true
                     task: modelData
                     now: row.now
-                    onMenuRequested: (item, x, y) => row.menuRequested(row.session, modelData, item, x, y)
                 }
             }
         }

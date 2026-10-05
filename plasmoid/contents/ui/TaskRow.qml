@@ -6,21 +6,15 @@ import org.kde.kirigami as Kirigami
 
 import "../code/logic.mjs" as Logic
 
-// A background task under its session, with its own bar. A right click asks for the menu, where a
-// wait recorded with `agent-eta add` can be marked done.
+// A background task under its session, with its own bar. SessionRow.qml handles the right click on
+// it, so the menu can offer to mark a wait recorded with `agent-eta add` done.
 ColumnLayout {
     id: taskRow
 
     property var task
     property real now
-    signal menuRequested(Item item, real x, real y)
 
     spacing: 0
-
-    TapHandler {
-        acceptedButtons: Qt.RightButton
-        onTapped: eventPoint => taskRow.menuRequested(taskRow, eventPoint.position.x, eventPoint.position.y)
-    }
 
     RowLayout {
         Layout.fillWidth: true
