@@ -782,6 +782,17 @@ class Usage(StateTest):
         self.assertEqual(five["seen_at"], eta.parse_stamp("2026-10-04T01:45:00.000Z"))
         self.assertEqual((seven["minutes"], seven["used"], five["ahead"]), (10080, 90.0, False))
 
+    def test_newer_rollouts_without_readings_do_not_hide_the_last_one(self):
+        now = 1_000_000
+        codex = {"limit_id": "codex", "primary": {"used_percent": 10.0, "window_minutes": 300, "resets_at": now + 600},
+                 "secondary": {"used_percent": 100.0, "window_minutes": 10080, "resets_at": now + 86400}}
+        old = self.rollout("real", ("2026-10-04T03:54:00.000Z", codex))
+        os.utime(old, (now - 3600, now - 3600))
+        for index in range(eta.USAGE_ROLLOUTS + 3):
+            self.rollout("batch%d" % index, ("2026-10-04T13:19:00.000Z", None))
+        windows = [w for w in eta.usage_view(now) if w["agent"] == "codex"]
+        self.assertEqual([(w["minutes"], w["used"]) for w in windows], [(300, 10.0), (10080, 100.0)])
+
     def test_a_window_past_its_reset_is_unknown(self):
         now = 1_000_000
         (self.claude / "usage-state.json").write_text(json.dumps({"windows_seen_at": now - 7200, "windows": {

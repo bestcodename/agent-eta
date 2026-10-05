@@ -104,8 +104,11 @@ CODEX_QUESTION_TOOLS = ("request_user_input",)
 ROLLOUT_TAIL = 256 * 1024
 # How long each Claude Code usage window lasts in minutes, by its name in usage-state.json.
 CLAUDE_WINDOWS = {"five_hour": 300, "seven_day": 10080}
-# How many of the most recently written Codex rollouts are searched for the latest usage reading.
+# How many of the most recently written Codex rollouts with a usage reading are searched for the
+# latest one, and how many rollouts are opened at most to find them. Codex writes batches of
+# short threads whose readings are all null, and those must not hide the last real one.
 USAGE_ROLLOUTS = 5
+USAGE_ROLLOUTS_MAX = 50
 # How a Codex turn that ended with an error reads in the list, by its codex_error_info.
 CODEX_ERRORS = {"usage_limit_exceeded": "usage limit"}
 # Claude Code keeps a session's title in its transcript and rewrites it now and then. Only the
@@ -904,11 +907,14 @@ def claude_usage():
 
 def codex_usage():
     """The Codex usage windows of the latest `token_count` reading that carries windows, from
-    the most recently written rollout transcripts."""
+    the most recently written rollout transcripts that hold such a reading."""
     pattern = os.path.join(codex_home(), "sessions", "*", "*", "*", "rollout-*.jsonl")
-    paths = sorted(glob.glob(pattern), key=modified, reverse=True)[:USAGE_ROLLOUTS]
-    seen_at, limits = 0, None
+    paths = sorted(glob.glob(pattern), key=modified, reverse=True)[:USAGE_ROLLOUTS_MAX]
+    seen_at, limits, found = 0, None, 0
     for path in paths:
+        if found >= USAGE_ROLLOUTS:
+            break
+        held = False
         for record in tail_records(path) or []:
             payload = record["payload"]
             reading = payload.get("rate_limits") if payload.get("type") == "token_count" else None
@@ -919,6 +925,8 @@ def codex_usage():
             stamp = parse_stamp(record.get("timestamp")) or 0
             if stamp >= seen_at:
                 seen_at, limits = stamp, reading
+            held = True
+        found += held
     if not limits:
         return []
     return [usage_window("codex", window["window_minutes"], window["used_percent"], window.get("resets_at"),
