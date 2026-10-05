@@ -74,10 +74,10 @@ export function formatIn(seconds) {
     return hours ? `${hours}h ${totalMinutes % 60}m` : `${totalMinutes}m`;
 }
 
-// A reset as `24:00 (in 12h 13m)`, or the clock time alone once it has passed.
+// A reset as `in 12h 13m (24:00)`, or the clock time alone once it has passed.
 export function resetText(epoch, now) {
     const left = epoch ? formatIn(epoch - now) : "";
-    return left ? `${formatClock(epoch, now)} (in ${left})` : formatClock(epoch, now);
+    return left ? `in ${left} (${formatClock(epoch, now)})` : formatClock(epoch, now);
 }
 
 // A usage window length as `5h` or `7d`.

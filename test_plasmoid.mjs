@@ -74,8 +74,8 @@ test("countdowns read like `12h 13m` and follow the clock time of a reset", () =
         assert.equal(logic.formatIn(seconds), text);
     }
     const reset = Date.UTC(2026, 9, 5, 22, 0) / 1000;
-    assert.equal(logic.resetText(reset, reset - 44_000), "00:00 (in 12h 13m)");
-    assert.equal(logic.resetText(reset, reset - 3 * 86400), "06.10. 00:00 (in 3d 0h)");
+    assert.equal(logic.resetText(reset, reset - 44_000), "in 12h 13m (00:00)");
+    assert.equal(logic.resetText(reset, reset - 3 * 86400), "in 3d 0h (06.10. 00:00)");
     assert.equal(logic.resetText(reset, reset + 60), "00:00");
     assert.equal(logic.resetText(null, NOW), "-");
 });
