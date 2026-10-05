@@ -58,7 +58,43 @@ test("rows say what is left, what ran over and where the session stands", () => 
                             waiting_for: "turn failed (TIMEOUT)"});
     assert.equal(logic.detailLine(failed, NOW), "dsh · qwen3-coder · shop · waiting (turn failed (TIMEOUT)) for 2m");
     assert.equal(logic.title(session({turn_label: "tests"})), "shop · tests");
-    assert.equal(logic.stateIcon(session({state: "working", overdue: true})), "dialog-warning");
+});
+
+test("each state gets a traffic-light colour and an overdue working session turns yellow", () => {
+    for (const [state, light] of [["waiting", "red"], ["idle", "yellow"], ["working", "green"], ["stopped", "grey"],
+                                  ["-", "grey"]]) {
+        assert.equal(logic.stateLight(session({state})), light);
+    }
+    assert.equal(logic.stateLight(session({state: "working", overdue: true})), "yellow");
+});
+
+test("countdowns read like `12h 13m` and follow the clock time of a reset", () => {
+    for (const [seconds, text] of [[null, ""], [-5, ""], [0, "<1m"], [59, "<1m"], [2940, "49m"], [3600, "1h 0m"],
+                                   [44_000, "12h 13m"], [183_600, "2d 3h"]]) {
+        assert.equal(logic.formatIn(seconds), text);
+    }
+    const reset = Date.UTC(2026, 9, 5, 22, 0) / 1000;
+    assert.equal(logic.resetText(reset, reset - 44_000), "00:00 (in 12h 13m)");
+    assert.equal(logic.resetText(reset, reset - 3 * 86400), "06.10. 00:00 (in 3d 0h)");
+    assert.equal(logic.resetText(reset, reset + 60), "00:00");
+    assert.equal(logic.resetText(null, NOW), "-");
+});
+
+test("the tray orb is a traffic light over the sessions that are not dormant", () => {
+    const orb = sessions => {
+        const summary = logic.summary(listing(sessions));
+        return [summary.light, summary.orbCount, summary.status];
+    };
+    assert.deepEqual(orb([]), ["none", 0, "passive"]);
+    assert.deepEqual(orb([session({state: "idle", dormant: true, section: 3})]), ["none", 0, "passive"]);
+    assert.deepEqual(orb([session({state: "working"})]), ["green", 0, "active"]);
+    assert.deepEqual(orb([session({state: "stopped"})]), ["green", 0, "active"]);
+    assert.deepEqual(orb([session({state: "working", pid: 1}), session({state: "idle", pid: 2})]),
+                     ["yellow", 1, "active"]);
+    assert.deepEqual(orb([session({state: "working", overdue: true, pid: 1}), session({state: "idle", pid: 2})]),
+                     ["yellow", 2, "active"]);
+    assert.deepEqual(orb([session({state: "waiting", pid: 1}), session({state: "idle", pid: 2}),
+                          session({state: "waiting", pid: 3})]), ["red", 2, "attention"]);
 });
 
 test("the summary counts what needs you and picks the soonest working ETA", () => {
@@ -75,6 +111,7 @@ test("the summary counts what needs you and picks the soonest working ETA", () =
     assert.equal(summary.status, "attention");
     assert.equal(summary.next.pid, 3);
     assert.equal(summary.headline, "1 waiting · 1 overdue · 3 working");
+    assert.equal(summary.light, "red");
     assert.equal(logic.summary(listing([session({state: "idle"})])).status, "active");
     assert.equal(logic.summary(null).status, "passive");
     assert.equal(logic.summary(null).headline, "No active agent sessions");

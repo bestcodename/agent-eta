@@ -19,8 +19,9 @@
     <entry name="showUsage" type="Bool">
       <default>true</default>
     </entry>
+    <!-- Off, because the red pulsing orb of the tray icon already shows a waiting session. -->
     <entry name="notifyWaiting" type="Bool">
-      <default>true</default>
+      <default>false</default>
     </entry>
     <entry name="notifyOverdue" type="Bool">
       <default>true</default>

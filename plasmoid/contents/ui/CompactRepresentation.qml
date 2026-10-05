@@ -1,12 +1,12 @@
 import QtQuick
 
 import org.kde.plasma.plasmoid
-import org.kde.plasma.components as PlasmaComponents3
 import org.kde.kirigami as Kirigami
 
-// The tray icon. A badge counts the sessions that need you now, red once one of them ran over, and
-// a bar along the bottom fills with the working session whose ETA comes soonest. The root is a
-// MouseArea, because the system tray forwards its clicks to the first one it finds.
+// The tray icon. An orb in traffic-light colours tells whether a session waits for you, red with
+// their number, whether one is idle or ran over, yellow with their number, or whether all of them
+// work, green. A bar along the bottom fills with the working session whose ETA comes soonest. The
+// root is a MouseArea, because the system tray forwards its clicks to the first one it finds.
 MouseArea {
     id: compact
 
@@ -37,25 +37,13 @@ MouseArea {
         active: compact.containsMouse
     }
 
-    Rectangle {
-        id: badge
-        visible: root.summary.attention > 0
+    StateDot {
+        visible: root.summary.light !== "none"
         anchors.right: parent.right
         anchors.top: parent.top
-        width: Math.max(height, count.implicitWidth + 4)
         height: Math.max(Kirigami.Units.gridUnit * 0.6, Math.round(icon.height * 0.5))
-        radius: height / 2
-        color: root.summary.overdue > 0 ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.neutralTextColor
-
-        PlasmaComponents3.Label {
-            id: count
-            anchors.centerIn: parent
-            text: root.summary.attention
-            color: "white"
-            font.bold: true
-            font.pixelSize: Math.max(8, Math.round(badge.height * 0.75))
-            textFormat: Text.PlainText
-        }
+        light: root.summary.light
+        count: root.summary.orbCount
     }
 
     Item {

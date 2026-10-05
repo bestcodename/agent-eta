@@ -7,11 +7,14 @@
 export const SECTION_TITLES = ["Needs you", "Working", "Stopped until a limit resets", "Dormant"];
 export const DORMANT_SECTION = 3;
 
-const STATE_ICONS = {
-    waiting: "dialog-question",
-    idle: "media-playback-pause",
-    working: "media-playback-start",
-    stopped: "media-playback-stop",
+// The traffic-light colour of a session state. A coloured dot rather than a media icon, because a
+// play or pause symbol reads as a button that starts or stops the session. StateDot.qml maps the
+// names to theme colours.
+const STATE_LIGHTS = {
+    waiting: "red",
+    idle: "yellow",
+    working: "green",
+    stopped: "grey",
 };
 
 function pad(number) {
@@ -54,6 +57,29 @@ export function formatClock(epoch, now) {
     return time;
 }
 
+// A span ahead as `<1m`, `49m`, `12h 13m` or `2d 3h`, for the countdown behind a clock time. A span
+// that is unknown or already over gives "".
+export function formatIn(seconds) {
+    if (seconds === null || seconds === undefined || seconds < 0) {
+        return "";
+    }
+    const totalMinutes = Math.floor(seconds / 60);
+    if (totalMinutes < 1) {
+        return "<1m";
+    }
+    const hours = Math.floor(totalMinutes / 60);
+    if (hours >= 24) {
+        return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+    }
+    return hours ? `${hours}h ${totalMinutes % 60}m` : `${totalMinutes}m`;
+}
+
+// A reset as `24:00 (in 12h 13m)`, or the clock time alone once it has passed.
+export function resetText(epoch, now) {
+    const left = epoch ? formatIn(epoch - now) : "";
+    return left ? `${formatClock(epoch, now)} (in ${left})` : formatClock(epoch, now);
+}
+
 // A usage window length as `5h` or `7d`.
 export function formatWindow(minutes) {
     if (minutes % 1440 === 0) {
@@ -85,11 +111,12 @@ export function agentLabel(session) {
     return session.account ? `${session.agent}/${session.account}` : session.agent || "-";
 }
 
-export function stateIcon(session) {
+// A working session past its ETA turns yellow, like the tray orb counts it.
+export function stateLight(session) {
     if (session.overdue && session.state === "working") {
-        return "dialog-warning";
+        return "yellow";
     }
-    return STATE_ICONS[session.state] || "dialog-information";
+    return STATE_LIGHTS[session.state] || "grey";
 }
 
 export function title(session) {
@@ -143,8 +170,13 @@ function tasksById(listing) {
     return found;
 }
 
-// Counts, the tray state and the session whose progress the tray icon shows. The badge counts the
+// Counts, the tray state and the session whose progress the tray icon shows. `attention` counts the
 // sessions that need you now, which are the waiting ones and the working ones that ran over.
+//
+// `light` is the tray orb, a traffic light over the sessions that are not dormant. Red with the
+// number of waiting sessions as soon as one waits, yellow with the number of idle and overdue ones,
+// green without a number while everything else works or waits for a limit, and "none" without any
+// such session. Only red marks the widget as needing attention, which makes the tray pulse.
 export function summary(listing) {
     const byId = tasksById(listing);
     const live = sessionsOf(listing).filter(session => !session.dormant);
@@ -164,7 +196,17 @@ export function summary(listing) {
         attention: waiting + overdue,
         next: timed.length ? timed[0] : null,
     };
-    result.status = result.attention ? "attention" : live.length ? "active" : "passive";
+    if (waiting) {
+        result.light = "red";
+        result.orbCount = waiting;
+    } else if (result.idle || overdue) {
+        result.light = "yellow";
+        result.orbCount = result.idle + overdue;
+    } else {
+        result.light = live.length ? "green" : "none";
+        result.orbCount = 0;
+    }
+    result.status = result.light === "red" ? "attention" : live.length ? "active" : "passive";
     const parts = [];
     for (const name of ["waiting", "overdue", "working", "idle", "stopped"]) {
         if (result[name]) {

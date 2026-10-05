@@ -8,7 +8,8 @@ import "../code/logic.mjs" as Logic
 
 // One agent's usage windows. Each bar fills with the used share, and its tick marks the share of
 // the window that has passed, so a fill past the tick runs out before the reset. Red means the
-// limit is reached, orange that the usage runs ahead of the time.
+// limit is reached, orange that the usage runs ahead of the time. Every reset carries its
+// countdown, as in `resets 18:30 (in 49m)`.
 ColumnLayout {
     id: usageRow
 
@@ -28,7 +29,7 @@ ColumnLayout {
         }
         PlasmaComponents3.Label {
             text: usageRow.group.reached
-                ? i18n("blocked until %1", Logic.formatClock(usageRow.group.resetBy.resets_at, usageRow.now))
+                ? i18n("blocked until %1", Logic.resetText(usageRow.group.resetBy.resets_at, usageRow.now))
                 : Logic.percent(usageRow.group.used)
             color: usageRow.group.reached ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
             textFormat: Text.PlainText
@@ -57,12 +58,12 @@ ColumnLayout {
                     : modelData.ahead ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.positiveTextColor
             }
             PlasmaComponents3.Label {
-                Layout.minimumWidth: Kirigami.Units.gridUnit * 8
+                Layout.minimumWidth: Kirigami.Units.gridUnit * 12
                 horizontalAlignment: Text.AlignRight
                 text: modelData.remaining === null || modelData.remaining === undefined
                     ? i18n("%1 · no reading", Logic.percent(modelData.used))
                     : i18n("%1 · resets %2", Logic.percent(modelData.used),
-                           Logic.formatClock(modelData.resets_at, usageRow.now))
+                           Logic.resetText(modelData.resets_at, usageRow.now))
                 font: Kirigami.Theme.smallFont
                 textFormat: Text.PlainText
             }

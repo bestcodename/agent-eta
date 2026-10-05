@@ -48,11 +48,18 @@ PlasmaComponents3.ItemDelegate {
     contentItem: RowLayout {
         spacing: Kirigami.Units.smallSpacing * 2
 
-        Kirigami.Icon {
+        // The dot sits in a box of icon size, so the titles line up as they did with icons.
+        Item {
             Layout.alignment: Qt.AlignTop
             Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
             Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-            source: Logic.stateIcon(row.session)
+            Accessible.name: row.session.state
+
+            StateDot {
+                anchors.centerIn: parent
+                height: Math.round(parent.height * 0.6)
+                light: Logic.stateLight(row.session)
+            }
         }
 
         ColumnLayout {
