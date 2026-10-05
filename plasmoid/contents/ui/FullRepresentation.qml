@@ -172,6 +172,7 @@ PlasmaExtras.Representation {
 
         PlasmaExtras.MenuItem {
             text: actions.session && actions.session.agent === "codex" ? i18n("Open thread in Codex")
+                : actions.session && actions.session.agent === "dsh" ? i18n("Open dsh web UI")
                 : i18n("Jump to window")
             icon: "window"
             enabled: actions.jumpable

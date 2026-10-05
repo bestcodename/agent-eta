@@ -12,7 +12,7 @@
         "Icon": "chronometer",
         "Id": "com.github.bestcodename.agenteta",
         "Name": "Agent ETA",
-        "Version": "0.67.0"
+        "Version": "0.68.0"
     },
     "X-Plasma-API-Minimum-Version": "6.0",
     "X-Plasma-NotificationArea": "true",

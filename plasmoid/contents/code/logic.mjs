@@ -107,6 +107,9 @@ export function etaText(item) {
 // The second line of a session row.
 export function detailLine(session, now) {
     const parts = [agentLabel(session)];
+    if (session.model) {
+        parts.push(session.model);
+    }
     if (session.project_name) {
         parts.push(session.project_name);
     }

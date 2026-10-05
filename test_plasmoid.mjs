@@ -54,6 +54,9 @@ test("rows say what is left, what ran over and where the session stands", () => 
     assert.equal(logic.etaText({state: "idle", due: null}), "");
     const waiting = session({state: "waiting", waiting_for: "permission", account: "ndcnet"});
     assert.equal(logic.detailLine(waiting, NOW), "claude/ndcnet · shop · waiting (permission) for 2m");
+    const failed = session({agent: "dsh", account: null, model: "qwen3-coder", state: "waiting",
+                            waiting_for: "turn failed (TIMEOUT)"});
+    assert.equal(logic.detailLine(failed, NOW), "dsh · qwen3-coder · shop · waiting (turn failed (TIMEOUT)) for 2m");
     assert.equal(logic.title(session({turn_label: "tests"})), "shop · tests");
     assert.equal(logic.stateIcon(session({state: "working", overdue: true})), "dialog-warning");
 });
@@ -129,6 +132,7 @@ test("copy gives a resume command for Claude Code and a thread link for Codex", 
     assert.equal(logic.resumeCommand(session({id: "abc", cwd: null})), "claude --resume 'abc'");
     assert.equal(logic.resumeCommand(session({agent: "codex", id: "t-1"})), "codex://threads/t-1");
     assert.equal(logic.resumeCommand(session({agent: "local", id: null})), "");
+    assert.equal(logic.resumeCommand(session({agent: "dsh", id: "session-1"})), "");
 });
 
 test("the tooltip escapes names and cuts off after the limit", () => {

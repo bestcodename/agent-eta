@@ -31,7 +31,7 @@ _spec.loader.exec_module(eta)
 
 AGENT_VARS = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SANDBOX",
               "CODEX_SANDBOX_NETWORK_DISABLED", "AGENT_ETA_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
-              "CLAUDE_ACCOUNTS_FILE")
+              "CLAUDE_ACCOUNTS_FILE", "DSH_HOME", "DSH_SESSION_ID")
 
 
 class Durations(unittest.TestCase):
@@ -92,16 +92,19 @@ class StateTest(unittest.TestCase):
         (self.claude / "sessions").mkdir(parents=True)
         self.codex = self.root / "codex"
         self.codex.mkdir()
+        # Its own dsh home, so a dsh process running on this machine never shows in a test.
+        self.dsh = self.root / "dsh"
+        (self.dsh / "sessions").mkdir(parents=True)
         self.env = {k: v for k, v in os.environ.items() if k not in AGENT_VARS}
         self.accounts = self.root / "accounts.json"
         self.env.update(AGENT_ETA_DIR=self.dir, CLAUDE_CONFIG_DIR=str(self.claude),
                         CODEX_HOME=str(self.codex), CLAUDE_ACCOUNTS_FILE=str(self.accounts),
-                        PYTHONDONTWRITEBYTECODE="1")
+                        DSH_HOME=str(self.dsh), PYTHONDONTWRITEBYTECODE="1")
         self.saved = {k: os.environ.get(k) for k in AGENT_VARS}
         for key in AGENT_VARS:
             os.environ.pop(key, None)
         os.environ.update(AGENT_ETA_DIR=self.dir, CLAUDE_CONFIG_DIR=str(self.claude), CODEX_HOME=str(self.codex),
-                          CLAUDE_ACCOUNTS_FILE=str(self.accounts))
+                          CLAUDE_ACCOUNTS_FILE=str(self.accounts), DSH_HOME=str(self.dsh))
         self.addCleanup(self.restore)
         eta.state_dir()
 
