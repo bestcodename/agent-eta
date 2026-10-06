@@ -258,8 +258,8 @@ function compareAgents(a, b) {
 }
 
 // The usage windows per agent, as agent-eta's usage table orders them. Agents with room left come
-// first and those with a reached limit last, each part by the reset of the 7-day window and then
-// by that of the 5-hour window, the soonest first.
+// first, by the reset of the 7-day window and then by that of the 5-hour window, and those with a
+// reached limit last, by the reset that ends their block, the soonest first in both.
 export function usageGroups(usage) {
     const byAgent = new Map();
     for (const window of usage || []) {
@@ -285,7 +285,9 @@ export function usageGroups(usage) {
             resetBy,
         });
     }
-    groups.sort((a, b) => (a.reached - b.reached) || compareAgents(a, b));
+    groups.sort((a, b) => (a.reached - b.reached)
+        || (a.reached ? untilReset(a.resetBy) - untilReset(b.resetBy) : 0)
+        || compareAgents(a, b));
     return groups;
 }
 

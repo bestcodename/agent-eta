@@ -869,7 +869,7 @@ class Usage(StateTest):
         self.assertEqual([(agent, summary["minutes"]) for agent, summary, _ in blocked], [("soon", 10080), ("late", 300)])
         self.assertEqual([w["minutes"] for w in blocked[0][2]], [300, 10080])
 
-    def test_sections_sort_by_the_7_day_reset_before_the_5_hour_reset(self):
+    def test_open_section_sorts_by_the_7_day_reset_before_the_5_hour_reset(self):
         def window(agent, minutes, used, remaining):
             return {"agent": agent, "minutes": minutes, "used": used, "remaining": remaining,
                     "reached": used >= 100, "seen_at": None}
@@ -877,11 +877,22 @@ class Usage(StateTest):
                    window("tie-late", 300, 10, 800), window("tie-late", 10080, 10, 5000),
                    window("tie-soon", 300, 10, 700), window("tie-soon", 10080, 10, 5000),
                    window("no-week", 300, 10, 50),
-                   window("blocked-late", 300, 100, 100), window("blocked-late", 10080, 50, 8000),
-                   window("blocked-soon", 300, 100, 3000), window("blocked-soon", 10080, 50, 4000)]
+                   window("unblocks-late", 300, 100, 3000), window("unblocks-late", 10080, 50, 4000),
+                   window("unblocks-soon", 300, 100, 100), window("unblocks-soon", 10080, 50, 8000)]
         open_, blocked = eta.usage_sections(windows)
         self.assertEqual([agent for agent, _, _ in open_], ["tie-soon", "tie-late", "week-late", "no-week"])
-        self.assertEqual([agent for agent, _, _ in blocked], ["blocked-soon", "blocked-late"])
+        self.assertEqual([agent for agent, _, _ in blocked], ["unblocks-soon", "unblocks-late"])
+
+    def test_blocked_section_sorts_by_the_end_of_the_block(self):
+        def window(agent, minutes, used, remaining):
+            return {"agent": agent, "minutes": minutes, "used": used, "remaining": remaining,
+                    "reached": used >= 100, "seen_at": None}
+        windows = [window("week-blocked", 300, 100, 100), window("week-blocked", 10080, 100, 9000),
+                   window("hour-blocked", 300, 100, 2000), window("hour-blocked", 10080, 50, 3000),
+                   window("tie-late", 300, 100, 500), window("tie-late", 10080, 50, 7000),
+                   window("tie-soon", 300, 100, 500), window("tie-soon", 10080, 50, 6000)]
+        _, blocked = eta.usage_sections(windows)
+        self.assertEqual([agent for agent, _, _ in blocked], ["tie-soon", "tie-late", "hour-blocked", "week-blocked"])
 
     def test_json_carries_the_usage(self):
         (self.claude / "usage-state.json").write_text(json.dumps({"windows": {

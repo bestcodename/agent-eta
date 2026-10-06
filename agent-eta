@@ -1235,11 +1235,12 @@ def usage_view(now):
 
 
 def usage_sections(windows):
-    """The agents whose usage limits all have room left and the agents with a reached limit, each
-    ordered by the reset of the 7-day window and then by that of the 5-hour window, the soonest
-    first, with their windows ordered by reset as well. Each entry is (agent, summary, windows).
-    The summary of an open agent is its window that resets first, and that of a blocked one the
-    reached window that resets last, since that reset ends the block."""
+    """The agents whose usage limits all have room left and the agents with a reached limit, with
+    their windows ordered by reset. Each entry is (agent, summary, windows). The summary of an open
+    agent is its window that resets first, and that of a blocked one the reached window that resets
+    last, since that reset ends the block. Open agents are ordered by the reset of the 7-day window
+    and then by that of the 5-hour window, blocked ones by the end of their block, the soonest
+    first in both."""
     def until_reset(window):
         return (window is None or window["remaining"] is None, (window or {}).get("remaining") or 0)
 
@@ -1257,8 +1258,8 @@ def usage_sections(windows):
             blocked.append((agent, max(reached, key=lambda window: window["remaining"]), group))
         else:
             open_.append((agent, group[0], group))
-    for entries in (open_, blocked):
-        entries.sort(key=agent_order)
+    open_.sort(key=agent_order)
+    blocked.sort(key=lambda entry: (until_reset(entry[1]), agent_order(entry)))
     return open_, blocked
 
 

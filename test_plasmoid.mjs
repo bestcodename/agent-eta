@@ -145,7 +145,7 @@ test("usage groups put reached limits last and order windows by reset", () => {
     assert.equal(groups[0].ahead, true);
 });
 
-test("usage groups sort by the 7-day reset before the 5-hour reset", () => {
+test("usage groups sort open agents by the 7-day reset and blocked ones by the end of the block", () => {
     const groups = logic.usageGroups([
         {agent: "week-late", minutes: 300, used: 10, remaining: 100, reached: false},
         {agent: "week-late", minutes: 10080, used: 10, remaining: 9000, reached: false},
@@ -154,13 +154,15 @@ test("usage groups sort by the 7-day reset before the 5-hour reset", () => {
         {agent: "tie-soon", minutes: 300, used: 10, remaining: 700, reached: false},
         {agent: "tie-soon", minutes: 10080, used: 10, remaining: 5000, reached: false},
         {agent: "no-week", minutes: 300, used: 10, remaining: 50, reached: false},
-        {agent: "blocked-late", minutes: 300, used: 100, remaining: 100, reached: true},
-        {agent: "blocked-late", minutes: 10080, used: 50, remaining: 8000, reached: false},
-        {agent: "blocked-soon", minutes: 300, used: 100, remaining: 3000, reached: true},
-        {agent: "blocked-soon", minutes: 10080, used: 50, remaining: 4000, reached: false},
+        {agent: "week-blocked", minutes: 300, used: 100, remaining: 100, reached: true},
+        {agent: "week-blocked", minutes: 10080, used: 100, remaining: 9000, reached: true},
+        {agent: "unblocks-late", minutes: 300, used: 100, remaining: 3000, reached: true},
+        {agent: "unblocks-late", minutes: 10080, used: 50, remaining: 4000, reached: false},
+        {agent: "unblocks-soon", minutes: 300, used: 100, remaining: 100, reached: true},
+        {agent: "unblocks-soon", minutes: 10080, used: 50, remaining: 8000, reached: false},
     ]);
     assert.deepEqual(groups.map(g => g.agent),
-        ["tie-soon", "tie-late", "week-late", "no-week", "blocked-soon", "blocked-late"]);
+        ["tie-soon", "tie-late", "week-late", "no-week", "unblocks-soon", "unblocks-late", "week-blocked"]);
 });
 
 test("an agent's usage line names its highest share and its soonest reset", () => {
