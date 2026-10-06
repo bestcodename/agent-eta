@@ -3,7 +3,8 @@ import QtQuick
 import org.kde.kirigami as Kirigami
 
 // A thin bar. `value` fills it from 0 to 1, and `marker`, when 0 or more, draws a tick there, which
-// the usage rows use for the share of the window that has passed. `bands`, from usageBands() in
+// the usage rows use for the share of the window that has passed. `ticks`, shares from 0 to 1, draws
+// thinner and fainter ticks there, which the usage rows set at every hour or day. `bands`, from usageBands() in
 // logic.mjs, colours the fill in traffic-light bands instead of the one `color`. They are painted as
 // separate rectangles inside the rounded fill rather than as one gradient with a pair of stops at
 // each edge, because QGradient replaces a stop that lands on the position of another one.
@@ -14,6 +15,7 @@ Item {
     property real marker: -1
     property color color: Kirigami.Theme.highlightColor
     property var bands: []
+    property var ticks: []
 
     implicitHeight: Math.max(3, Math.round(Kirigami.Units.smallSpacing * 1.5))
 
@@ -72,6 +74,18 @@ Item {
                 // would each cover it only partly and let the track show through as a thin gap.
                 ctx.fillRect(x(band.from), 0, fill - x(band.from), height);
             }
+        }
+    }
+    Repeater {
+        model: line.ticks
+
+        delegate: Rectangle {
+            required property real modelData
+            x: Math.round(line.width * modelData)
+            width: 1
+            height: line.height
+            color: Kirigami.Theme.textColor
+            opacity: 0.35
         }
     }
     Rectangle {

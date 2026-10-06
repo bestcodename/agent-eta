@@ -7,7 +7,8 @@ import org.kde.kirigami as Kirigami
 import "../code/logic.mjs" as Logic
 
 // One agent's usage windows. Each bar fills with the used share, and its tick marks the share of
-// the window that has passed, so a fill past the tick runs out before the reset. The fill comes in
+// the window that has passed, so a fill past the tick runs out before the reset. Fainter ticks from
+// windowTicks() mark every hour of the 5-hour window and every day of the 7-day one. The fill comes in
 // traffic-light bands from usageBands() in logic.mjs, green below the tick, yellow around it and
 // red where the usage runs far ahead of the time, `yellow` sets the half-width
 // of the yellow band and `fade` blends it. Every reset
@@ -58,6 +59,7 @@ ColumnLayout {
                 value: (modelData.used || 0) / 100
                 marker: modelData.elapsed === null || modelData.elapsed === undefined ? -1 : modelData.elapsed / 100
                 bands: Logic.usageBands(modelData, usageRow.fade, usageRow.yellow)
+                ticks: Logic.windowTicks(modelData.minutes)
             }
             PlasmaComponents3.Label {
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 12

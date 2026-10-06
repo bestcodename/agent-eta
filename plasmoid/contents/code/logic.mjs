@@ -96,6 +96,21 @@ export function formatWindow(minutes) {
     return `${minutes}m`;
 }
 
+// The faint ticks of a usage bar as shares from 0 to 1, one at every full day of a window of several
+// days and one at every full hour of a shorter one, counted from the window's start like the elapsed
+// tick, so that tick lands on one of them each hour or day. A window of no whole hours gets none.
+export function windowTicks(minutes) {
+    if (!Number.isInteger(minutes) || minutes <= 0) {
+        return [];
+    }
+    const unit = minutes > 1440 && minutes % 1440 === 0 ? 1440 : minutes % 60 === 0 ? 60 : 0;
+    if (!unit) {
+        return [];
+    }
+    const count = minutes / unit;
+    return Array.from({length: count - 1}, (_, index) => (index + 1) / count);
+}
+
 export function percent(value) {
     return value === null || value === undefined ? "?" : `${Math.round(value)}%`;
 }

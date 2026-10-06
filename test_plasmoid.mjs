@@ -41,6 +41,16 @@ test("due times carry the date only when a day or more away", () => {
     assert.equal(logic.formatWindow(10080), "7d");
 });
 
+test("usage bars get a faint tick at every hour or day of the window", () => {
+    assert.deepEqual(logic.windowTicks(300), [0.2, 0.4, 0.6, 0.8]);
+    assert.deepEqual(logic.windowTicks(10080), [1, 2, 3, 4, 5, 6].map(day => day / 7));
+    assert.equal(logic.windowTicks(1440).length, 23);
+    assert.deepEqual(logic.windowTicks(60), []);
+    for (const minutes of [90, 0, -300, null, undefined, 2.5]) {
+        assert.deepEqual(logic.windowTicks(minutes), [], String(minutes));
+    }
+});
+
 test("keys follow agent-eta's session_key", () => {
     assert.equal(logic.sessionKey(session({})), "claude:100");
     assert.equal(logic.sessionKey(session({agent: "codex", pid: null, id: "t-1"})), "codex:t-1");
