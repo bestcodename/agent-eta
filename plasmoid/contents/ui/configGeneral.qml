@@ -9,6 +9,8 @@ KCM.SimpleKCM {
     property alias cfg_pollClosed: pollClosed.value
     property alias cfg_pollOpen: pollOpen.value
     property alias cfg_showUsage: showUsage.checked
+    property alias cfg_blendYellow: blendYellow.checked
+    property alias cfg_blendWidth: blendWidth.value
     property alias cfg_notifyWaiting: notifyWaiting.checked
     property alias cfg_notifyOverdue: notifyOverdue.checked
     property alias cfg_notifyReset: notifyReset.checked
@@ -17,6 +19,8 @@ KCM.SimpleKCM {
     property int cfg_pollClosedDefault
     property int cfg_pollOpenDefault
     property bool cfg_showUsageDefault
+    property bool cfg_blendYellowDefault
+    property int cfg_blendWidthDefault
     property bool cfg_notifyWaitingDefault
     property bool cfg_notifyOverdueDefault
     property bool cfg_notifyResetDefault
@@ -42,6 +46,19 @@ KCM.SimpleKCM {
             id: showUsage
             Kirigami.FormData.label: i18nc("@title:group", "Show:")
             text: i18nc("@option:check", "Usage windows")
+        }
+        QQC2.CheckBox {
+            id: blendYellow
+            enabled: showUsage.checked
+            text: i18nc("@option:check", "Blend the yellow band of a usage bar")
+        }
+        QQC2.SpinBox {
+            id: blendWidth
+            Kirigami.FormData.label: i18nc("@label:spinbox", "Fade width (% of each half of the yellow band):")
+            enabled: showUsage.checked && blendYellow.checked
+            from: 10
+            to: 100
+            stepSize: 10
         }
         QQC2.CheckBox {
             id: notifyWaiting

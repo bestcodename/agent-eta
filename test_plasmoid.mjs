@@ -179,6 +179,46 @@ test("an agent's usage line names its highest share and its soonest reset", () =
     assert.equal(logic.usageHeadline(stale, NOW), "?");
 });
 
+function bands(window, fade) {
+    return logic.usageBands(Object.assign({reached: false}, window), fade)
+        .map(each => [Math.round(each.from * 100) / 100, Math.round(each.to * 100) / 100, each.light]);
+}
+
+test("a usage bar is green up to the tick, yellow around it and red over the last two thirds past it", () => {
+    assert.deepEqual(bands({used: 30, elapsed: 50}), [[0, 30, "green"]]);
+    assert.deepEqual(bands({used: 50, elapsed: 50}), [[0, 50, "green"]]);
+    assert.deepEqual(bands({used: 80, elapsed: 50}), [[0, 40, "green"], [40, 60, "yellow"], [60, 80, "red"]]);
+    assert.deepEqual(bands({used: 80, elapsed: 10}), [[0, 33.33, "yellow"], [33.33, 80, "red"]]);
+    assert.deepEqual(bands({used: 40, elapsed: 0}), [[0, 13.33, "yellow"], [13.33, 40, "red"]]);
+});
+
+test("a reached usage bar is yellow up to the tick and red from there", () => {
+    assert.deepEqual(bands({used: 100, elapsed: 40, reached: true}), [[0, 40, "yellow"], [40, 100, "red"]]);
+    assert.deepEqual(bands({used: 100, elapsed: 90, reached: true}), [[0, 90, "yellow"], [90, 100, "red"]]);
+    assert.deepEqual(bands({used: 104, elapsed: 0, reached: true}), [[0, 100, "red"]]);
+    assert.equal(logic.usageBands({used: 100, elapsed: 40, reached: true}, 1).some(each => each.stops), false);
+});
+
+test("a usage bar without a known reset keeps one colour, and an empty one has no bands", () => {
+    assert.deepEqual(bands({used: 70, elapsed: null}), [[0, 70, "green"]]);
+    assert.deepEqual(bands({used: 100, elapsed: undefined, reached: true}), [[0, 100, "red"]]);
+    assert.deepEqual(bands({used: 0, elapsed: 50}), []);
+    assert.deepEqual(bands({used: null, elapsed: null}), []);
+});
+
+test("the fade blends only the yellow band, over the share of each half it is given", () => {
+    const hard = logic.usageBands({used: 80, elapsed: 50, reached: false}, 0);
+    assert.equal(hard.some(each => each.stops), false);
+    const full = logic.usageBands({used: 80, elapsed: 50, reached: false}, 1);
+    assert.deepEqual(full.map(each => Boolean(each.stops)), [false, true, false]);
+    assert.deepEqual(full[1].stops, [[40, "green"], [50, "yellow"], [50, "yellow"], [60, "red"]]);
+    const half = logic.usageBands({used: 80, elapsed: 50, reached: false}, 0.5);
+    assert.deepEqual(half[1].stops, [[40, "green"], [45, "yellow"], [55, "yellow"], [60, "red"]]);
+    const cut = logic.usageBands({used: 80, elapsed: 10, reached: false}, 1);
+    assert.equal(cut[0].from, 0);
+    assert.equal(Math.round(cut[0].stops[0][0] * 100) / 100, -13.33);
+});
+
 test("the nearest window owner wins, and the project name picks among PhpStorm windows", () => {
     const windows = [
         {index: 0, pid: 55593, title: "sdwa5 – checkout.php"},

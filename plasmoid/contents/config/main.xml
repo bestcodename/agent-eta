@@ -19,6 +19,13 @@
     <entry name="showUsage" type="Bool">
       <default>true</default>
     </entry>
+    <!-- The yellow band of a usage bar fades into green and red, over this share of each half. -->
+    <entry name="blendYellow" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="blendWidth" type="Int">
+      <default>100</default>
+    </entry>
     <!-- Off, because the red pulsing orb of the tray icon already shows a waiting session. -->
     <entry name="notifyWaiting" type="Bool">
       <default>false</default>

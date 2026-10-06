@@ -7,15 +7,17 @@ import org.kde.kirigami as Kirigami
 import "../code/logic.mjs" as Logic
 
 // One agent's usage windows. Each bar fills with the used share, and its tick marks the share of
-// the window that has passed, so a fill past the tick runs out before the reset. Red means the
-// limit is reached, orange that the usage runs ahead of the time. Every reset carries its
-// countdown, as in `resets in 49m (18:30)`, and the agent's own line names its
-// highest share with the reset that comes first.
+// the window that has passed, so a fill past the tick runs out before the reset. The fill comes in
+// traffic-light bands from usageBands() in logic.mjs, green below the tick, yellow around it and
+// red where the usage runs far ahead of the time, and `fade` blends the yellow band. Every reset
+// carries its countdown, as in `resets in 49m (18:30)`, and the agent's own line names its highest
+// share with the reset that comes first.
 ColumnLayout {
     id: usageRow
 
     property var group
     property real now
+    property real fade: 0
 
     spacing: Kirigami.Units.smallSpacing / 2
 
@@ -53,8 +55,7 @@ ColumnLayout {
                 Layout.fillWidth: true
                 value: (modelData.used || 0) / 100
                 marker: modelData.elapsed === null || modelData.elapsed === undefined ? -1 : modelData.elapsed / 100
-                color: modelData.reached ? Kirigami.Theme.negativeTextColor
-                    : modelData.ahead ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.positiveTextColor
+                bands: Logic.usageBands(modelData, usageRow.fade)
             }
             PlasmaComponents3.Label {
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 12

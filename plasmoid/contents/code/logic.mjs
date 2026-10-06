@@ -291,6 +291,50 @@ export function usageGroups(usage) {
     return groups;
 }
 
+function band(from, to, light) {
+    return {from: Math.max(0, from), to, light};
+}
+
+// The traffic-light bands of a usage bar's filled part, as `{from, to, light}` in percent of the
+// whole bar. With `u` the used share, `t` the tick of the elapsed share and `d = u - t`:
+//
+// - Usage at or below the tick is green throughout.
+// - Usage past the tick is green up to `t - d/3`, yellow from there to `t + d/3`, so the yellow
+//   band is centred on the tick, and red over the last two thirds of `d` up to the usage.
+// - A reached limit is yellow up to the tick and red from there.
+// - A window without a known reset keeps one colour, red when reached and green otherwise.
+//
+// `fade`, from 0 to 1, blends the yellow band of a bar that is not reached into its neighbours.
+// It is the share of each half of the band that fades, so 1 leaves pure yellow only at the tick
+// and 0 keeps hard edges. The band then carries `stops` as `[percent, light]` pairs over the band
+// before it was cut off at 0, so a cut band keeps its fade where it was.
+export function usageBands(window, fade = 0) {
+    const used = Math.min(100, window.used || 0);
+    if (used <= 0) {
+        return [];
+    }
+    const tick = window.elapsed;
+    if (tick === null || tick === undefined) {
+        return [band(0, used, window.reached ? "red" : "green")];
+    }
+    if (window.reached) {
+        return [band(0, tick, "yellow"), band(tick, used, "red")].filter(each => each.to > each.from);
+    }
+    if (used <= tick) {
+        return [band(0, used, "green")];
+    }
+    const third = (used - tick) / 3;
+    const start = tick - third;
+    const end = tick + third;
+    const yellow = band(start, end, "yellow");
+    const share = Math.max(0, Math.min(1, fade));
+    if (share > 0) {
+        yellow.stops = [[start, "green"], [start + share * third, "yellow"],
+                        [end - share * third, "yellow"], [end, "red"]];
+    }
+    return [band(0, start, "green"), yellow, band(end, used, "red")].filter(each => each.to > each.from);
+}
+
 // The line beside an agent's name in the usage block. An agent with room left shows its highest
 // used share and the reset that comes first, as in `56% · resets in 49m (18:30)`, and a blocked one
 // the reset that ends the block. Without a known reset the share stands alone.

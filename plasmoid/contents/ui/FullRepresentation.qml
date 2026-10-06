@@ -133,6 +133,7 @@ PlasmaExtras.Representation {
                     Layout.bottomMargin: Kirigami.Units.largeSpacing
                     group: modelData
                     now: full.now
+                    fade: Plasmoid.configuration.blendYellow ? Plasmoid.configuration.blendWidth / 100 : 0
                 }
             }
         }
