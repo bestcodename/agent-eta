@@ -179,8 +179,8 @@ test("an agent's usage line names its highest share and its soonest reset", () =
     assert.equal(logic.usageHeadline(stale, NOW), "?");
 });
 
-function bands(window, fade) {
-    return logic.usageBands(Object.assign({reached: false}, window), fade)
+function bands(window, fade, yellow = 1 / 3) {
+    return logic.usageBands(Object.assign({reached: false}, window), fade, yellow)
         .map(each => [Math.round(each.from * 100) / 100, Math.round(each.to * 100) / 100, each.light]);
 }
 
@@ -196,7 +196,7 @@ test("a reached usage bar is yellow up to the tick and red from there", () => {
     assert.deepEqual(bands({used: 100, elapsed: 40, reached: true}), [[0, 40, "yellow"], [40, 100, "red"]]);
     assert.deepEqual(bands({used: 100, elapsed: 90, reached: true}), [[0, 90, "yellow"], [90, 100, "red"]]);
     assert.deepEqual(bands({used: 104, elapsed: 0, reached: true}), [[0, 100, "red"]]);
-    assert.equal(logic.usageBands({used: 100, elapsed: 40, reached: true}, 1).some(each => each.stops), false);
+    assert.equal(logic.usageBands({used: 100, elapsed: 40, reached: true}, 1, 1 / 3).some(each => each.stops), false);
 });
 
 test("a usage bar without a known reset keeps one colour, and an empty one has no bands", () => {
@@ -206,15 +206,30 @@ test("a usage bar without a known reset keeps one colour, and an empty one has n
     assert.deepEqual(bands({used: null, elapsed: null}), []);
 });
 
+test("the yellow band's half-width is a share of the usage past the tick", () => {
+    assert.deepEqual(logic.usageBands({used: 80, elapsed: 50, reached: false}),
+                     logic.usageBands({used: 80, elapsed: 50, reached: false}, 0, 0.66));
+    assert.deepEqual(bands({used: 80, elapsed: 50}, 0, 0.66), [[0, 30.2, "green"], [30.2, 69.8, "yellow"], [69.8, 80, "red"]]);
+    assert.deepEqual(bands({used: 80, elapsed: 50}, 0), bands({used: 80, elapsed: 50}, 0, 1 / 3));
+    assert.deepEqual(logic.usageBands({used: 80, elapsed: 50, reached: false}, 0, 0.5)
+        .map(each => [each.from, each.to, each.light]), [[0, 35, "green"], [35, 65, "yellow"], [65, 80, "red"]]);
+    assert.deepEqual(logic.usageBands({used: 80, elapsed: 50, reached: false}, 1, 0)
+        .map(each => [each.from, each.to, each.light, Boolean(each.stops)]), [[0, 50, "green", false], [50, 80, "red", false]]);
+    assert.deepEqual(logic.usageBands({used: 80, elapsed: 50, reached: false}, 0, 1)
+        .map(each => [each.from, each.to, each.light]), [[0, 20, "green"], [20, 80, "yellow"]]);
+    assert.deepEqual(logic.usageBands({used: 100, elapsed: 40, reached: true}, 0, 0.9)
+        .map(each => [each.from, each.to, each.light]), [[0, 40, "yellow"], [40, 100, "red"]]);
+});
+
 test("the fade blends only the yellow band, over the share of each half it is given", () => {
-    const hard = logic.usageBands({used: 80, elapsed: 50, reached: false}, 0);
+    const hard = logic.usageBands({used: 80, elapsed: 50, reached: false}, 0, 1 / 3);
     assert.equal(hard.some(each => each.stops), false);
-    const full = logic.usageBands({used: 80, elapsed: 50, reached: false}, 1);
+    const full = logic.usageBands({used: 80, elapsed: 50, reached: false}, 1, 1 / 3);
     assert.deepEqual(full.map(each => Boolean(each.stops)), [false, true, false]);
     assert.deepEqual(full[1].stops, [[40, "green"], [50, "yellow"], [50, "yellow"], [60, "red"]]);
-    const half = logic.usageBands({used: 80, elapsed: 50, reached: false}, 0.5);
+    const half = logic.usageBands({used: 80, elapsed: 50, reached: false}, 0.5, 1 / 3);
     assert.deepEqual(half[1].stops, [[40, "green"], [45, "yellow"], [55, "yellow"], [60, "red"]]);
-    const cut = logic.usageBands({used: 80, elapsed: 10, reached: false}, 1);
+    const cut = logic.usageBands({used: 80, elapsed: 10, reached: false}, 1, 1 / 3);
     assert.equal(cut[0].from, 0);
     assert.equal(Math.round(cut[0].stops[0][0] * 100) / 100, -13.33);
 });

@@ -296,11 +296,13 @@ function band(from, to, light) {
 }
 
 // The traffic-light bands of a usage bar's filled part, as `{from, to, light}` in percent of the
-// whole bar. With `u` the used share, `t` the tick of the elapsed share and `d = u - t`:
+// whole bar. With `u` the used share, `t` the tick of the elapsed share, `d = u - t` and `k` the
+// half-width of the yellow band as a share of `d`, 0.66 by default:
 //
 // - Usage at or below the tick is green throughout.
-// - Usage past the tick is green up to `t - d/3`, yellow from there to `t + d/3`, so the yellow
-//   band is centred on the tick, and red over the last two thirds of `d` up to the usage.
+// - Usage past the tick is green up to `t - k·d`, yellow from there to `t + k·d`, so the yellow
+//   band is centred on the tick, and red from there up to the usage. With `k` at 1/3, red covers
+//   the last two thirds of `d`.
 // - A reached limit is yellow up to the tick and red from there.
 // - A window without a known reset keeps one colour, red when reached and green otherwise.
 //
@@ -308,7 +310,7 @@ function band(from, to, light) {
 // It is the share of each half of the band that fades, so 1 leaves pure yellow only at the tick
 // and 0 keeps hard edges. The band then carries `stops` as `[percent, light]` pairs over the band
 // before it was cut off at 0, so a cut band keeps its fade where it was.
-export function usageBands(window, fade = 0) {
+export function usageBands(window, fade = 0, yellow = 0.66) {
     const used = Math.min(100, window.used || 0);
     if (used <= 0) {
         return [];
@@ -323,16 +325,16 @@ export function usageBands(window, fade = 0) {
     if (used <= tick) {
         return [band(0, used, "green")];
     }
-    const third = (used - tick) / 3;
-    const start = tick - third;
-    const end = tick + third;
-    const yellow = band(start, end, "yellow");
+    const half = (used - tick) * Math.max(0, Math.min(1, yellow));
+    const start = tick - half;
+    const end = tick + half;
+    const middle = band(start, end, "yellow");
     const share = Math.max(0, Math.min(1, fade));
-    if (share > 0) {
-        yellow.stops = [[start, "green"], [start + share * third, "yellow"],
-                        [end - share * third, "yellow"], [end, "red"]];
+    if (share > 0 && half > 0) {
+        middle.stops = [[start, "green"], [start + share * half, "yellow"],
+                        [end - share * half, "yellow"], [end, "red"]];
     }
-    return [band(0, start, "green"), yellow, band(end, used, "red")].filter(each => each.to > each.from);
+    return [band(0, start, "green"), middle, band(end, used, "red")].filter(each => each.to > each.from);
 }
 
 // The line beside an agent's name in the usage block. An agent with room left shows its highest

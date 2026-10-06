@@ -19,6 +19,10 @@
     <entry name="showUsage" type="Bool">
       <default>true</default>
     </entry>
+    <!-- Half-width of a usage bar's yellow band around the tick, in percent of the usage past the tick. -->
+    <entry name="yellowWidth" type="Int">
+      <default>66</default>
+    </entry>
     <!-- The yellow band of a usage bar fades into green and red, over this share of each half. -->
     <entry name="blendYellow" type="Bool">
       <default>true</default>

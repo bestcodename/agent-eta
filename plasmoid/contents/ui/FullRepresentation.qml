@@ -134,6 +134,7 @@ PlasmaExtras.Representation {
                     group: modelData
                     now: full.now
                     fade: Plasmoid.configuration.blendYellow ? Plasmoid.configuration.blendWidth / 100 : 0
+                    yellow: Plasmoid.configuration.yellowWidth / 100
                 }
             }
         }

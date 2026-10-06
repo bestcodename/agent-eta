@@ -68,7 +68,9 @@ Item {
                 } else {
                     ctx.fillStyle = lights.colorOf(band.light);
                 }
-                ctx.fillRect(x(band.from), 0, x(band.to) - x(band.from), height);
+                // On to the end of the fill, under the next band. Two edges on the same fractional pixel
+                // would each cover it only partly and let the track show through as a thin gap.
+                ctx.fillRect(x(band.from), 0, fill - x(band.from), height);
             }
         }
     }
