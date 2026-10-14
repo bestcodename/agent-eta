@@ -18,6 +18,8 @@ PlasmoidItem {
     property string failure: ""
     property real updatedAt: 0
     property bool showDormant: false
+    property bool showStopped: false
+    property string actionFailure: ""
     // A poll rebuilds every row, which would close an open context menu, so polling pauses meanwhile.
     property bool menuOpen: false
     readonly property var summary: Logic.summary(listing)
@@ -128,6 +130,18 @@ PlasmoidItem {
         if (action !== "copy" && action !== "done") {
             expanded = false;
         }
+    }
+
+    // Account actions have one implementation in the CLI. Errors survive ordinary polls.
+    function accountAction(action, account, directory) {
+        let args = " account " + action + " " + Logic.shellQuote(account.id);
+        if (directory !== undefined && directory !== null)
+            args += action === "launch" ? " --directory " + Logic.shellQuote(directory) : " " + Logic.shellQuote(directory);
+        runner.run(command + args, (code, stdout, stderr) => {
+            actionFailure = code === 0 ? "" : (stderr || i18n("Account action failed")).trim();
+            refresh();
+            if (code === 0 && (action === "login" || action === "launch")) expanded = false;
+        });
     }
 
     Component {

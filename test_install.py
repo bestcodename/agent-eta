@@ -70,8 +70,11 @@ class Install(unittest.TestCase):
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
 class Plasmoid(unittest.TestCase):
     def test_logic_module(self):
-        result = subprocess.run(["node", "--test", str(_HERE / "test_plasmoid.mjs")], capture_output=True, text=True)
+        # node:test runs the registered tests directly as well. Avoid another child
+        # runner, which some sandboxed Node builds report as one file without its tests.
+        result = subprocess.run(["node", str(_HERE / "test_plasmoid.mjs")], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("stopped and dormant sections retain counts", result.stdout)
 
 
 if __name__ == "__main__":

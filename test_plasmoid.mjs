@@ -141,6 +141,51 @@ test("sessions group by their section and dormant ones only count unless shown",
     assert.equal(logic.groupSessions(data, true)[2].sessions.length, 1);
 });
 
+test("stopped and dormant sections retain counts and open independently", () => {
+    const data = listing([
+        session({pid: 1, section: 0, state: "waiting"}),
+        session({pid: 2, section: 1, state: "working"}),
+        session({pid: 3, section: 2, state: "stopped", tasks: ["blocked-task"]}),
+        session({pid: 4, section: 3, dormant: true}),
+    ], [{id: "blocked-task", label: "tests"}]);
+    for (const [dormant, stopped, lengths] of [[false, false, [1, 1, 0, 0]], [true, false, [1, 1, 0, 1]],
+                                             [false, true, [1, 1, 1, 0]], [true, true, [1, 1, 1, 1]]]) {
+        const groups = logic.groupSessions(data, dormant, stopped);
+        assert.deepEqual(groups.map(g => g.count), [1, 1, 1, 1]);
+        assert.deepEqual(groups.map(g => g.sessions.length), lengths);
+    }
+    assert.equal(logic.groupSessions(data, false, true)[2].sessions[0].taskItems[0].label, "tests");
+    data.sessions[2].section = 0;
+    data.sessions[2].state = "idle";
+    assert.deepEqual(logic.groupSessions(data, false).map(g => [g.section, g.sessions.length]), [[0, 2], [1, 1], [3, 0]]);
+});
+
+test("accounts without readings remain visible and authentication has its own status", () => {
+    const accounts = [{id: "codex", agent: "codex", auth_state: "logged_out", usage_status: "unavailable"},
+                      {id: "claude:work", agent: "claude/work", auth_state: "unknown", usage_status: "unavailable"}];
+    const groups = logic.usageGroups([], accounts);
+    assert.deepEqual(groups.map(g => [g.account.id, g.windows.length]), [["codex", 0], ["claude:work", 0]]);
+    assert.equal(logic.usageHeadline(groups[0], NOW), "?");
+    assert.equal(logic.accountStatus(accounts[0], NOW), "Not logged in");
+    assert.equal(logic.accountStatus(accounts[1], NOW), "Authentication unknown · Usage unavailable");
+    assert.match(logic.accountStatus({auth_state: "authenticated", usage_status: "stale", seen_at: NOW - 600}, NOW), /Stale reading · read 10m ago/);
+});
+
+test("the folder picker decodes local paths and rejects other URL types", () => {
+    assert.equal(logic.folderPath("file:///home/me/a%20folder%20%24%28echo%20no%29"), "/home/me/a folder $(echo no)");
+    assert.equal(logic.folderPath("file:///home/me/quote%27"), "/home/me/quote'");
+    for (const url of ["https://example.org", "file://remote/home/me", "file:///bad%", ""]) {
+        assert.equal(logic.folderPath(url), null);
+    }
+});
+
+test("a recorded window ending with no new reading never promises unused quota", () => {
+    const before = listing([], [], [{agent: "codex", minutes: 300, used: 100, reached: true, resets_at: NOW}]);
+    const after = listing([], [], [{agent: "codex", minutes: 300, used: null, reached: false, resets_at: NOW}]);
+    assert.equal(logic.transitions(before, after)[0].text,
+                 "The recorded 5h window ended. A fresh usage reading is pending.");
+});
+
 test("usage groups put reached limits last and order windows by reset", () => {
     const groups = logic.usageGroups([
         {agent: "codex", minutes: 300, used: null, remaining: null, reached: false},

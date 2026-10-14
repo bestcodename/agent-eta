@@ -6,6 +6,7 @@
 
 export const SECTION_TITLES = ["Needs you", "Working", "Stopped until a limit resets", "Dormant"];
 export const DORMANT_SECTION = 3;
+export const STOPPED_SECTION = 2;
 
 // The traffic-light colour of a session state. A coloured dot rather than a media icon, because a
 // play or pause symbol reads as a button that starts or stops the session. StateDot.qml maps the
@@ -237,15 +238,16 @@ export function summary(listing) {
     return result;
 }
 
-// The sessions by section, each with its task objects as `taskItems`. A dormant section only
-// lists its sessions when asked to, and otherwise only counts them.
-export function groupSessions(listing, showDormant) {
+// The sessions by section, each with its task objects as `taskItems`. Stopped and dormant
+// sections retain their counts, and list their sessions only when independently opened.
+export function groupSessions(listing, showDormant, showStopped = false) {
     const byId = tasksById(listing);
     const groups = SECTION_TITLES.map((name, section) => ({section, title: name, count: 0, sessions: []}));
     for (const session of sessionsOf(listing)) {
         const group = groups[session.section] || groups[session.dormant ? DORMANT_SECTION : 0];
         group.count += 1;
-        if (group.section !== DORMANT_SECTION || showDormant) {
+        if ((group.section !== DORMANT_SECTION || showDormant)
+                && (group.section !== STOPPED_SECTION || showStopped)) {
             group.sessions.push(Object.assign({}, session, {
                 taskItems: (session.tasks || []).map(id => byId[id]).filter(Boolean),
             }));
@@ -275,8 +277,11 @@ function compareAgents(a, b) {
 // The usage windows per agent, as agent-eta's usage table orders them. Agents with room left come
 // first, by the reset of the 7-day window and then by that of the 5-hour window, and those with a
 // reached limit last, by the reset that ends their block, the soonest first in both.
-export function usageGroups(usage) {
+export function usageGroups(usage, accounts = []) {
     const byAgent = new Map();
+    for (const account of accounts || []) {
+        byAgent.set(account.agent, []);
+    }
     for (const window of usage || []) {
         if (!byAgent.has(window.agent)) {
             byAgent.set(window.agent, []);
@@ -293,6 +298,7 @@ export function usageGroups(usage) {
             : windows[0];
         groups.push({
             agent,
+            account: (accounts || []).find(account => account.agent === agent) || null,
             windows,
             reached: reached.length > 0,
             ahead: windows.some(window => window.ahead),
@@ -304,6 +310,25 @@ export function usageGroups(usage) {
         || (a.reached ? untilReset(a.resetBy) - untilReset(b.resetBy) : 0)
         || compareAgents(a, b));
     return groups;
+}
+
+// Authentication and missing readings describe accounts, not inferred session states.
+export function accountStatus(account, now) {
+    if (!account) return "";
+    if (account.auth_state === "logged_out") return "Not logged in";
+    if (account.auth_state === "mismatch") return "Different account logged in";
+    const parts = [];
+    if (account.auth_state === "unknown") parts.push("Authentication unknown");
+    if (account.usage_status !== "current") parts.push(account.usage_status === "stale" ? "Stale reading" : "Usage unavailable");
+    if (account.seen_at) parts.push(`read ${formatIn(Math.max(0, now - account.seen_at))} ago`);
+    if (account.error) parts.push(account.error);
+    return parts.join(" · ");
+}
+
+export function folderPath(url) {
+    const text = String(url);
+    if (!text.startsWith("file:///")) return null;
+    try { return decodeURIComponent(text.slice(7)); } catch (_) { return null; }
 }
 
 function band(from, to, light) {
@@ -476,7 +501,9 @@ export function transitions(previous, next) {
             events.push({
                 kind: "reset", key: `reset:${window.agent}:${window.minutes}:${old.resets_at}`,
                 title: `${window.agent} usage limit reset`,
-                text: `The ${formatWindow(window.minutes)} window has room again`,
+                text: window.used === null || window.used === undefined
+                    ? `The recorded ${formatWindow(window.minutes)} window ended. A fresh usage reading is pending.`
+                    : `The ${formatWindow(window.minutes)} window has room again`,
             });
         }
     }

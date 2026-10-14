@@ -31,7 +31,8 @@ _spec.loader.exec_module(eta)
 
 AGENT_VARS = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SANDBOX",
               "CODEX_SANDBOX_NETWORK_DISABLED", "AGENT_ETA_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
-              "CLAUDE_ACCOUNTS_FILE", "DSH_HOME", "DSH_SESSION_ID")
+              "CLAUDE_ACCOUNTS_FILE", "DSH_HOME", "DSH_SESSION_ID", "AGENT_ETA_NO_REFRESH",
+              "AGENT_ETA_CONFIG", "AGENT_ETA_CACHE_DIR")
 
 
 class Durations(unittest.TestCase):
@@ -99,12 +100,12 @@ class StateTest(unittest.TestCase):
         self.accounts = self.root / "accounts.json"
         self.env.update(AGENT_ETA_DIR=self.dir, CLAUDE_CONFIG_DIR=str(self.claude),
                         CODEX_HOME=str(self.codex), CLAUDE_ACCOUNTS_FILE=str(self.accounts),
-                        DSH_HOME=str(self.dsh), PYTHONDONTWRITEBYTECODE="1")
+                        DSH_HOME=str(self.dsh), PYTHONDONTWRITEBYTECODE="1", AGENT_ETA_NO_REFRESH="1")
         self.saved = {k: os.environ.get(k) for k in AGENT_VARS}
         for key in AGENT_VARS:
             os.environ.pop(key, None)
         os.environ.update(AGENT_ETA_DIR=self.dir, CLAUDE_CONFIG_DIR=str(self.claude), CODEX_HOME=str(self.codex),
-                          CLAUDE_ACCOUNTS_FILE=str(self.accounts), DSH_HOME=str(self.dsh))
+                          CLAUDE_ACCOUNTS_FILE=str(self.accounts), DSH_HOME=str(self.dsh), AGENT_ETA_NO_REFRESH="1")
         self.addCleanup(self.restore)
         eta.state_dir()
 
@@ -233,8 +234,10 @@ class Commands(StateTest):
         self.assertEqual(self.cli("done", entry_id).returncode, 1)
         self.assertEqual(self.cli().stdout.splitlines()[1:], [
             eta.EMPTY_SECTIONS[0], "---", eta.EMPTY_SECTIONS[1], "---", eta.EMPTY_SECTIONS[2], "---",
-            eta.EMPTY_SECTIONS[3], "", "USAGE  USED  ELAPSED  PACE  REMAINING  DUE  READ",
-            eta.EMPTY_USAGE[0], "---", eta.EMPTY_USAGE[1]])
+            eta.EMPTY_SECTIONS[3], "", "USAGE   USED  ELAPSED  PACE  REMAINING  DUE  READ  NOTE",
+            eta.EMPTY_USAGE[0], "---", eta.EMPTY_USAGE[1], "---",
+            "claude  -     -        -     -          -    -     Authentication unknown · Usage unavailable",
+            "codex   -     -        -     -          -    -     Authentication unknown · Usage unavailable"])
         self.assertEqual(self.cli("--tasks").stdout, "No background tasks.\n")
 
     def test_add_with_a_pid_ends_with_that_process(self):
@@ -686,6 +689,27 @@ class Sessions(StateTest):
         self.assertIn("(no working sessions)", text)
         self.assertIn("1 dormant session", text)
 
+    def test_a_session_that_never_ran_a_turn_is_dormant_at_once(self):
+        # PhpStorm's pre-started agent-SDK processes write a record without a status and no transcript.
+        now = time.time()
+        unused = self.sleeper()
+        self.register(unused.pid, status=None, since=now - 60, entrypoint="sdk-ts")
+        [session] = self.view(now)
+        self.assertEqual((session["state"], session["unused"]), ("idle", True))
+        self.assertTrue(eta.dormant(session, now))
+        self.assertIn("1 dormant session", eta.render_sessions([session], now))
+
+    def test_a_status_less_session_with_a_transcript_stays_unknown(self):
+        now = time.time()
+        used = self.sleeper()
+        self.register(used.pid, status=None, since=now - 60)
+        transcripts = self.claude / "projects" / "-work"
+        transcripts.mkdir(parents=True)
+        (transcripts / ("s-%d.jsonl" % used.pid)).write_text("")
+        [session] = self.view(now)
+        self.assertEqual((session["state"], session["unused"]), ("unknown", False))
+        self.assertFalse(eta.dormant(session, now))
+
     def test_codex_interrupt_without_turn_id_is_still_codex(self):
         self.hook(self.codex_event("UserPromptSubmit"))
         self.hook({"hook_event_name": "Interrupt", "session_id": "thread-1"})
@@ -804,6 +828,21 @@ class Usage(StateTest):
         self.assertEqual(lines[2].split()[:6], ["└", "5h", "62%", "40%", "ahead", "+22%"])
         self.assertEqual(lines[3].split()[:6], ["└", "7d", "10%", "14%", "ok", "-4%"])
         self.assertEqual(lines[4:], ["---", eta.EMPTY_USAGE[1]])
+
+    def test_account_notes_fill_a_note_column_and_list_accounts_without_a_reading(self):
+        now = 1_000_000
+        window = eta.usage_window("claude/work", 300, 50.0, now + 3600, now - 60)
+        [window] = eta.usage_view(now, [window])
+        lines = eta.render_usage([window], now, {"claude/work": "Different account logged in",
+                                                 "codex": "Not logged in"}).splitlines()
+        self.assertEqual(lines[0].split()[-1], "NOTE")
+        self.assertTrue(lines[1].startswith("claude/work") and lines[1].endswith("Different account logged in"))
+        self.assertEqual(lines[-2], "---")
+        self.assertEqual(lines[-1].split()[0], "codex")
+        self.assertTrue(lines[-1].endswith("Not logged in"))
+        self.assertEqual(eta.account_note({"auth_state": "authenticated", "usage_status": "current"}), "")
+        self.assertEqual(eta.account_note({"auth_state": "unknown", "usage_status": "stale"}),
+                         "Authentication unknown · Stale reading")
 
     def test_the_agent_row_holds_the_worst_per_column(self):
         now = 1_000_000

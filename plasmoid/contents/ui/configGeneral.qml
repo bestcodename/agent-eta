@@ -5,6 +5,7 @@ import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
 
 KCM.SimpleKCM {
+    id: config
     property alias cfg_command: command.text
     property alias cfg_pollClosed: pollClosed.value
     property alias cfg_pollOpen: pollOpen.value
@@ -27,6 +28,8 @@ KCM.SimpleKCM {
     property bool cfg_notifyOverdueDefault
     property bool cfg_notifyResetDefault
 
+    Runner { id: runner }
+
     Kirigami.FormLayout {
         QQC2.TextField {
             id: command
@@ -48,6 +51,18 @@ KCM.SimpleKCM {
             id: showUsage
             Kirigami.FormData.label: i18nc("@title:group", "Show:")
             text: i18nc("@option:check", "Usage windows")
+        }
+        QQC2.Button {
+            text: i18n("Restore Codex monitoring")
+            onClicked: runner.run(config.cfg_command + " account enable codex", (code, stdout, stderr) => {
+                restoreStatus.text = code === 0 ? i18n("Codex monitoring is enabled") : (stderr || i18n("Restore failed")).trim();
+            })
+        }
+        QQC2.Label {
+            id: restoreStatus
+            text: ""
+            visible: text !== ""
+            wrapMode: Text.Wrap
         }
         QQC2.SpinBox {
             id: yellowWidth

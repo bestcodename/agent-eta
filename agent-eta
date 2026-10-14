@@ -31,7 +31,15 @@ dsh's own session logs, without an ETA. See docs/agent-eta.md.
         Record a wait that is not a local process, such as a CI pipeline, and remove it
         again. With --pid the entry lives exactly as long as that process.
 
-The state lives in /tmp/agent-eta-<uid>, overridable with AGENT_ETA_DIR. /tmp is the only
+    agent-eta account list [--json]
+    agent-eta account refresh [--json]
+    agent-eta account login|remove|launch ID
+    agent-eta account default-directory ID [PATH]
+    agent-eta account enable codex
+        Share account actions with the tray. Launch accepts --directory for a one-off
+        folder. Readings and preferences persist; native clients own all credentials.
+
+Session and task state lives in /tmp/agent-eta-<uid>, overridable with AGENT_ETA_DIR. /tmp is the only
 directory that both the Codex sandbox and the host can write, and the files may vanish at
 reboot, because every session they describe does too.
 
@@ -65,6 +73,11 @@ import sys
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+# The executable is installed through a symlink; its shared helpers live beside its real path.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import agent_eta_accounts as accounts_api
+from agent_eta_providers import AccountError
 
 BERLIN = ZoneInfo("Europe/Berlin")
 LABEL_MAX = 80
@@ -553,14 +566,15 @@ def claude_home():
 
 
 def claude_accounts():
-    """Every Claude Code config directory to read, as (account, directory). With more than one
-    account in the registry of scripts/claude-account, that is each registered account by its
-    name, and otherwise the one directory of this environment without a name."""
+    """Every registered Claude directory, as (account, directory). A single registration
+    keeps its legacy unnamed label. Without registrations, use this environment's directory."""
     path = os.environ.get("CLAUDE_ACCOUNTS_FILE") or os.path.expanduser("~/.config/claude-account/accounts.json")
     data = read_json(path) or {}
     accounts = [a for a in data.get("accounts") or [] if isinstance(a, dict) and a.get("name") and a.get("dir")]
-    if len(accounts) < 2:
+    if not accounts:
         return [(None, claude_home())]
+    if len(accounts) == 1:
+        return [(None, os.path.expanduser(accounts[0]["dir"]))]
     return [(a["name"], os.path.expanduser(a["dir"])) for a in accounts]
 
 
@@ -644,10 +658,15 @@ def codex_thread_names(threads=None):
     return names
 
 
+def claude_transcript_paths(session_id):
+    """The transcript files of a Claude Code session in every account's directory."""
+    return [path for _, directory in claude_accounts()
+            for path in glob.glob(os.path.join(directory, "projects", "*", "%s.jsonl" % glob.escape(str(session_id))))]
+
+
 def claude_title(session_id):
     """The latest custom or generated title in a Claude Code transcript, or None."""
-    paths = [path for _, directory in claude_accounts()
-             for path in glob.glob(os.path.join(directory, "projects", "*", "%s.jsonl" % glob.escape(str(session_id))))]
+    paths = claude_transcript_paths(session_id)
     if not paths:
         return None
     try:
@@ -743,16 +762,21 @@ def account_sessions(account, directory):
             continue
         status = record.get("status")
         since = record.get("statusUpdatedAt") or record.get("startedAt")
+        # PhpStorm starts an agent-SDK process per open project ahead of use. Its record carries no
+        # status, and until its first prompt it has no transcript either, so it never ran a turn.
+        # Measured on claude-agent-sdk 2.1.220 on 2026-10-15.
+        unused = not status and not claude_transcript_paths(record.get("sessionId"))
         found.append({
             "agent": "claude",
             "account": account,
             "id": record.get("sessionId"),
             "pid": pid,
             "name": claude_name(record),
-            "state": CLAUDE_STATES.get(status, status or "unknown"),
+            "state": "idle" if unused else CLAUDE_STATES.get(status, status or "unknown"),
             "waiting_for": record.get("waitingFor") if status == "waiting" else None,
             "since": since / 1000 if isinstance(since, (int, float)) else None,
             "cwd": record.get("cwd"),
+            "unused": unused,
         })
     return found
 
@@ -1215,12 +1239,12 @@ def usage_window(agent, minutes, used, resets_at, seen_at):
             "seen_at": seen_at}
 
 
-def usage_view(now):
+def usage_view(now, windows=None):
     """Every usage window with the share of it that has passed, both in percent, how far the
     usage runs ahead of the time in percentage points, the time left until its reset and
     whether its limit is reached. A window whose reset lies in the past has started over since
     its reading, so none of that is known then."""
-    windows = claude_usage() + codex_usage()
+    windows = claude_usage() + codex_usage() if windows is None else windows
     for window in windows:
         resets_at, length = window["resets_at"], window["minutes"] * 60
         if resets_at and resets_at > now:
@@ -1263,22 +1287,47 @@ def usage_sections(windows):
     return open_, blocked
 
 
-def render_usage(windows, now):
+def account_note(account):
+    """What the usage table says about an account whose login or reading is not in order, the
+    same wording as the tray, or "" for an authenticated account with a current reading."""
+    if account["auth_state"] == "logged_out":
+        return "Not logged in"
+    if account["auth_state"] == "mismatch":
+        return "Different account logged in"
+    parts = []
+    if account["auth_state"] == "unknown":
+        parts.append("Authentication unknown")
+    if account["usage_status"] != "current":
+        parts.append("Stale reading" if account["usage_status"] == "stale" else "Usage unavailable")
+    return " · ".join(parts)
+
+
+def render_usage(windows, now, notes=None):
     """The usage table in two sections, agents with room left in every window and agents with a
     reached limit. Each agent's row holds the worst of its windows per column, and its windows
     follow as `└` rows. PACE is the usage ahead of the time in percentage points, REMAINING and
-    DUE say when a window resets, and READ how old the reading is."""
+    DUE say when a window resets, and READ how old the reading is. `notes` maps an agent to the
+    account status its row carries in a NOTE column, and an agent with a note but no reading
+    gets a row of its own in a third section."""
+    notes = notes or {}
     sections = usage_sections(windows)
-    lines = [("USAGE", "USED", "ELAPSED", "PACE", "REMAINING", "DUE", "READ")]
+    extra = ("NOTE",) if notes else ()
+    lines = [("USAGE", "USED", "ELAPSED", "PACE", "REMAINING", "DUE", "READ") + extra]
     blocks = []
+    shown = set()
     for entries in sections:
         block = []
         for agent, summary, group in entries:
+            shown.add(agent)
             age = format_span(now - summary["seen_at"]) if summary.get("seen_at") else "?"
-            block.append((agent,) + agent_cells(summary, group, now) + (age,))
+            note = (notes.get(agent, ""),) if notes else ()
+            block.append((agent,) + agent_cells(summary, group, now) + (age,) + note)
             block.extend(("└ " + format_window(window["minutes"]),) + usage_cells(window, now) + ("",)
-                         for window in group)
+                         + ("",) * len(extra) for window in group)
         blocks.append(block)
+    unread = [(agent,) + ("-",) * 6 + (note,) for agent, note in sorted(notes.items()) if agent not in shown]
+    if unread:
+        blocks.append(unread)
     widths = [max(len(line[i]) for line in lines + sum(blocks, [])) for i in range(len(lines[0]))]
     def row(line):
         return "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line)).rstrip()
@@ -1522,7 +1571,10 @@ def at_rest(session):
 
 def dormant(session, now):
     """Whether a session has rested so long that nobody looks at it any more. A dsh turn that
-    failed waits for the next prompt, and after DORMANT_AFTER it rests like an idle session."""
+    failed waits for the next prompt, and after DORMANT_AFTER it rests like an idle session. A
+    session that never ran a turn is dormant from the start."""
+    if session.get("unused") and not session["tasks"]:
+        return True
     return ((at_rest(session) or bool(session.get("failed"))) and not session["tasks"]
             and now - (session.get("since") or now) > DORMANT_AFTER)
 
@@ -1648,19 +1700,25 @@ def cmd_list(args):
     now = time.time()
     directory = state_dir()
     table = rows(directory, now)
-    usage = usage_view(now)
+    store = accounts_api.AccountStore()
+    account_data = store.snapshot(claude_usage() + codex_usage(), now)
+    store.maybe_refresh(os.path.realpath(__file__), now)
+    usage = usage_view(now, account_data["usage"])
     # The session view also deletes tasks that ended unseen, so --tasks runs it as well.
     sessions = sessions_view(directory, now, table, usage)
     if args.json:
         sessions = [session_json(session, now) for session in sessions]
-        json.dump({"now": int(now), "sessions": sessions, "tasks": table, "usage": usage}, sys.stdout,
+        json.dump({"now": int(now), "sessions": sessions, "tasks": table, "usage": usage,
+                   "accounts": account_data["accounts"]}, sys.stdout,
                   indent=2, sort_keys=True)
         sys.stdout.write("\n")
     elif args.tasks:
         sys.stdout.write(render(table, now))
     else:
         # A blank line sets the usage table apart, since `---` only splits sections inside a table.
-        sys.stdout.write(render_sessions(sessions, now, args.all) + "\n" + render_usage(usage, now))
+        notes = {account["agent"]: account_note(account) for account in account_data["accounts"]}
+        sys.stdout.write(render_sessions(sessions, now, args.all) + "\n"
+                         + render_usage(usage, now, {agent: note for agent, note in notes.items() if note}))
     return 0
 
 
@@ -1937,6 +1995,7 @@ def build_parser():
     turn.add_argument("--done", action="store_true")
     done = sub.add_parser("done", help="remove entries recorded with add")
     done.add_argument("ids", nargs="+")
+    accounts_api.add_parser(sub)
     return parser
 
 
@@ -1946,10 +2005,10 @@ def main(argv=None):
         argv.insert(0, "list")
     args = build_parser().parse_args(argv)
     handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done,
-                "turn": cmd_turn}
+                "turn": cmd_turn, "account": accounts_api.account_action}
     try:
         return handlers[args.cmd](args)
-    except StateDirError as exc:
+    except (StateDirError, AccountError) as exc:
         print("agent-eta: %s" % exc, file=sys.stderr)
         return 1
 

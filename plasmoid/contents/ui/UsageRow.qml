@@ -21,6 +21,8 @@ ColumnLayout {
     property real now
     property real fade: 0
     property real yellow: 0.66
+    signal accountActionRequested(string action, var account)
+    signal menuRequested(var account, var item, real x, real y)
 
     spacing: Kirigami.Units.smallSpacing / 2
 
@@ -28,15 +30,45 @@ ColumnLayout {
         Layout.fillWidth: true
 
         PlasmaComponents3.Label {
+            id: accountLabel
             Layout.fillWidth: true
             text: usageRow.group.agent
             font.bold: true
             textFormat: Text.PlainText
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.RightButton
+                onClicked: mouse => usageRow.menuRequested(usageRow.group.account, accountLabel, mouse.x, mouse.y)
+            }
         }
         PlasmaComponents3.Label {
             text: Logic.usageHeadline(usageRow.group, usageRow.now)
             color: usageRow.group.reached ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
             textFormat: Text.PlainText
+        }
+    }
+
+    RowLayout {
+        Layout.fillWidth: true
+        visible: !!usageRow.group.account
+        PlasmaComponents3.Label {
+            Layout.fillWidth: true
+            text: Logic.accountStatus(usageRow.group.account, usageRow.now)
+            visible: text !== ""
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            opacity: 0.7
+        }
+        PlasmaComponents3.ToolButton {
+            text: i18n("Log in")
+            visible: !!usageRow.group.account && ["logged_out", "mismatch"].includes(usageRow.group.account.auth_state)
+            onClicked: usageRow.accountActionRequested("login", usageRow.group.account)
+        }
+        PlasmaComponents3.ToolButton {
+            text: i18n("Remove")
+            icon.name: "edit-delete"
+            visible: !!usageRow.group.account && usageRow.group.account.can_remove && usageRow.group.account.auth_state === "logged_out"
+            onClicked: usageRow.accountActionRequested("remove", usageRow.group.account)
         }
     }
 

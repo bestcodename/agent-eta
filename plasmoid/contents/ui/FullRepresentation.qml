@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
@@ -10,12 +11,12 @@ import org.kde.kirigami as Kirigami
 import "../code/logic.mjs" as Logic
 
 // The popup. Sessions come in agent-eta's own order and sections, the ones that need you first and
-// dormant ones folded away, followed by the usage windows of every agent.
+// stopped and dormant ones independently folded away, followed by every monitored account.
 PlasmaExtras.Representation {
     id: full
 
-    readonly property var groups: Logic.groupSessions(root.listing, root.showDormant)
-    readonly property var usage: Logic.usageGroups(root.listing ? root.listing.usage : [])
+    readonly property var groups: Logic.groupSessions(root.listing, root.showDormant, root.showStopped)
+    readonly property var usage: Logic.usageGroups(root.listing ? root.listing.usage : [], root.listing ? root.listing.accounts : [])
     readonly property real now: root.listing ? root.listing.now : Date.now() / 1000
 
     Layout.minimumWidth: Kirigami.Units.gridUnit * 24
@@ -62,7 +63,7 @@ PlasmaExtras.Representation {
 
         PlasmaComponents3.Label {
             anchors.fill: parent
-            text: root.failure ? root.failure
+            text: root.actionFailure ? root.actionFailure : root.failure ? root.failure
                 : root.updatedAt ? i18n("Updated %1", Qt.formatTime(new Date(root.updatedAt), "HH:mm:ss"))
                 : i18n("Loading…")
             elide: Text.ElideRight
@@ -104,6 +105,13 @@ PlasmaExtras.Representation {
                         icon.name: root.showDormant ? "go-up" : "go-down"
                         onClicked: root.showDormant = !root.showDormant
                     }
+                    PlasmaComponents3.ToolButton {
+                        visible: modelData.section === Logic.STOPPED_SECTION
+                        Layout.leftMargin: Kirigami.Units.largeSpacing
+                        text: root.showStopped ? i18n("Hide stopped sessions") : i18n("Show sessions stopped until a limit resets")
+                        icon.name: root.showStopped ? "go-up" : "go-down"
+                        onClicked: root.showStopped = !root.showStopped
+                    }
                     Repeater {
                         model: modelData.sessions
 
@@ -135,8 +143,51 @@ PlasmaExtras.Representation {
                     now: full.now
                     fade: Plasmoid.configuration.blendYellow ? Plasmoid.configuration.blendWidth / 100 : 0
                     yellow: Plasmoid.configuration.yellowWidth / 100
+                    onAccountActionRequested: (action, account) => root.accountAction(action, account)
+                    onMenuRequested: (account, item, x, y) => accountMenu.show(account, item, x, y)
                 }
             }
+        }
+    }
+
+    FolderDialog {
+        id: folderDialog
+        property var account: null
+        property string action: "launch"
+        title: action === "launch" ? i18n("New session in…") : i18n("Default session directory")
+        onAccepted: {
+            const path = Logic.folderPath(selectedFolder);
+            if (path !== null) root.accountAction(action, account, path);
+            else root.actionFailure = i18n("Choose a local directory");
+        }
+    }
+
+    PlasmaExtras.Menu {
+        id: accountMenu
+        property var account: null
+        onStatusChanged: root.menuOpen = status !== PlasmaExtras.Menu.Closed
+        function show(account, item, x, y) {
+            if (!account) return;
+            this.account = account;
+            visualParent = item;
+            root.menuOpen = true;
+            open(x, y);
+        }
+        PlasmaExtras.MenuItem {
+            text: i18n("New session in the default directory")
+            onClicked: root.accountAction("launch", accountMenu.account)
+        }
+        PlasmaExtras.MenuItem {
+            text: i18n("New session in…")
+            onClicked: { folderDialog.account = accountMenu.account; folderDialog.action = "launch"; folderDialog.open(); }
+        }
+        PlasmaExtras.MenuItem {
+            text: i18n("Set default directory…")
+            onClicked: { folderDialog.account = accountMenu.account; folderDialog.action = "default-directory"; folderDialog.open(); }
+        }
+        PlasmaExtras.MenuItem {
+            text: i18n("Log in")
+            onClicked: root.accountAction("login", accountMenu.account)
         }
     }
 
