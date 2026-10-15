@@ -656,6 +656,54 @@ class Sessions(StateTest):
         self.assertEqual(sorted(s["state"] for s in self.view(reset + 1)),
                          ["idle", "idle", "idle", "waiting", "working"])
 
+    def test_codex_usage_limit_below_a_full_window_waits_for_the_fullest_one(self):
+        # Codex stopped two threads on 2026-10-14 with the 5-hour window at 99% and 97%.
+        folder = self.codex / "sessions" / "2026" / "10" / "14"
+        folder.mkdir(parents=True)
+        rollout = folder / "rollout-2026-10-14T22-28-28-thread-1.jsonl"
+        now = time.time()
+        resets = int(now) + 360
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now - 5))
+        def event(**payload):
+            return json.dumps({"timestamp": stamp, "type": "event_msg", "payload": payload}) + "\n"
+        limits = {"limit_id": "codex", "primary": {"used_percent": 99.0, "resets_at": resets},
+                  "secondary": {"used_percent": 16.0, "resets_at": resets + 86400}}
+        rollout.write_text(event(type="task_started", turn_id="t-1"))
+        self.hook(self.codex_event("UserPromptSubmit"))
+        with rollout.open("a") as handle:
+            handle.write(event(type="token_count", rate_limits=limits) +
+                         event(type="token_count", rate_limits={"limit_id": "premium", "primary": None}) +
+                         event(type="task_complete", turn_id="t-1",
+                               error={"message": "out of credits", "codex_error_info": "usage_limit_exceeded"}))
+        [session] = self.view(now)
+        self.assertEqual((session["state"], session["waiting_for"], session["due"]), ("stopped", "usage limit", resets))
+        self.assertEqual(eta.section(session), 2)
+        [session] = self.view(resets + 1)
+        self.assertEqual((session["state"], session["since"], session["due"]), ("idle", resets, None))
+
+    def test_an_archived_codex_thread_is_left_out_until_unarchived(self):
+        import sqlite3
+        connection = sqlite3.connect(str(self.codex / "state_5.sqlite"))
+        connection.execute("CREATE TABLE threads (id TEXT, name TEXT, title TEXT, rollout_path TEXT, archived INTEGER)")
+        connection.executemany("INSERT INTO threads VALUES (?, ?, ?, ?, ?)", [
+            ("thread-1", "Kept", "kept", "/nope", 0), ("thread-2", "Archived", "archived", "/nope", 1)])
+        connection.commit()
+        self.hook(self.codex_event("Stop"))
+        self.hook(self.codex_event("Stop", thread="thread-2"))
+        self.assertEqual([s["name"] for s in self.view()], ["Kept"])
+        connection.execute("UPDATE threads SET archived = 0 WHERE id = 'thread-2'")
+        connection.commit()
+        connection.close()
+        self.assertEqual(sorted(s["name"] for s in self.view()), ["Archived", "Kept"])
+
+    def test_fullest_reset_takes_the_window_closest_to_its_limit(self):
+        self.assertIsNone(eta.fullest_reset({"limit_id": "premium", "primary": None, "secondary": None}))
+        self.assertIsNone(eta.fullest_reset(None))
+        self.assertEqual(eta.fullest_reset({"primary": {"used_percent": 99, "resets_at": 5},
+                                            "secondary": {"used_percent": 16, "resets_at": 9}}), 5)
+        self.assertEqual(eta.fullest_reset({"primary": {"used_percent": 40, "resets_at": 5},
+                                            "secondary": {"used_percent": 100, "resets_at": 9}}), 9)
+
     def test_exhausted_until_takes_the_latest_full_window(self):
         self.assertIsNone(eta.exhausted_until({"limit_id": "premium", "primary": None}))
         self.assertEqual(eta.exhausted_until({"primary": {"used_percent": 40, "resets_at": 5}}), 0)
@@ -673,7 +721,8 @@ class Sessions(StateTest):
         self.assertEqual([eta.dormant(s, now) for s in sessions], [False, False, True])
         short = eta.render_sessions(sessions, now)
         self.assertNotIn("session-%d" % old.pid, short)
-        self.assertIn("1 dormant session, idle for more than 12h. agent-eta --all lists it.", short)
+        self.assertIn("1 dormant session, idle for more than %dh. agent-eta --all lists it." % (eta.DORMANT_AFTER // 3600),
+                      short)
         full = eta.render_sessions(sessions, now, show_dormant=True).splitlines()
         rule = len(full) - 1 - full[::-1].index(eta.SECTION_RULE)
         self.assertIn("session-%d" % old.pid, full[rule + 1])

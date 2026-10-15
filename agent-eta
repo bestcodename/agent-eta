@@ -95,8 +95,10 @@ SESSION_IDLE_TTL = 12 * 3600
 SESSION_STALE = 6 * 3600
 # An idle session without a running task counts as dormant after this long. Neither agent says
 # whether anyone still looks at a session, and a process that lives on for days in a terminal
-# tab or the Claude Code daemon looks just like one in use, so time is the signal.
-DORMANT_AFTER = 12 * 3600
+# tab, the Claude Code daemon or the Codex app's one app-server for all threads looks just like
+# one in use, so time is the signal. Twelve hours kept a night's worth of finished threads under
+# "Needs you" on 2026-10-15.
+DORMANT_AFTER = 2 * 3600
 # The JSON section of a dormant session, after the three of section().
 DORMANT_SECTION = 3
 # Where PhpStorm projects live. A session below it belongs to the project at its first level.
@@ -620,6 +622,7 @@ def codex_threads():
 
     `name` is set once Codex has named a thread or the user renamed it. Until then the app
     shows the first prompt, which the database keeps as `title`, so its first line stands in.
+    `archived` is set while the user has archived the thread in the app.
     """
     paths = sorted(glob.glob(os.path.join(codex_home(), "state_*.sqlite")),
                    key=lambda path: int(re.sub(r"\D", "", os.path.basename(path)) or 0))
@@ -629,10 +632,13 @@ def codex_threads():
     try:
         connection = sqlite3.connect("file:%s?mode=ro" % paths[-1], uri=True, timeout=1)
         try:
-            for thread, name, title, rollout in connection.execute(
-                    "SELECT id, name, title, rollout_path FROM threads"):
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(threads)")}
+            archived = "archived" if "archived" in columns else "0"
+            for thread, name, title, rollout, gone in connection.execute(
+                    "SELECT id, name, title, rollout_path, %s FROM threads" % archived):
                 first = next((line.strip() for line in str(title or "").splitlines() if line.strip()), "")
-                threads[thread] = {"name": name or first.rstrip(":") or None, "rollout": rollout}
+                threads[thread] = {"name": name or first.rstrip(":") or None, "rollout": rollout,
+                                   "archived": bool(gone)}
         finally:
             connection.close()
     except sqlite3.Error:
@@ -834,7 +840,7 @@ def codex_pending(path):
     records = tail_records(path)
     if records is None:
         return None
-    asked, planned, finished, resets = {}, set(), None, None
+    asked, planned, finished, resets, last = {}, set(), None, None, None
     for record in records:
         payload = record["payload"]
         kind = payload.get("type")
@@ -854,12 +860,14 @@ def codex_pending(path):
                 finished = None
             elif kind == "token_count":
                 resets = exhausted_until(payload.get("rate_limits")) or resets
+                last = payload.get("rate_limits") if fullest_reset(payload.get("rate_limits")) else last
     if asked:
         return "question", parse_stamp(list(asked.values())[-1]) or 0, None
     if finished and isinstance(finished[2], dict):
         code = str(finished[2].get("codex_error_info") or "error")
         reason = CODEX_ERRORS.get(code, code.replace("_", " "))
-        return reason, parse_stamp(finished[1]) or 0, resets if code == "usage_limit_exceeded" else None
+        until = (resets or fullest_reset(last)) if code == "usage_limit_exceeded" else None
+        return reason, parse_stamp(finished[1]) or 0, until
     if finished and finished[0] in planned:
         return "plan approval", parse_stamp(finished[1]) or 0, None
     return None
@@ -909,12 +917,29 @@ def exhausted_until(limits):
     return max(resets) if resets else 0
 
 
+def fullest_reset(limits):
+    """When the fullest Codex usage window of a rate_limits record resets, or None without window data.
+
+    Codex ends a turn with usage_limit_exceeded before its last reading shows a window at 100%.
+    On 2026-10-14 two threads stopped with the 5-hour window at 99% and 97%, so the fullest
+    window stands in for the exhausted one that exhausted_until() finds no trace of.
+    """
+    if not isinstance(limits, dict):
+        return None
+    windows = [window for window in (limits.get("primary"), limits.get("secondary"))
+               if isinstance(window, dict) and window.get("resets_at")]
+    if not windows:
+        return None
+    return max(windows, key=lambda window: (window.get("used_percent") or 0, window["resets_at"]))["resets_at"]
+
+
 def codex_sessions(directory, now, names, prune=True, threads=None):
     """Every Codex thread its hooks have reported, while its app-server runs.
 
     A thread whose hooks stayed silent for SESSION_IDLE_TTL is dropped, and one that has
     claimed to work or wait for SESSION_STALE without a word counts as idle. A thread that is
-    not idle and has an unanswered question in its transcript waits for that answer.
+    not idle and has an unanswered question in its transcript waits for that answer. An archived
+    thread is left out but keeps its record, so it comes back once it is unarchived.
     """
     found = []
     for path in json_files(os.path.join(directory, "sessions")):
@@ -930,6 +955,8 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
         waiting_for = record.get("waiting_for")
         if threads is None:
             threads = codex_threads()
+        if (threads.get(record["id"]) or {}).get("archived"):
+            continue
         hint = record.get("transcript") or (threads.get(record["id"]) or {}).get("rollout")
         rollout = codex_rollout(record["id"], hint)
         pending = codex_pending(rollout)
@@ -1977,7 +2004,7 @@ def build_parser():
     listing = sub.add_parser("list", help="print every running session with its state, ETA and tasks")
     listing.add_argument("--json", action="store_true", help="machine-readable output")
     listing.add_argument("--tasks", action="store_true", help="the flat task list instead of the sessions")
-    listing.add_argument("--all", action="store_true", help="also list dormant sessions, idle for more than 12h")
+    listing.add_argument("--all", action="store_true", help="also list dormant sessions, idle for more than %dh" % (DORMANT_AFTER // 3600))
     sub.add_parser("hook", help="hook entry point for Claude Code and Codex")
     run = sub.add_parser("run", help="run a command and list it while it runs")
     run.add_argument("--eta", type=eta_type, required=True, help="25m, 1h30m, 7200, ca. 10 minutes")
