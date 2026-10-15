@@ -12,8 +12,8 @@ import "../code/logic.mjs" as Logic
 // traffic-light bands from usageBands() in logic.mjs, green below the tick, yellow around it and
 // red where the usage runs far ahead of the time, `yellow` sets the half-width
 // of the yellow band and `fade` blends it. Every reset
-// carries its countdown, as in `resets in 49m (18:30)`, and the agent's own line names its highest
-// share with the reset that comes first.
+// carries its countdown, as in `resets in 49m (18:30)`, and the status line under the agent's name
+// names its highest share with the reset that comes first, beside the freshness of the reading.
 ColumnLayout {
     id: usageRow
 
@@ -26,38 +26,32 @@ ColumnLayout {
 
     spacing: Kirigami.Units.smallSpacing / 2
 
-    RowLayout {
+    PlasmaComponents3.Label {
+        id: accountLabel
         Layout.fillWidth: true
-
-        PlasmaComponents3.Label {
-            id: accountLabel
-            Layout.fillWidth: true
-            text: usageRow.group.agent
-            font.bold: true
-            textFormat: Text.PlainText
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: mouse => usageRow.menuRequested(usageRow.group.account, accountLabel, mouse.x, mouse.y)
-            }
-        }
-        PlasmaComponents3.Label {
-            text: Logic.usageHeadline(usageRow.group, usageRow.now)
-            color: usageRow.group.reached ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
-            textFormat: Text.PlainText
+        text: usageRow.group.agent
+        font.bold: true
+        textFormat: Text.PlainText
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.RightButton
+            onClicked: mouse => usageRow.menuRequested(usageRow.group.account, accountLabel, mouse.x, mouse.y)
         }
     }
 
     RowLayout {
         Layout.fillWidth: true
-        visible: !!usageRow.group.account
         PlasmaComponents3.Label {
             Layout.fillWidth: true
             text: Logic.accountStatus(usageRow.group.account, usageRow.now)
-            visible: text !== ""
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
             opacity: 0.7
+        }
+        PlasmaComponents3.Label {
+            text: Logic.usageHeadline(usageRow.group, usageRow.now)
+            color: usageRow.group.reached ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
+            textFormat: Text.PlainText
         }
         PlasmaComponents3.ToolButton {
             text: i18n("Log in")
