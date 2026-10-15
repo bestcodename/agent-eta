@@ -418,7 +418,11 @@ export function shellQuote(text) {
 
 // What "Copy" puts on the clipboard. A Claude Code session gets the command that resumes it in its
 // directory and account, a Codex thread its link in the Codex app, which has no CLI on the PATH.
+// An internal Codex thread, such as the memory consolidation, has no page in the app.
 export function resumeCommand(session) {
+    if (session.internal) {
+        return "";
+    }
     if (session.agent === "codex" && session.id) {
         return `codex://threads/${session.id}`;
     }

@@ -135,6 +135,13 @@ USAGE_ROLLOUTS = 5
 USAGE_ROLLOUTS_MAX = 50
 # How a Codex turn that ended with an error reads in the list, by its codex_error_info.
 CODEX_ERRORS = {"usage_limit_exceeded": "usage limit"}
+# Codex consolidates its memories in a sub-agent thread that works in this directory below its home.
+# The thread has no row in the state database and no rollout, and it fires UserPromptSubmit and tool
+# hooks but never Stop. Its end is the finished_at of the consolidation job in memories_<n>.sqlite,
+# measured on 2026-10-15 at 09:14:56, 17 seconds after the thread's last hook call.
+CODEX_MEMORY_DIR = "memories"
+CODEX_MEMORY_JOB = "memory_consolidate_global"
+CODEX_MEMORY_NAME = "Codex memories"
 # Claude Code keeps a session's title in its transcript and rewrites it now and then. Only the
 # end of a transcript is read first, because a long one runs to tens of megabytes.
 TRANSCRIPT_TAIL = 2 * 1024 * 1024
@@ -624,13 +631,12 @@ def codex_threads():
     shows the first prompt, which the database keeps as `title`, so its first line stands in.
     `archived` is set while the user has archived the thread in the app.
     """
-    paths = sorted(glob.glob(os.path.join(codex_home(), "state_*.sqlite")),
-                   key=lambda path: int(re.sub(r"\D", "", os.path.basename(path)) or 0))
-    if not paths:
+    path = newest_codex_db("state")
+    if not path:
         return {}
     threads = {}
     try:
-        connection = sqlite3.connect("file:%s?mode=ro" % paths[-1], uri=True, timeout=1)
+        connection = sqlite3.connect("file:%s?mode=ro" % path, uri=True, timeout=1)
         try:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(threads)")}
             archived = "archived" if "archived" in columns else "0"
@@ -644,6 +650,36 @@ def codex_threads():
     except sqlite3.Error:
         return {}
     return threads
+
+
+def newest_codex_db(prefix):
+    """The newest `<prefix>_<n>.sqlite` in the Codex home, or None."""
+    paths = sorted(glob.glob(os.path.join(codex_home(), "%s_*.sqlite" % prefix)),
+                   key=lambda path: int(re.sub(r"\D", "", os.path.basename(path)) or 0))
+    return paths[-1] if paths else None
+
+
+def codex_memory_finished():
+    """When Codex last finished consolidating its memories, as a Unix time, or None."""
+    path = newest_codex_db("memories")
+    if not path:
+        return None
+    try:
+        connection = sqlite3.connect("file:%s?mode=ro" % path, uri=True, timeout=1)
+        try:
+            row = connection.execute("SELECT finished_at FROM jobs WHERE kind = ?", (CODEX_MEMORY_JOB,)).fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return None
+    return row[0] if row and isinstance(row[0], (int, float)) else None
+
+
+def is_codex_memory_agent(record, threads):
+    """Whether a hook record belongs to the sub-agent Codex consolidates its memories in."""
+    cwd = record.get("cwd")
+    return (bool(cwd) and record.get("id") not in threads
+            and os.path.realpath(cwd) == os.path.realpath(os.path.join(codex_home(), CODEX_MEMORY_DIR)))
 
 
 def codex_thread_names(threads=None):
@@ -939,7 +975,9 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
     A thread whose hooks stayed silent for SESSION_IDLE_TTL is dropped, and one that has
     claimed to work or wait for SESSION_STALE without a word counts as idle. A thread that is
     not idle and has an unanswered question in its transcript waits for that answer. An archived
-    thread is left out but keeps its record, so it comes back once it is unarchived.
+    thread is left out but keeps its record, so it comes back once it is unarchived. The sub-agent
+    Codex consolidates its memories in is marked `internal`, since the app cannot open it, and
+    dropped once the consolidation job finished after the thread started.
     """
     found = []
     for path in json_files(os.path.join(directory, "sessions")):
@@ -956,6 +994,11 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
         if threads is None:
             threads = codex_threads()
         if (threads.get(record["id"]) or {}).get("archived"):
+            continue
+        internal = is_codex_memory_agent(record, threads)
+        if internal and (codex_memory_finished() or 0) >= (record.get("since") or updated):
+            if prune:
+                remove(path)
             continue
         hint = record.get("transcript") or (threads.get(record["id"]) or {}).get("rollout")
         rollout = codex_rollout(record["id"], hint)
@@ -982,12 +1025,14 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
             "agent": "codex",
             "id": record["id"],
             "pid": None,
-            "name": names.get(record["id"]) or os.path.basename(record.get("cwd") or "") or "-",
+            "name": (CODEX_MEMORY_NAME if internal else names.get(record["id"]))
+                    or os.path.basename(record.get("cwd") or "") or "-",
             "state": state,
             "waiting_for": waiting_for if state in ("waiting", "stopped") else None,
             "since": since,
             "cwd": record.get("cwd"),
             "resume_at": resume_at,
+            "internal": internal,
         })
     return found
 

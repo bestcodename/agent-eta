@@ -38,7 +38,11 @@ Item {
         return Logic.pickWindow(windows(), session.pids || [], session.project_name || "");
     }
 
+    // An internal Codex thread, such as the memory consolidation, has no page in the app.
     function canJump(session) {
+        if (session.internal) {
+            return false;
+        }
         if (session.agent === "codex") {
             return !!session.id;
         }
@@ -48,6 +52,9 @@ Item {
     // dsh serves no link to a single session, so its jump opens the web UI, which keeps its sign-in
     // in a browser cookie for 30 days.
     function jump(session) {
+        if (session.internal) {
+            return false;
+        }
         if (session.agent === "codex" && session.id) {
             Qt.openUrlExternally("codex://threads/" + encodeURIComponent(session.id));
             return true;

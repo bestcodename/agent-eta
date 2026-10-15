@@ -759,6 +759,42 @@ class Sessions(StateTest):
         self.assertEqual((session["state"], session["unused"]), ("unknown", False))
         self.assertFalse(eta.dormant(session, now))
 
+    def memory_job(self, finished_at):
+        import sqlite3
+        connection = sqlite3.connect(str(self.codex / "memories_1.sqlite"))
+        connection.execute("CREATE TABLE IF NOT EXISTS jobs (kind TEXT, job_key TEXT, finished_at INTEGER)")
+        connection.execute("DELETE FROM jobs")
+        connection.execute("INSERT INTO jobs VALUES ('memory_consolidate_global', 'global', ?)", (finished_at,))
+        connection.commit()
+        connection.close()
+
+    def test_the_codex_memory_agent_works_until_its_consolidation_finished(self):
+        cwd = str(self.codex / "memories")
+        self.hook(self.codex_event("UserPromptSubmit", cwd=cwd))
+        record = os.path.join(self.dir, "sessions", "codex-thread-1.json")
+        started = eta.read_json(record)["since"]
+        for finished in (None, started - 600):
+            with self.subTest(finished=finished):
+                self.memory_job(finished)
+                [session] = self.view()
+                self.assertEqual((session["name"], session["state"], session["internal"]),
+                                 (eta.CODEX_MEMORY_NAME, "working", True))
+        self.memory_job(started + 60)
+        self.assertEqual(self.view(), [])
+        self.assertFalse(os.path.exists(record))
+
+    def test_a_codex_thread_in_the_state_database_is_no_memory_agent(self):
+        import sqlite3
+        connection = sqlite3.connect(str(self.codex / "state_5.sqlite"))
+        connection.execute("CREATE TABLE threads (id TEXT, name TEXT, title TEXT, rollout_path TEXT)")
+        connection.execute("INSERT INTO threads VALUES ('thread-1', 'Notes', 'notes', '/nope')")
+        connection.commit()
+        connection.close()
+        self.memory_job(int(time.time()) + 60)
+        self.hook(self.codex_event("UserPromptSubmit", cwd=str(self.codex / "memories")))
+        [session] = self.view()
+        self.assertEqual((session["name"], session["internal"]), ("Notes", False))
+
     def test_codex_interrupt_without_turn_id_is_still_codex(self):
         self.hook(self.codex_event("UserPromptSubmit"))
         self.hook({"hook_event_name": "Interrupt", "session_id": "thread-1"})
