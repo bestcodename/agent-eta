@@ -1013,8 +1013,9 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
         # A turn that ended with an error fires no Stop hook, so the transcript decides on its own.
         # An open question only counts inside a turn, and a plan only once its turn has ended.
         if pending and pending[2] and pending[2] <= now:
-            # The usage limit has reset, so the thread only waits for its next prompt.
-            state, since = "idle", pending[2]
+            # The usage limit has reset, so the thread only waits for its next prompt. It has rested
+            # since its failed turn ended, which is the age the Codex app shows for it.
+            state, since = "idle", pending[1] or since
         elif pending and pending[0] not in ("question", "plan approval"):
             state, since, waiting_for, resume_at = "stopped", pending[1] or since, pending[0], pending[2]
         elif pending and (pending[0] == "question") == (state != "idle"):

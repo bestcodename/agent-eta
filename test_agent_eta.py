@@ -617,9 +617,12 @@ class Sessions(StateTest):
         [session] = self.view(now + 11)
         self.assertEqual((session["state"], session["tasks"]), ("stopped", []))
         self.assertFalse(pathlib.Path(self.dir, "codex-call_1.json").exists())
+        # Once the window resets, the thread rests since its failed turn ended, not since the reset.
+        ended = eta.parse_stamp(stamp)
         [session] = self.view(resets + 1)
-        self.assertEqual((session["state"], session["since"], session["due"]), ("idle", resets, None))
-        self.assertTrue(eta.dormant(session, resets + eta.DORMANT_AFTER + 1))
+        self.assertEqual((session["state"], session["since"], session["due"]), ("idle", ended, None))
+        self.assertFalse(eta.dormant(session, resets + 1))
+        self.assertTrue(eta.dormant(session, ended + eta.DORMANT_AFTER + 1))
         with rollout.open("a") as handle:
             handle.write(event(type="task_started", turn_id="t-2"))
         self.assertEqual([s["state"] for s in self.view(now)], ["working"])
@@ -679,7 +682,7 @@ class Sessions(StateTest):
         self.assertEqual((session["state"], session["waiting_for"], session["due"]), ("stopped", "usage limit", resets))
         self.assertEqual(eta.section(session), 2)
         [session] = self.view(resets + 1)
-        self.assertEqual((session["state"], session["since"], session["due"]), ("idle", resets, None))
+        self.assertEqual((session["state"], session["since"], session["due"]), ("idle", eta.parse_stamp(stamp), None))
 
     def test_an_archived_codex_thread_is_left_out_until_unarchived(self):
         import sqlite3
