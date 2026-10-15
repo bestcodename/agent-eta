@@ -76,6 +76,8 @@ test("each state gets a traffic-light colour and an overdue working session turn
         assert.equal(logic.stateLight(session({state})), light);
     }
     assert.equal(logic.stateLight(session({state: "working", overdue: true})), "yellow");
+    assert.equal(logic.stateLight(session({state: "idle", tasks: ["wait"]})), "green");
+    assert.equal(logic.stateLight(session({state: "idle", tasks: ["wait"], overdue: true})), "yellow");
 });
 
 test("countdowns read like `12h 13m` and follow the clock time of a reset", () => {
@@ -100,6 +102,7 @@ test("the tray orb is a traffic light over the sessions that are not dormant", (
     assert.deepEqual(orb([session({state: "idle", dormant: true, section: 3})]), ["none", 0, "passive"]);
     assert.deepEqual(orb([session({state: "working"})]), ["green", 0, "active"]);
     assert.deepEqual(orb([session({state: "stopped"})]), ["green", 0, "active"]);
+    assert.deepEqual(orb([session({state: "idle", tasks: ["wait"]})]), ["green", 0, "active"]);
     assert.deepEqual(orb([session({state: "working", pid: 1}), session({state: "idle", pid: 2})]),
                      ["yellow", 1, "active"]);
     assert.deepEqual(orb([session({state: "working", overdue: true, pid: 1}), session({state: "idle", pid: 2})]),

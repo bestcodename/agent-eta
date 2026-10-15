@@ -132,12 +132,20 @@ export function agentLabel(session) {
     return session.account ? `${session.agent}/${session.account}` : session.agent || "-";
 }
 
+// The state a session counts as. An idle session that holds a running task, such as a wait
+// recorded with `agent-eta add`, works on through it, as the session table ranks it among the
+// working ones.
+export function shownState(session) {
+    return session.state === "idle" && (session.tasks || []).length ? "working" : session.state;
+}
+
 // A working session past its ETA turns yellow, like the tray orb counts it.
 export function stateLight(session) {
-    if (session.overdue && session.state === "working") {
+    const state = shownState(session);
+    if (session.overdue && state === "working") {
         return "yellow";
     }
-    return STATE_LIGHTS[session.state] || "grey";
+    return STATE_LIGHTS[state] || "grey";
 }
 
 export function title(session) {
@@ -201,10 +209,10 @@ function tasksById(listing) {
 export function summary(listing) {
     const byId = tasksById(listing);
     const live = sessionsOf(listing).filter(session => !session.dormant);
-    const count = state => live.filter(session => session.state === state).length;
-    const overdue = live.filter(session => session.state === "working" && late(session, byId)).length;
+    const count = state => live.filter(session => shownState(session) === state).length;
+    const overdue = live.filter(session => shownState(session) === "working" && late(session, byId)).length;
     const waiting = count("waiting");
-    const timed = live.filter(session => session.state === "working" && session.progress !== null
+    const timed = live.filter(session => shownState(session) === "working" && session.progress !== null
                               && session.progress !== undefined);
     timed.sort((a, b) => a.remaining - b.remaining);
     const result = {
