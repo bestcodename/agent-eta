@@ -137,11 +137,8 @@ USAGE_ROLLOUTS_MAX = 50
 CODEX_ERRORS = {"usage_limit_exceeded": "usage limit"}
 # Codex consolidates its memories in a sub-agent thread that works in this directory below its home.
 # The thread has no row in the state database and no rollout, and it fires UserPromptSubmit and tool
-# hooks but never Stop. Its end is the finished_at of the consolidation job in memories_<n>.sqlite,
-# measured on 2026-10-15 at 09:14:56, 17 seconds after the thread's last hook call.
+# hooks but never Stop. It is no session anyone works in, so it is never listed.
 CODEX_MEMORY_DIR = "memories"
-CODEX_MEMORY_JOB = "memory_consolidate_global"
-CODEX_MEMORY_NAME = "Codex memories"
 # Claude Code keeps a session's title in its transcript and rewrites it now and then. Only the
 # end of a transcript is read first, because a long one runs to tens of megabytes.
 TRANSCRIPT_TAIL = 2 * 1024 * 1024
@@ -659,22 +656,6 @@ def newest_codex_db(prefix):
     return paths[-1] if paths else None
 
 
-def codex_memory_finished():
-    """When Codex last finished consolidating its memories, as a Unix time, or None."""
-    path = newest_codex_db("memories")
-    if not path:
-        return None
-    try:
-        connection = sqlite3.connect("file:%s?mode=ro" % path, uri=True, timeout=1)
-        try:
-            row = connection.execute("SELECT finished_at FROM jobs WHERE kind = ?", (CODEX_MEMORY_JOB,)).fetchone()
-        finally:
-            connection.close()
-    except sqlite3.Error:
-        return None
-    return row[0] if row and isinstance(row[0], (int, float)) else None
-
-
 def is_codex_memory_agent(record, threads):
     """Whether a hook record belongs to the sub-agent Codex consolidates its memories in."""
     cwd = record.get("cwd")
@@ -976,8 +957,7 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
     claimed to work or wait for SESSION_STALE without a word counts as idle. A thread that is
     not idle and has an unanswered question in its transcript waits for that answer. An archived
     thread is left out but keeps its record, so it comes back once it is unarchived. The sub-agent
-    Codex consolidates its memories in is marked `internal`, since the app cannot open it, and
-    dropped once the consolidation job finished after the thread started.
+    Codex consolidates its memories in is no session and is dropped along with its record.
     """
     found = []
     for path in json_files(os.path.join(directory, "sessions")):
@@ -995,8 +975,7 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
             threads = codex_threads()
         if (threads.get(record["id"]) or {}).get("archived"):
             continue
-        internal = is_codex_memory_agent(record, threads)
-        if internal and (codex_memory_finished() or 0) >= (record.get("since") or updated):
+        if is_codex_memory_agent(record, threads):
             if prune:
                 remove(path)
             continue
@@ -1026,14 +1005,12 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
             "agent": "codex",
             "id": record["id"],
             "pid": None,
-            "name": (CODEX_MEMORY_NAME if internal else names.get(record["id"]))
-                    or os.path.basename(record.get("cwd") or "") or "-",
+            "name": names.get(record["id"]) or os.path.basename(record.get("cwd") or "") or "-",
             "state": state,
             "waiting_for": waiting_for if state in ("waiting", "stopped") else None,
             "since": since,
             "cwd": record.get("cwd"),
             "resume_at": resume_at,
-            "internal": internal,
         })
     return found
 

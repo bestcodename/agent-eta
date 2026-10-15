@@ -316,7 +316,6 @@ test("copy gives a resume command for Claude Code and a thread link for Codex", 
                  "cd '/work/shop' && claude-account run 'ndcnet' --resume 'abc'");
     assert.equal(logic.resumeCommand(session({id: "abc", cwd: null})), "claude --resume 'abc'");
     assert.equal(logic.resumeCommand(session({agent: "codex", id: "t-1"})), "codex://threads/t-1");
-    assert.equal(logic.resumeCommand(session({agent: "codex", id: "t-1", internal: true})), "");
     assert.equal(logic.resumeCommand(session({agent: "local", id: null})), "");
     assert.equal(logic.resumeCommand(session({agent: "dsh", id: "session-1"})), "");
 });
