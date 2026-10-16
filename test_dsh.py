@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the dsh sessions of agent-eta.
 
-Run with: python3 -m unittest discover -s scripts/agent-eta -v
+Run with: python3 -m unittest discover -s . -v
 """
 
 import json

@@ -1,0 +1,52 @@
+# agent-eta
+
+`agent-eta` lists every running Claude Code, Codex, dsh and local-model session on a Linux machine with its state, its
+ETA and its background tasks, and shows the usage windows of every account. Sessions waiting for an answer come first.
+A Plasma 6 tray widget shows the same overview, raises a session's window on click and offers account actions such as
+starting a session, logging in and moving all Claude Code sessions to another account.
+
+Hooks and the agents' own session registries fill the list, so an agent only has to write down the ETA it states anyway.
+
+## Install
+
+```sh
+git clone git@github.com:bestcodename/agent-eta.git ~/PhpstormProjects/agent-eta
+~/PhpstormProjects/agent-eta/install.sh
+systemctl --user restart plasma-plasmashell.service   # load a new or changed widget
+```
+
+The installer links `~/.local/bin/agent-eta` to the checkout, so a `git pull` updates the CLI. The widget is a copy in
+`~/.local/share/plasma/plasmoids`, so it needs the installer and a plasmashell restart after each change.
+
+Requirements are Python 3 with the standard library only (CI runs 3.13), and Plasma 6 for the widget. The Claude Code
+account features use `claude-account` from [bestcodename/ai](https://github.com/bestcodename/ai) when it is on `PATH`
+or in `~/.local/bin`, and the usage windows come from that repository's `scripts/claude-usage/statusline.py`.
+
+## Usage
+
+```sh
+agent-eta                          # sessions, their tasks and the usage windows
+agent-eta add --eta 10m --label "Run the test suite"
+agent-eta done <id>
+agent-eta turn --eta 20m --label "Long refactor"
+agent-eta list --json --all        # what the widget reads
+```
+
+The hooks for Claude Code and Codex, every command and the widget are described in
+[docs/agent-eta.md](docs/agent-eta.md).
+
+## Tests
+
+```sh
+python3 -m unittest discover -s . -v
+node --test --test-isolation=none test_plasmoid.mjs
+```
+
+## Changelog and roadmap
+
+See [CHANGELOG.md](CHANGELOG.md) and [TODO.md](TODO.md). Before 1.0.0 agent-eta lived in bestcodename/ai under
+`scripts/agent-eta`.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

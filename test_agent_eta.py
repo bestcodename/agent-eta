@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for agent-eta.
 
-Run with:  python3 -m unittest discover -s scripts/agent-eta -v
+Run with:  python3 -m unittest discover -s . -v
 
 Every test works in its own state directory and its own fake Claude Code and Codex
 homes, so nothing here touches /tmp/agent-eta-<uid> or a live session registry. The hook
@@ -133,7 +133,7 @@ class StateTest(unittest.TestCase):
 
     def second_account(self):
         """Register the fixture's directory as account work and a second one as private, the way
-        scripts/claude-account writes its registry, and return the second directory."""
+        claude-account (bestcodename/ai) writes its registry, and return the second directory."""
         private = self.root / "claude-private"
         (private / "sessions").mkdir(parents=True)
         self.accounts.write_text(json.dumps({"accounts": [

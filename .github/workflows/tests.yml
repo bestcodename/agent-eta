@@ -1,0 +1,37 @@
+name: Tests
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # The Python suite also executes the widget's node:test cases.
+      # Install Node explicitly so UI regressions cannot silently skip in CI.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s . -v
+
+      - name: Widget tests
+        run: node --test --test-isolation=none test_plasmoid.mjs
+
+      - name: Syntax check
+        run: |
+          python3 -m py_compile agent-eta agent_eta_*.py
+          bash -n install.sh
+
+      - name: Lint the installer
+        run: |
+          command -v shellcheck >/dev/null || sudo apt-get install -y shellcheck
+          shellcheck install.sh

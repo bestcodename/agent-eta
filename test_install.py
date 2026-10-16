@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for install.sh and the widget's logic.mjs.
 
-Run with: python3 -m unittest discover -s scripts/agent-eta -v
+Run with: python3 -m unittest discover -s . -v
 """
 
 import os

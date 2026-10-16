@@ -233,11 +233,18 @@ class Actions(Isolated):
     def test_claude_unregister_uses_the_existing_tool_and_preserves_the_directory(self):
         self.registered(("work",))
         os.environ["CLAUDE_CONFIG_DIR"] = str(self.root / "claude-work")
-        original = subprocess.run
-        def remove(command, **kwargs):
-            return original(command, **kwargs)
-        with mock.patch.object(subprocess, "run", side_effect=remove):
-            accounts.account_action(self.args("remove", "claude:work"))
+        # A stand-in for `claude-account remove`, which lives in bestcodename/ai: it drops the entry and keeps the
+        # directory, as the real tool does.
+        tool = self.root / "claude-account-stub"
+        tool.write_text("#!" + sys.executable + "\nimport json,sys\n"
+                        "path=" + repr(str(self.registry)) + "\n"
+                        "assert sys.argv[1]=='remove'\n"
+                        "data=json.load(open(path))\n"
+                        "data['accounts']=[a for a in data['accounts'] if a['name']!=sys.argv[2]]\n"
+                        "json.dump(data,open(path,'w'))\n")
+        tool.chmod(0o700)
+        os.environ["AGENT_ETA_CLAUDE_ACCOUNT_BIN"] = str(tool)
+        accounts.account_action(self.args("remove", "claude:work"))
         self.assertTrue((self.root / "claude-work").is_dir())
         self.assertEqual([a["id"] for a in self.store.inventory()], ["codex"])
         self.registered(("work",))

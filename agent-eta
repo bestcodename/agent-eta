@@ -1232,7 +1232,7 @@ def dsh_sessions(directory, now):
 
 
 def claude_usage():
-    """The Claude Code usage windows of every account as scripts/claude-usage/statusline.py last
+    """The Claude Code usage windows of every account as statusline.py of bestcodename/ai (scripts/claude-usage) last
     recorded them, each account as an agent of its own."""
     found = []
     for account, directory in claude_accounts():

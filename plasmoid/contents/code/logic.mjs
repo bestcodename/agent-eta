@@ -1,6 +1,6 @@
 // What the agent-eta tray widget shows, computed from `agent-eta list --json --all`.
 //
-// Pure functions without QML, so `node --test` covers them (scripts/agent-eta/test_plasmoid.mjs).
+// Pure functions without QML, so `node --test` covers them (test_plasmoid.mjs).
 // The order of the sessions and their section come from agent-eta itself, so nothing here sorts
 // sessions. See docs/agent-eta.md, section "Tray widget".
 

@@ -1,6 +1,6 @@
 // Tests for the logic of the agent-eta tray widget.
 //
-// Run with:  node --test scripts/agent-eta/test_plasmoid.mjs
+// Run with:  node --test test_plasmoid.mjs
 // test_plasmoid.py runs this file as well, so the Python suite covers it.
 
 process.env.TZ = "Europe/Berlin";

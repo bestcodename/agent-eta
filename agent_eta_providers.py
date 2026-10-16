@@ -21,11 +21,11 @@ class AccountError(Exception):
 
 def executable(kind):
     """Resolve desktop binaries even when Plasma's PATH lacks ~/.local/bin."""
-    here = Path(__file__).resolve().parent
     candidates = {
         "codex": [os.environ.get("AGENT_ETA_CODEX_BIN"), shutil.which("codex"), "/usr/lib/chatgpt/resources/codex"],
         "claude": [os.environ.get("CLAUDE_BIN"), str(Path.home() / ".local/bin/claude"), shutil.which("claude")],
-        "claude-account": [os.environ.get("AGENT_ETA_CLAUDE_ACCOUNT_BIN"), str(here.parent / "claude-account/claude-account")],
+        "claude-account": [os.environ.get("AGENT_ETA_CLAUDE_ACCOUNT_BIN"), str(Path.home() / ".local/bin/claude-account"),
+                           shutil.which("claude-account")],
         "terminal": [os.environ.get("AGENT_ETA_TERMINAL_BIN"), shutil.which("konsole")],
         "opener": [os.environ.get("AGENT_ETA_OPENER_BIN"), shutil.which("xdg-open")],
     }
