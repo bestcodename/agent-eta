@@ -20,6 +20,10 @@ PlasmaComponents3.ItemDelegate {
 
     onClicked: root.act("jump", session, null)
 
+    HoverHandler {
+        cursorShape: Qt.PointingHandCursor
+    }
+
     // The only right-click handler of the row. A handler on each task row as well would fire next to
     // this one, and whichever came last decided the menu. A session without an id of its own, such as
     // one made up of `agent-eta add` entries, offers its only task from anywhere on the row.

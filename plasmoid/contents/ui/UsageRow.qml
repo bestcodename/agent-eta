@@ -13,7 +13,8 @@ import "../code/logic.mjs" as Logic
 // red where the usage runs far ahead of the time, `yellow` sets the half-width
 // of the yellow band and `fade` blends it. Every reset
 // carries its countdown, as in `resets in 49m (18:30)`, and the status line under the agent's name
-// names its highest share with the reset that comes first, beside the freshness of the reading.
+// names its highest share with the reset that comes first, beside the freshness of the reading. A click
+// anywhere on the row opens the account menu of FullRepresentation.qml.
 ColumnLayout {
     id: usageRow
 
@@ -26,17 +27,24 @@ ColumnLayout {
 
     spacing: Kirigami.Units.smallSpacing / 2
 
+    // The whole row opens the account menu, with either button, because nothing else on it takes a
+    // click apart from its own buttons, which keep theirs. The hand cursor shows where that works.
+    TapHandler {
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        enabled: !!usageRow.group.account
+        onTapped: eventPoint => usageRow.menuRequested(usageRow.group.account, usageRow,
+                                                       eventPoint.position.x, eventPoint.position.y)
+    }
+    HoverHandler {
+        enabled: !!usageRow.group.account
+        cursorShape: Qt.PointingHandCursor
+    }
+
     PlasmaComponents3.Label {
-        id: accountLabel
         Layout.fillWidth: true
         text: usageRow.group.agent
         font.bold: true
         textFormat: Text.PlainText
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.RightButton
-            onClicked: mouse => usageRow.menuRequested(usageRow.group.account, accountLabel, mouse.x, mouse.y)
-        }
     }
 
     RowLayout {
