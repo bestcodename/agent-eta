@@ -189,6 +189,11 @@ PlasmaExtras.Representation {
             text: i18n("Log in")
             onClicked: root.accountAction("login", accountMenu.account)
         }
+        PlasmaExtras.MenuItem {
+            text: i18n("Move all sessions here")
+            visible: !!accountMenu.account && accountMenu.account.provider === "claude" && accountMenu.account.can_remove
+            onClicked: root.accountAction("handoff", accountMenu.account)
+        }
     }
 
     PlasmaExtras.PlaceholderMessage {

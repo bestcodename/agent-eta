@@ -243,6 +243,17 @@ class Actions(Isolated):
         self.registered(("work",))
         self.assertIn("claude:work", [a["id"] for a in self.store.inventory()])
 
+    def test_move_all_sessions_here_hands_off_every_other_claude_account_detached(self):
+        self.registered(("work", "private"))
+        with mock.patch.object(accounts, "executable", side_effect=lambda kind: "/fake/" + kind), \
+                mock.patch.object(subprocess, "Popen") as popen:
+            accounts.account_action(self.args("handoff", "claude:private"))
+        self.assertEqual(popen.call_args.args[0],
+                         ["/fake/claude-account", "handoff", "work", "private", "--all", "--wait", "1800"])
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+        with self.assertRaises(providers.AccountError):
+            accounts.account_action(self.args("handoff", "codex"))
+
     def test_claude_launch_uses_konsole_argv_without_shell_interpolation(self):
         self.registered()
         account = self.store.find("claude:work")

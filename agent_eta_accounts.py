@@ -229,6 +229,25 @@ def valid_directory(directory):
     return str(path)
 
 
+def handoff_here(store, account):
+    """Move every session of the other registered Claude accounts to this one, through
+    `claude-account handoff --all`. It runs detached and logs to ~/.local/state/claude-account/handoff/,
+    because it ends sessions and waits up to half an hour for busy ones."""
+    if account["provider"] != "claude" or not account["registered"]:
+        raise AccountError("Sessions can only move to a registered Claude account")
+    sources = [a for a in store.inventory() if a["provider"] == "claude" and a["registered"]
+               and a["name"] != account["name"]]
+    if not sources:
+        raise AccountError("No other Claude account is registered")
+    log_dir = Path.home() / ".local" / "state" / "claude-account" / "handoff"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    tool = executable("claude-account")
+    for source in sources:
+        command = [tool, "handoff", source["name"], account["name"], "--all", "--wait", "1800"]
+        with open(log_dir / time.strftime("handoff-%Y%m%d-%H%M%S.log"), "a") as log:
+            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+
+
 def account_action(args):
     store = AccountStore()
     action = args.account_action
@@ -248,6 +267,8 @@ def account_action(args):
             else:
                 directory = valid_directory(args.directory)
                 store.configure(lambda data: data.setdefault("default_directories", {}).update({account["id"]: directory}))
+        elif action == "handoff":
+            handoff_here(store, account)
         elif action == "remove":
             if account["provider"] == "codex":
                 store.configure(lambda data: data.update(codex_disabled=True))
@@ -282,7 +303,7 @@ def add_parser(sub):
             parser.add_argument("--lock-fd", type=int, help=argparse.SUPPRESS)
     parser = actions.add_parser("enable", help="restore Codex monitoring")
     parser.add_argument("id", choices=["codex"])
-    for action in ("login", "remove", "launch", "default-directory"):
+    for action in ("login", "remove", "launch", "default-directory", "handoff"):
         parser = actions.add_parser(action)
         parser.add_argument("id", help="codex, claude:NAME or claude:default")
         if action == "launch":
