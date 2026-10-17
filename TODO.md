@@ -8,18 +8,15 @@ priority.
    `org.kde.taskmanager` and `Runner` modules on the test import path, load the real `WindowJumper.qml` and
    `SessionRow.qml`, and assert that a click runs `agent-eta tab`, picks the window and calls `requestActivate`. The
    hover and the context menu actions follow the same way. Run it in GitHub CI with the Qt 6 test packages, since
-   stefan-notebook has only the qtchooser wrapper. It replaces most of the hand checks in item 3 and the
+   stefan-notebook has only the qtchooser wrapper. It replaces hand checks like item 3 and the
    [docs/agent-eta.md](docs/agent-eta.md) "Limits" note on `xdotool`; a containerized Plasma with fake input was
    rejected as too heavy for what it adds (ca. 4 Stunden)
 2. (next) Probe whether the TasksModel `DisplayRole` of a Konsole window equals its KWin caption, such as
    "Handoff 3d — Konsole". `pickWindow` matches the titles of `agent-eta tab` against it, and so far only the KWin
    caption was measured. A small `qml` script that prints `AppPid` and `DisplayRole` per window settles it
    (ca. 20 Minuten)
-3. (next) Check *Jump to window* of the tray widget on stefan-notebook, which runs Wayland. The widget of 0.71.0
-   was installed there on 2026-10-05, but so far it was only seen working on the desktop under X11. The check
-   needs a running Claude Code session on the notebook (ca. 10 Minuten)
-   The desktop handler accepted the current thread's `codex://` link on 2026-10-14. The widget's actual
-   *Open thread in Codex* click still needs a visual target check (ca. 5 Minuten).
+3. (next) Check the widget's *Open thread in Codex* click visually. The desktop handler accepted the current
+   thread's `codex://` link on 2026-10-14, but the click itself has not been watched yet (ca. 5 Minuten)
 4. (low) Match a Codex task to its process through `CODEX_THREAD_ID` in `/proc/*/environ`. Only worth it if Codex
    entries whose process ended unpolled stay listed until they expire often enough to mislead, see
    [docs/agent-eta.md](docs/agent-eta.md) "Limits" (ca. 3 Stunden)
