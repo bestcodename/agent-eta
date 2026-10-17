@@ -7,11 +7,17 @@ import "../code/logic.mjs" as Logic
 // Raises the window a session runs in. A Codex thread opens through its link in the Codex app, and a
 // dsh session opens the dsh web UI.
 // Any other session is matched by the pids agent-eta lists for it, its own and its ancestors',
-// against the pid of every window, since a terminal or an IDE owns the window. PhpStorm owns all
-// its project windows in one process, so the project name picks among them. A terminal tab inside
-// a window cannot be chosen from outside.
+// against the pid of every window, since a terminal or an IDE owns the window. Konsole owns all its
+// windows in one process, so `agent-eta tab` first makes the session's tab current over D-Bus and
+// reports the caption titles that pick its window. PhpStorm owns all its project windows in one
+// process, so the project name picks among them. A tab in PhpStorm's terminal cannot be chosen from
+// outside.
 Item {
     id: jumper
+
+    // The Runner and the agent-eta command line, from main.qml.
+    property var launcher
+    property string command
 
     TaskManager.TasksModel {
         id: tasks
@@ -34,8 +40,15 @@ Item {
         return found;
     }
 
-    function find(session) {
-        return Logic.pickWindow(windows(), session.pids || [], session.project_name || "");
+    function find(session, titles) {
+        return Logic.pickWindow(windows(), session.pids || [], session.project_name || "", titles || []);
+    }
+
+    function raise(session, titles) {
+        const index = find(session, titles);
+        if (index >= 0) {
+            tasks.requestActivate(tasks.makeModelIndex(index));
+        }
     }
 
     function canJump(session) {
@@ -55,11 +68,16 @@ Item {
         if (session.agent === "dsh") {
             return !!session.web_url && Qt.openUrlExternally(session.web_url);
         }
-        const index = find(session);
-        if (index < 0) {
+        if (find(session) < 0) {
             return false;
         }
-        tasks.requestActivate(tasks.makeModelIndex(index));
+        // Outside Konsole the tab call fails fast and the jump runs on pids and the project name.
+        const tab = launcher && command ? Logic.tabCommand(command, session.pids) : "";
+        if (!tab) {
+            raise(session, []);
+            return true;
+        }
+        launcher.run(tab, (code, stdout) => raise(session, Logic.tabTitles(code, stdout)));
         return true;
     }
 }

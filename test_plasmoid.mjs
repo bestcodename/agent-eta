@@ -1,7 +1,7 @@
 // Tests for the logic of the agent-eta tray widget.
 //
-// Run with:  node --test test_plasmoid.mjs
-// test_plasmoid.py runs this file as well, so the Python suite covers it.
+// Run with:  node --test --test-isolation=none test_plasmoid.mjs
+// test_install.py runs this file as well, so the Python suite covers it.
 
 process.env.TZ = "Europe/Berlin";
 
@@ -304,6 +304,37 @@ test("the nearest window owner wins, and the project name picks among PhpStorm w
     assert.equal(logic.pickWindow(windows, [12, 900, 55593], "ai"), 2);
     assert.equal(logic.pickWindow(windows, [2491308, 2491283], "sdwa5"), -1);
     assert.equal(logic.pickWindow(windows, [], "ai"), -1);
+});
+
+test("the caption titles agent-eta tab reports pick among the windows of one Konsole process", () => {
+    const windows = [
+        {index: 0, pid: 58086, title: "sec"},
+        {index: 1, pid: 58086, title: "Handoff 3d"},
+        {index: 2, pid: 58086, title: "Handoff 3d (2)"},
+    ];
+    const pids = [58107, 58086];
+    assert.equal(logic.pickWindow(windows, pids, "stefanr", ["Handoff 3d", "Handoff 3d"]), 1);
+    assert.equal(logic.pickWindow(windows, pids, "stefanr", ["sec", "sec"]), 0);
+    assert.equal(logic.pickWindow(windows, pids, "stefanr", ["gone", "Handoff 3d (2)"]), 2);
+    assert.equal(logic.pickWindow([{index: 0, pid: 58086, title: "sec"},
+        {index: 1, pid: 58086, title: "Handoff 3d — Konsole"}], pids, "", ["Handoff 3d"]), 1);
+    assert.equal(logic.pickWindow(windows, pids, "stefanr", ["Handoff"]), 0);
+    assert.equal(logic.pickWindow(windows, pids, "stefanr", []), 0);
+    assert.equal(logic.pickWindow(windows, pids, "stefanr"), 0);
+    assert.equal(logic.pickWindow(windows, pids, "sec", ["", null]), 0);
+});
+
+test("the tab call takes only real pids and its output only on success", () => {
+    assert.equal(logic.tabCommand("agent-eta", [58107, 58086]), "agent-eta tab 58107 58086");
+    assert.equal(logic.tabCommand("agent-eta", [0, -1, "1; rm", 1.5, 42]), "agent-eta tab 42");
+    assert.equal(logic.tabCommand("agent-eta", []), "");
+    assert.equal(logic.tabCommand("agent-eta", undefined), "");
+    assert.deepEqual(logic.tabTitles(0, '{"window": "/Windows/3", "titles": ["sec", "Handoff 3d"]}\n'),
+        ["sec", "Handoff 3d"]);
+    assert.deepEqual(logic.tabTitles(1, '{"titles": ["sec"]}'), []);
+    assert.deepEqual(logic.tabTitles(0, "garbage"), []);
+    assert.deepEqual(logic.tabTitles(0, '{"titles": "sec"}'), []);
+    assert.deepEqual(logic.tabTitles(0, '{"titles": ["", 3, "sec"]}'), ["sec"]);
 });
 
 test("quoting survives a quote in a path", () => {

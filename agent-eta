@@ -77,6 +77,7 @@ from zoneinfo import ZoneInfo
 # The executable is installed through a symlink; its shared helpers live beside its real path.
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import agent_eta_accounts as accounts_api
+import agent_eta_konsole as konsole_api
 from agent_eta_providers import AccountError
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -2046,6 +2047,7 @@ def build_parser():
     done = sub.add_parser("done", help="remove entries recorded with add")
     done.add_argument("ids", nargs="+")
     accounts_api.add_parser(sub)
+    konsole_api.add_parser(sub)
     return parser
 
 
@@ -2055,7 +2057,8 @@ def main(argv=None):
         argv.insert(0, "list")
     args = build_parser().parse_args(argv)
     handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done,
-                "turn": cmd_turn, "account": accounts_api.account_action}
+                "turn": cmd_turn, "account": accounts_api.account_action,
+                "tab": konsole_api.tab_action}
     try:
         return handlers[args.cmd](args)
     except (StateDirError, AccountError) as exc:

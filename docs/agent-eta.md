@@ -292,7 +292,7 @@ Preferences live at `${XDG_CONFIG_HOME:-~/.config}/agent-eta/config.json` and ca
 `${XDG_CACHE_HOME:-~/.cache}/agent-eta/accounts.json`. New files have mode 0600. Tests can override `AGENT_ETA_CONFIG`
 and `AGENT_ETA_CACHE_DIR`; `AGENT_ETA_DIR` also isolates account state under that directory. `AGENT_ETA_NO_REFRESH=1`
 disables automatic workers. `AGENT_ETA_CODEX_BIN`, `CLAUDE_BIN`, `AGENT_ETA_CLAUDE_ACCOUNT_BIN`,
-`AGENT_ETA_TERMINAL_BIN` and `AGENT_ETA_OPENER_BIN` override the native binaries. Codex resolution checks PATH and
+`AGENT_ETA_TERMINAL_BIN`, `AGENT_ETA_OPENER_BIN` and `AGENT_ETA_QDBUS_BIN` override the native binaries. Codex resolution checks PATH and
 then the desktop bundle at `/usr/lib/chatgpt/resources/codex`.
 
 ## Install
@@ -410,8 +410,12 @@ and what the hook did. The command text never goes there. The log rotates at 256
   The pointer turns into a hand wherever a click does something, on account rows and session rows alike. Cancelling a folder chooser starts no process.
   CLI action failures remain in the footer across ordinary polls.
 - **A click on a row** jumps to the session's window. A right click offers that and four more actions.
-  - *Jump to window* activates the window of the nearest ancestor in `pids` that owns one. Every PhpStorm window belongs
-    to the same process, so among several it takes the one whose title starts with `project_name`. For a Codex thread
+  - *Jump to window* activates the window of the nearest ancestor in `pids` that owns one. Konsole runs all its windows
+    in one process, so the tray first calls `agent-eta tab <pids>`. It finds the Konsole tab whose process is in `pids`
+    over D-Bus (`qdbus6`, else `qdbus`, overridden by `AGENT_ETA_QDBUS_BIN`), makes it the current tab of its window and
+    prints the caption titles before and after the switch, and the window with one of those captions wins. Without a
+    Konsole tab the call exits 1 and the jump goes on as before. Every PhpStorm window belongs to the same process, so
+    among several it takes the one whose title starts with `project_name`. For a Codex thread
     it is *Open thread in Codex*, which opens `codex://threads/<id>` in the ChatGPT app. For a dsh session it is *Open
     dsh web UI*, which opens the `web_url` of its process, for example `http://127.0.0.1:3080/`.
   - *Open in PhpStorm* runs `phpstorm <project_root>`, which is always the project root and never a subdirectory.
@@ -555,8 +559,9 @@ plasmawindowed com.github.bestcodename.agenteta    # the overview in a window, w
 - A Codex thread shows only once a hook fired for it, so a thread that has been quiet since the hooks were trusted is
   missing until its next prompt.
 - The state of a Codex thread from before the four state hooks were trusted stays at working until its next `Stop`.
-- The tray widget's jump focuses the PhpStorm window of the project, but it cannot select the terminal tab the session
-  runs in. A session of the Claude Code daemon has no window, so its jump is disabled.
+- The tray widget's jump focuses the PhpStorm window of the project, but it cannot select the PhpStorm terminal tab the
+  session runs in. Konsole tabs are selected. A session of the Claude Code daemon has no window, so its jump is
+  disabled.
 - plasmashell loads a changed widget only after a restart.
 - *Open dsh web UI* opens the root of the web UI in a new browser tab, not the session, because dsh has no link to a
   single session.

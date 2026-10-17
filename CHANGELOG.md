@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-18
+
+### Added
+
+- `agent-eta tab PID...` makes the Konsole tab running one of the pids current over D-Bus and prints its window's
+  caption titles; `AGENT_ETA_QDBUS_BIN` overrides qdbus
+
+### Fixed
+
+- The tray's jump raises the Konsole window the session runs in, not the first window of the Konsole process
+
 ## [1.0.0] - 2026-10-17
 
 ### Added

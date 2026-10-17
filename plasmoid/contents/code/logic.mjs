@@ -403,21 +403,44 @@ function titleProject(title) {
 }
 
 // The window to raise for a session, as an index into `windows` ({index, pid, title}), or -1. The
-// nearest process in the session's lineage that owns a window wins. One PhpStorm process owns every
-// project window, so among its windows the one whose title starts with the project name wins.
-export function pickWindow(windows, pids, projectName) {
+// nearest process in the session's lineage that owns a window wins. One process may own several
+// windows. Konsole runs all its windows in one process, so the caption titles `agent-eta tab` reports
+// pick among them first. One PhpStorm process owns every project window, so the window whose title
+// starts with the project name comes next.
+export function pickWindow(windows, pids, projectName, titles) {
     for (const pid of pids || []) {
         const owned = (windows || []).filter(window => window.pid === pid);
         if (!owned.length) {
             continue;
         }
+        const captioned = owned.find(window => (titles || []).some(title => title
+            && (window.title === title || String(window.title || "").startsWith(title + " — "))));
         const named = projectName
             ? owned.find(window => titleProject(window.title) === projectName)
                 || owned.find(window => String(window.title || "").includes(projectName))
             : null;
-        return (named || owned[0]).index;
+        return (captioned || named || owned[0]).index;
     }
     return -1;
+}
+
+// The `agent-eta tab` call that makes a session's Konsole tab current, or "" for a session without pids.
+export function tabCommand(command, pids) {
+    const numbers = (pids || []).filter(pid => Number.isInteger(pid) && pid > 0);
+    return numbers.length ? command + " tab " + numbers.join(" ") : "";
+}
+
+// The caption titles `agent-eta tab` printed, or [] when it found no Konsole tab or printed garbage.
+export function tabTitles(code, stdout) {
+    if (code !== 0) {
+        return [];
+    }
+    try {
+        const titles = JSON.parse(stdout).titles;
+        return Array.isArray(titles) ? titles.filter(title => typeof title === "string" && title) : [];
+    } catch (error) {
+        return [];
+    }
 }
 
 export function shellQuote(text) {

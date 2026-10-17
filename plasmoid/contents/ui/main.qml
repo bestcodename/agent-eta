@@ -56,6 +56,8 @@ PlasmoidItem {
 
     WindowJumper {
         id: jumper
+        launcher: runner
+        command: root.command
     }
 
     KQuickControlsAddons.Clipboard {
