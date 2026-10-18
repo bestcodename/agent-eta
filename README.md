@@ -42,6 +42,9 @@ python3 -m unittest discover -s . -v
 node --test --test-isolation=none test_plasmoid.mjs
 ```
 
+The QML tests in `test_qml/` need Qt 6's `qmltestrunner` and the Plasma 6 QML modules, see
+[docs/agent-eta.md](docs/agent-eta.md#tests).
+
 ## Changelog and roadmap
 
 See [CHANGELOG.md](CHANGELOG.md) and [TODO.md](TODO.md). Before 1.0.0 agent-eta lived in bestcodename/ai under

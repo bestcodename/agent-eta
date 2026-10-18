@@ -35,3 +35,23 @@ jobs:
         run: |
           command -v shellcheck >/dev/null || sudo apt-get install -y shellcheck
           shellcheck install.sh
+
+  # The widget's QML runs against the real Plasma 6 and Kirigami modules, which Ubuntu runners lack.
+  qml:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt Quick Test and the Plasma 6 QML modules
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends python3 \
+            qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick-layouts qml6-module-qtquick-templates \
+            qml6-module-org-kde-kirigami plasma-desktoptheme
+
+      # The binary check keeps a missing runner from turning into a silent skip.
+      - name: Widget QML tests
+        run: |
+          test -x /usr/lib/qt6/bin/qmltestrunner
+          python3 -m unittest -v test_qml

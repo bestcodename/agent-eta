@@ -567,14 +567,15 @@ plasmawindowed com.github.bestcodename.agenteta    # the overview in a window, w
   single session.
 - A dsh row is only as fresh as dsh's log writes, which come in batches of about 200 ms.
 - A dsh bash call that dsh moves to the background is not recognised as such, because no log here has shown one yet.
-- `xdotool` is not installed, so the suite does not reach the hover, the click actions and the jump. They need a check by
-  hand.
+- The QML tests click a row and drive the jump against a stub task list, not against KWin, and they do not open the
+  context menu or follow its entries into `act()`. Plasma's `i18n` is missing there, so task labels stay empty.
 
 ## Tests
 
 ```sh
 python3 -m unittest discover -s . -v
 node --test --test-isolation=none test_plasmoid.mjs
+QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -import test_qml/stubs -input test_qml
 journalctl --user -u plasma-plasmashell -n 200 | grep -i agenteta    # QML errors of the widget
 ```
 
@@ -594,8 +595,17 @@ On 2026-10-14 live Codex account and rate-limit reads succeeded without a turn. 
 current Codex readings, a stale Claude reading and a registered Claude identity mismatch. Source widget previews
 loaded both offscreen and on desktop X11 without QML errors during the bounded checks. The OS handler accepted
 the current existing thread's deep link. Those are basic checks, not full validation of interactive login, removal,
-folder picking or navigation. The actual widget navigation click remains open. SSH to the notebook returned
-`No route to host`, so its Wayland check remains in TODO.md.
+folder picking or navigation. On 2026-10-18 *Jump to window* raised the right Konsole window for two sessions in
+one Konsole process on the notebook under Wayland, checked by hand.
+
+`test_qml.py` runs the QML tests in `test_qml/` with Qt Quick Test, offscreen. `tst_windowjumper.qml` drives
+`WindowJumper.qml` against a stub `org.kde.taskmanager` from `test_qml/stubs` and a launcher that records its
+commands. It covers the `agent-eta tab` call and its titles picking the Konsole window, a failed call falling back,
+a session without a window, the PhpStorm project choice, and Codex and dsh running nothing. `tst_sessionrow.qml`
+clicks `SessionRow.qml` with the real Plasma components and covers the jump on a click, the hover, and the menu on a
+right click for the session, for a task row and for a session without an id. The test is skipped without the Qt 6
+`qmltestrunner` (Debian `qt6-declarative-dev-tools`, `qml6-module-qttest`). CI runs it in a `debian:trixie`
+container, because Ubuntu runners have no Plasma 6 modules.
 
 The suite covers duration parsing in both languages, the sort order, every holder alive and dead, `run` with exit codes
 and a forwarded SIGTERM, `add` and `done`, the Claude Code hook against a real process whose fd 1 points at a fake
