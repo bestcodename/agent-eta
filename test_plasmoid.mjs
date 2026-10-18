@@ -76,8 +76,8 @@ test("each state gets a traffic-light colour and an overdue working session turn
         assert.equal(logic.stateLight(session({state})), light);
     }
     assert.equal(logic.stateLight(session({state: "working", overdue: true})), "yellow");
-    assert.equal(logic.stateLight(session({state: "idle", tasks: ["wait"]})), "green");
-    assert.equal(logic.stateLight(session({state: "idle", tasks: ["wait"], overdue: true})), "yellow");
+    assert.equal(logic.stateLight(session({state: "idle", section: 1, tasks: ["wait"]})), "green");
+    assert.equal(logic.stateLight(session({state: "idle", section: 1, tasks: ["wait"], overdue: true})), "yellow");
 });
 
 test("countdowns read like `12h 13m` and follow the clock time of a reset", () => {
@@ -102,7 +102,7 @@ test("the tray orb is a traffic light over the sessions that are not dormant", (
     assert.deepEqual(orb([session({state: "idle", dormant: true, section: 3})]), ["none", 0, "passive"]);
     assert.deepEqual(orb([session({state: "working"})]), ["green", 0, "active"]);
     assert.deepEqual(orb([session({state: "stopped"})]), ["green", 0, "active"]);
-    assert.deepEqual(orb([session({state: "idle", tasks: ["wait"]})]), ["green", 0, "active"]);
+    assert.deepEqual(orb([session({state: "idle", section: 1, tasks: ["wait"]})]), ["green", 0, "active"]);
     assert.deepEqual(orb([session({state: "working", pid: 1}), session({state: "idle", pid: 2})]),
                      ["yellow", 1, "active"]);
     assert.deepEqual(orb([session({state: "working", overdue: true, pid: 1}), session({state: "idle", pid: 2})]),
@@ -388,4 +388,24 @@ test("transitions notify a new wait, an ETA that runs over and a reset limit, on
     assert.equal(events[0].text, "claude needs you: permission");
     assert.deepEqual(logic.transitions(after, after), []);
     assert.deepEqual(logic.transitions(null, after), []);
+});
+
+
+test("unowned manual reminders have no working count, orb or progress activity", () => {
+    const reminder = session({state: "unknown", section: 0, tasks: ["sec-check"],
+                              overdue: true, progress: 1, remaining: -600});
+    const result = logic.summary(listing([reminder], [{id: "sec-check", overdue: true}]));
+    assert.equal(logic.stateLight(reminder), "grey");
+    assert.equal(result.working, 0);
+    assert.equal(result.attention, 0);
+    assert.equal(result.dormant, 0);
+    assert.equal(result.next, null);
+    assert.equal(result.light, "none");
+    assert.equal(result.status, "passive");
+    assert.equal(logic.groupSessions(listing([reminder]), false)[0].sessions.length, 1);
+});
+
+test("idle owners are promoted only for verified background work", () => {
+    assert.equal(logic.shownState(session({state: "idle", section: 0, tasks: ["manual"]})), "idle");
+    assert.equal(logic.shownState(session({state: "idle", section: 1, tasks: ["running"]})), "working");
 });

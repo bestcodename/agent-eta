@@ -58,7 +58,9 @@ The FOR column says how long a session has been in its state. The order follows 
 **waiting** means it needs you for a permission prompt, a question dialog or another dialog, and those sessions come
 first. **idle** sessions follow, most recently active first, because each of them waits for your next prompt.
 **working** sessions come next, overdue ones first, then by remaining time and then those without an ETA. An idle
-session that still has a background task running counts as working. A **stopped** Codex thread ended its turn with an
+session that still has a verified background task running counts as working. A manual reminder alone does not
+establish activity. Without a live owner or holder it appears as **unknown** in the non-working group, keeping its
+label, deadline and Mark done action. It contributes no working count, tray activity or progress indicator. A **stopped** Codex thread ended its turn with an
 error, and the reason stands in brackets. When the reason is a usage limit, REMAINING and DUE count down to the reset
 of the exhausted window, and the thread comes last, because nothing can be done before the reset. Once the reset has
 passed, the thread shows as idle, counted from the reset. A thread stopped by another error has nothing to count down
@@ -186,7 +188,8 @@ size or mtime changed, and the summary lives in `cache/dsh-cache.json` in the st
 ### When a task counts as ended
 
 No agent reports the end of a background task to anything outside itself, so every entry names a holder, and the reader
-judges it on its own. A forgotten `done` therefore cannot leave a ghost behind.
+judges it on its own. Entries without a holder retain their normal expiry and explicit `done` behavior; their
+continued presence alone does not prove that a session is working.
 
 | Holder | The task runs while | Written by |
 |---|---|---|
@@ -319,12 +322,20 @@ The hooks are wired by hand, because Codex skips a new hook until it is trusted 
 - `~/.claude/settings.json` gets a `PostToolUse` group with the matcher `Bash` and the command
   `/home/stefanr/.local/bin/agent-eta hook`, as shown in [claude-code-config.md](https://github.com/bestcodename/ai/blob/main/docs/claude-code-config.md).
 - `~/.codex/hooks.json` gets a `PreToolUse` and a `PostToolUse` group, each with the matcher `Bash` and the same command,
-  and one more group without a matcher for each of `UserPromptSubmit`, `Stop`, `PermissionRequest` and `Interrupt`. A
-  group for an event that already has one goes after it, because Codex keys its trust by event, group index and hook
+  and one more group without a matcher for each of `UserPromptSubmit`, `Stop`, `PermissionRequest`, `Interrupt`
+  and `SessionEnd`. A group for an event that already has one goes after it, because Codex keys its trust by event, group index and hook
   index, so an appended group leaves the trusted ones untouched. Every new hook has to be trusted once under Settings >
   Hooks in the Codex app. That stores a `trusted_hash` under
   `[hooks.state]` in `~/.codex/config.toml`. Writing that hash by hand would skip the review the app asks for, so it is
   not done here.
+
+After native review, send a fresh prompt in each local Codex chat. Verify that its registration appears in
+`/tmp/agent-eta-<uid>/sessions/`, then check `agent-eta list --json --all` and the modal. Confirm working on a new
+prompt, waiting at a native permission prompt and idle after Stop. `SessionEnd` removes the native registration;
+independent manual reminders remain until their normal expiry or Mark done. Merely finding a thread in the Codex
+database does not prove it is active. If a registration is missing, inspect the event and session id in `hook.log`
+before changing discovery code. The command is `/home/stefanr/.local/bin/agent-eta hook` with `type: "command"` and
+`timeout: 3` in each group. Append only missing handlers, preserving existing groups and native trust records.
 
 ## Use per agent
 
@@ -383,8 +394,9 @@ and what the hook did. The command text never goes there. The log rotates at 256
   its tasks below it. Stopped and dormant sessions each retain their heading and count and start folded. Their
   independent Show/Hide buttons keep their choice across polls and popup reopening until the widget restarts.
   A dot in the orb's colours marks each session's
-  state, red waiting, yellow idle or overdue, green working and grey stopped. An idle session that holds a running task, such as a wait recorded with
-  `agent-eta add`, counts as working for the dot and the orb, as the session table ranks it among the working ones. The line below the title says how long the
+  state, red waiting, yellow idle or overdue, green working and grey stopped or unknown. An idle session with a
+  verified running background task counts as working for the dot and the orb. A holderless `agent-eta add` reminder
+  does not establish activity by itself. The line below the title says how long the
   state has lasted and when it began, as in `idle for 1h 5m (17:25)`. The dot replaced play and pause icons in 0.71.0,
   because those read as buttons that start or stop the session. The usage windows follow, with one bar per window that
   fills with the used share. A tick marks the elapsed share of the window, so a fill past the tick runs out before the

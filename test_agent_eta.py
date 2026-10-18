@@ -443,10 +443,62 @@ class Sessions(StateTest):
                          ["ask", "reset", "idle", "work", "limit"])
 
     def test_a_task_without_a_known_session_stands_alone(self):
-        self.put("local-run", agent="local", eta=600, label="qwen on ai")
+        self.put("local-run", agent="local", eta=600, label="qwen on ai",
+                 holder={"type": "pid", "pid": os.getpid(), "start": eta.proc_start(os.getpid())})
         sessions = self.view()
         self.assertEqual([(s["agent"], s["state"], len(s["tasks"])) for s in sessions], [("local", "working", 1)])
         self.assertIn("└ qwen on ai", eta.render_sessions(sessions, time.time()))
+
+    def test_sec_manual_reminder_without_owner_is_unknown_and_preserved(self):
+        now = time.time()
+        entry = self.put("add-afa18602", agent="claude", eta=13 * 3600 + 37 * 60,
+                         label="SEC-28 check-in", now=now - 14 * 3600,
+                         session={"id": "sec-ended", "name": "SEC", "pid": self.dead_pid()})
+        path = pathlib.Path(self.dir, "add-afa18602.json")
+        original = path.read_bytes()
+        [session] = self.view(now)
+        self.assertEqual((session["state"], eta.section(session)), ("unknown", 0))
+        self.assertEqual(session["tasks"][0]["id"], entry["id"])
+        self.assertEqual(session["due"], entry["due"])
+        self.assertTrue(session["overdue"])
+        self.assertEqual(path.read_bytes(), original)
+        self.put("keep", eta=600)
+        self.assertEqual(self.cli("done", entry["id"]).returncode, 0)
+        self.assertEqual(self.ids(), ["keep"])
+
+    def test_idle_owner_with_only_a_manual_wait_stays_in_nonworking_group(self):
+        owner = self.register(status="idle")
+        self.put("ci-wait", agent="claude", eta=600,
+                 session={"id": owner["sessionId"], "pid": owner["pid"]})
+        [session] = self.view()
+        self.assertEqual((session["state"], eta.section(session)), ("idle", 0))
+
+    def test_codex_session_end_preserves_manual_wait_without_inventing_work(self):
+        self.hook(self.codex_event("UserPromptSubmit"))
+        self.put("external-ci", agent="codex", eta=600, session={"id": "thread-1"})
+        self.hook(self.codex_event("SessionEnd"))
+        [session] = self.view()
+        self.assertEqual((session["state"], eta.section(session)), ("unknown", 0))
+        self.assertTrue(pathlib.Path(self.dir, "external-ci.json").is_file())
+
+    def test_manual_reminder_is_not_replaced_by_an_account_usage_limit(self):
+        self.put("reminder", agent="codex", eta=600, session={"id": "ended"})
+        usage = [{"agent": "codex", "remaining": 3600, "reached": True, "resets_at": int(time.time()) + 3600,
+                  "minutes": 300}]
+        [session] = eta.sessions_view(self.dir, time.time(), usage=usage)
+        self.assertEqual(session["state"], "unknown")
+        self.assertIsNone(session.get("resume_at"))
+        self.assertEqual(session["due"], session["tasks"][0]["due"])
+
+    def test_locked_background_task_remains_working_beside_an_orphan_wait(self):
+        self.put("manual", agent="claude", eta=600, session={"id": "gone"})
+        entry = eta.make_entry("local-work", "local", "build", 600, {"type": "lock"}, "run")
+        with eta.write_locked(eta.entry_path(self.dir, entry["id"]), entry):
+            by_agent = {s["agent"]: s for s in self.view()}
+            self.assertEqual(by_agent["local"]["state"], "working")
+            self.assertEqual(eta.section(by_agent["local"]), 1)
+            self.assertEqual(by_agent["claude"]["state"], "unknown")
+            self.assertEqual(eta.section(by_agent["claude"]), 0)
 
     def test_codex_thread_state_follows_its_hooks(self):
         (self.codex / "session_index.jsonl").write_text(json.dumps({"id": "thread-1", "thread_name": "Shop"}) + "\n")

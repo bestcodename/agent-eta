@@ -1549,10 +1549,13 @@ def sessions_view(directory, now, tasks=None, usage=None):
             session = task.get("session") or {}
             owner = by_key[key] = {
                 "agent": task.get("agent"), "id": session.get("id"), "pid": session.get("pid"),
-                "name": task["session_name"], "state": "working" if task.get("agent") != "other" else "-",
+                "name": task["session_name"], "state": "unknown",
                 "waiting_for": None, "since": task.get("started"), "cwd": task.get("cwd"), "tasks": []}
             sessions.append(owner)
         owner["tasks"].append(task)
+    for session in sessions:
+        if session["state"] == "unknown" and has_running_task(session):
+            session["state"] = "working"
     limit_stops(sessions, usage_view(now) if usage is None else usage, now)
     for session in sessions:
         turn = turns.get(session_key(session["agent"], session))
@@ -1585,7 +1588,7 @@ def limit_stops(sessions, usage, now):
     blocked = {agent: summary["resets_at"] for agent, summary, _ in usage_sections(usage)[1]}
     for session in sessions:
         resets_at = blocked.get(agent_label(session["agent"], session.get("account")))
-        if (resets_at and session["state"] != "working" and not session.get("resume_at")
+        if (resets_at and session["state"] not in ("working", "unknown") and not session.get("resume_at")
                 and not dormant(session, now)):
             session.update(state="stopped", waiting_for="usage limit", resume_at=resets_at)
 
@@ -1597,13 +1600,19 @@ def stopped_before(session, task):
             and (task.get("started") or 0) <= (session.get("since") or 0))
 
 
+def has_running_task(session):
+    """Rows have already checked these holders; a manual deadline alone proves no work."""
+    return any((task.get("holder") or {}).get("type") in ("pid", "lock", "pair")
+               for task in session["tasks"])
+
+
 def session_sort_key(session):
     """By how soon a session needs you. Waiting for an answer first, then at rest with the most
     recently active first, then working by its ETA like the tasks, then stopped until a usage
     limit resets."""
     if session["state"] == "waiting":
         rank = 0
-    elif at_rest(session) and not session["tasks"]:
+    elif session["state"] == "unknown" or (at_rest(session) and not has_running_task(session)):
         rank = 1
     elif session["state"] == "stopped":
         rank = 3

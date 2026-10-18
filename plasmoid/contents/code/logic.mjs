@@ -132,11 +132,10 @@ export function agentLabel(session) {
     return session.account ? `${session.agent}/${session.account}` : session.agent || "-";
 }
 
-// The state a session counts as. An idle session that holds a running task, such as a wait
-// recorded with `agent-eta add`, works on through it, as the session table ranks it among the
-// working ones.
+// Only the backend Working section establishes background activity for an idle session.
+// A manual deadline without a live holder leaves its owner idle.
 export function shownState(session) {
-    return session.state === "idle" && (session.tasks || []).length ? "working" : session.state;
+    return session.state === "idle" && session.section === 1 ? "working" : session.state;
 }
 
 // A working session past its ETA turns yellow, like the tray orb counts it.
@@ -208,7 +207,7 @@ function tasksById(listing) {
 // such session. Only red marks the widget as needing attention, which makes the tray pulse.
 export function summary(listing) {
     const byId = tasksById(listing);
-    const live = sessionsOf(listing).filter(session => !session.dormant);
+    const live = sessionsOf(listing).filter(session => !session.dormant && session.state !== "unknown");
     const count = state => live.filter(session => shownState(session) === state).length;
     const overdue = live.filter(session => shownState(session) === "working" && late(session, byId)).length;
     const waiting = count("waiting");
@@ -221,7 +220,7 @@ export function summary(listing) {
         idle: count("idle"),
         stopped: count("stopped"),
         overdue,
-        dormant: sessionsOf(listing).length - live.length,
+        dormant: sessionsOf(listing).filter(session => session.dormant).length,
         attention: waiting + overdue,
         next: timed.length ? timed[0] : null,
     };

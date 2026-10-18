@@ -49,3 +49,15 @@ used up until 2026-10-08 03:22. In a Codex thread with the reviewer set to `user
 `waiting (permission)` until the click and `working` after it. In an `auto_review` thread the same command must show
 `working` within about 10 seconds. It confirms that auto-review requests rarely reach the user, which so far rests on
 the log database only.
+
+## Bug follow-up (2026-10-18)
+
+- Fixed in 1.1.1: Prevent orphaned Claude ETA tasks from appearing as working sessions after handoff or completion.
+  Reproduction: the Claude session is absent, but its retained manual SEC reminder (`add-afa18602`) creates a
+  synthetic working row. The reminder now remains unknown and keeps its deadline and Mark done action; verified
+  running background tasks remain working. No reminders are automatically completed.
+- Pending live setup: the two current Codex chats were absent because no agent-eta hooks were installed in
+  `~/.codex/hooks.json` and no hook registrations existed. The existing handlers already support tracking and
+  SessionEnd; no discovery redesign is justified. A concrete hook file is prepared, but the sandbox mount error
+  blocked installation. Complete native review and verify fresh events in both chats, including working, waiting,
+  idle and SessionEnd, before marking this resolved. Historical database rows alone are insufficient.
