@@ -2,7 +2,8 @@
 
 `agent-eta` lists every running Claude Code, Codex, dsh and local-model session on a Linux machine with its state, its
 ETA and its background tasks, and shows the usage windows of every account. Sessions waiting for an answer come first.
-A Plasma 6 tray widget shows the same overview, raises a session's window and Konsole tab on click and offers account
+Completed Codex turns stay idle even when a rejected command misses its completion hook; unanswered native questions
+show as waiting. A Plasma 6 tray widget shows the same overview, raises a session's window and Konsole tab on click and offers account
 actions such as starting a session, logging in and moving all Claude Code sessions to another account.
 
 Hooks and the agents' own session registries fill the list, so an agent only has to write down the ETA it states anyway.

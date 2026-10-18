@@ -534,6 +534,60 @@ class Sessions(StateTest):
         self.hook(self.codex_event("Stop"))
         self.assertEqual([s["state"] for s in self.view()], ["idle"])
 
+    def test_codex_end_discards_unpaired_command_but_keeps_reminder_and_live_job(self):
+        for event in ("Stop", "Interrupt"):
+            with self.subTest(event=event):
+                self.hook(self.codex_event("UserPromptSubmit"))
+                self.hook(self.codex_event("PreToolUse", tool_name="Bash", tool_use_id="rejected",
+                                           tool_input={"command": "rejected command"}))
+                self.put("manual", agent="codex", eta=600, session={"id": "thread-1"})
+                self.hook(self.codex_event(event))
+                [session] = self.view(time.time() + 11)
+                self.assertEqual((session["state"], eta.section(session)), ("idle", 0))
+                self.assertEqual([t["id"] for t in session["tasks"]], ["manual"])
+                self.assertFalse(pathlib.Path(self.dir, "codex-rejected.json").exists())
+                self.put("live", agent="codex", eta=600, session={"id": "thread-1"},
+                         holder={"type": "pid", "pid": os.getpid(), "start": eta.proc_start(os.getpid())})
+                [session] = self.view(time.time() + 11)
+                self.assertEqual(eta.section(session), 1)
+                self.assertEqual(sorted(t["id"] for t in session["tasks"]), ["live", "manual"])
+                pathlib.Path(self.dir, "live.json").unlink()
+
+    def test_async_question_waits_past_ack_and_stop_until_every_answer(self):
+        rollout = self.codex / "async.jsonl"
+        stamp = "2026-10-18T19:00:00.000Z"
+        def append(**payload):
+            with rollout.open("a") as handle:
+                handle.write(json.dumps({"timestamp": stamp, "type": "response_item", "payload": payload}) + "\n")
+        def answer(call, index):
+            replies = [{"questionItemId": json.dumps(["request_user_input_async", call, index]), "answer": "yes"}]
+            append(type="message", role="user", content=[{"type": "input_text", "text":
+                   "<send_user_message_question_reply>" + json.dumps(replies) + "</send_user_message_question_reply>"}])
+        append(type="function_call", name="request_user_input_async", call_id="q1",
+               arguments=json.dumps({"questions": [{"title": "first"}, {"title": "second"}]}))
+        append(type="function_call_output", call_id="q1", output='{"accepted":true}')
+        self.hook(self.codex_event("UserPromptSubmit", transcript_path=str(rollout)))
+        [session] = self.view()
+        self.assertEqual((session["state"], session["waiting_for"]), ("waiting", "question"))
+        self.hook(self.codex_event("Stop", transcript_path=str(rollout)))
+        answer("other-call", 0)
+        answer("q1", 0)
+        self.assertEqual([s["state"] for s in self.view()], ["waiting"])
+        answer("q1", 1)
+        self.assertEqual([s["state"] for s in self.view()], ["idle"])
+
+    def test_rejected_async_question_does_not_leave_a_wait(self):
+        rollout = self.codex / "async-error.jsonl"
+        events = [
+            {"type": "function_call", "name": "request_user_input_async", "call_id": "q1",
+             "arguments": json.dumps({"questions": [{"title": "first"}]})},
+            {"type": "function_call_output", "call_id": "q1", "output": '{"accepted":false}'},
+        ]
+        rollout.write_text("\n".join(json.dumps({"timestamp": "2026-10-18T19:00:00Z", "type": "response_item",
+                                                 "payload": p}) for p in events) + "\n")
+        self.hook(self.codex_event("UserPromptSubmit", transcript_path=str(rollout)))
+        self.assertEqual([s["state"] for s in self.view()], ["working"])
+
     def test_codex_permission_ends_once_the_script_open_at_the_request_has_output(self):
         folder = self.codex / "sessions" / "2026" / "10" / "04"
         folder.mkdir(parents=True)

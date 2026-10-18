@@ -56,8 +56,12 @@ the log database only.
   Reproduction: the Claude session is absent, but its retained manual SEC reminder (`add-afa18602`) creates a
   synthetic working row. The reminder now remains unknown and keeps its deadline and Mark done action; verified
   running background tasks remain working. No reminders are automatically completed.
-- Pending live setup: the two current Codex chats were absent because no agent-eta hooks were installed in
-  `~/.codex/hooks.json` and no hook registrations existed. The existing handlers already support tracking and
-  SessionEnd; no discovery redesign is justified. A concrete hook file is prepared, but the sandbox mount error
-  blocked installation. Complete native review and verify fresh events in both chats, including working, waiting,
-  idle and SessionEnd, before marking this resolved. Historical database rows alone are insufficient.
+- Fixed in 1.1.2: A rejected Codex command missed PostToolUse and kept this idle chat in the working section despite
+  its native Stop event. Discard completed-turn hook pairs while preserving reminders and verified jobs.
+- Fixed in 1.1.2: Native request_user_input_async questions were not recognized. Track delivery separately from
+  answers, retain waiting after Stop and clear each question only from its matching native reply.
+- Live Codex setup: Laptop handlers reviewed; both intended chats registered and appeared in the modal. Native
+  working, idle and SessionEnd removal observed, with the independent reminder retained. Laptop Plasma reload and
+  QML suite passed after sandbox access was changed. Laptop 1.1.2 red question status was confirmed
+  live by the user; answering cleared the wait. Desktop native hook review and QML dependency installation remain
+  pending. Confirm idle display after the current turn ends.

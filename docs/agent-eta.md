@@ -134,7 +134,10 @@ once each approval inside it was decided, by the user or by the auto-review agen
 request has its output, the thread counts as working again from that moment. A question the model puts through the `request_user_input` tool reaches no hook, so the reader
 also looks at the end of the thread's rollout transcript in `~/.codex/sessions/`. A thread that is not idle and has a
 `request_user_input` call there without its matching output waits for an answer, shown as `(question)` and counted from
-the moment it asked. In plan mode a turn ends with an `item_completed` event of type `Plan` before its `task_complete`,
+the moment it asked. Native `request_user_input_async` questions also wait after Stop. Their immediate
+`accepted` result only acknowledges delivery; the matching `send_user_message_question_reply` envelope clears each
+answered question by call id and question index. A partial answer leaves the other questions waiting.
+In plan mode a turn ends with an `item_completed` event of type `Plan` before its `task_complete`,
 and the app then asks whether to implement the plan. An idle thread whose last finished turn carries such a plan
 therefore waits as well, shown as `(plan approval)` and counted from the end of that turn. A turn that fails fires no
 `Stop` either. When the last `task_complete` in the transcript carries an `error`, the thread is stopped, counted from
@@ -147,7 +150,8 @@ thread counts from the end of its failed turn, which is the age the Codex app sh
 stopped at 11:27:35 with a reset at 13:54:30 showed as idle for 37 minutes at 14:31, while the app showed 3 hours,
 matching `updated_at` in its `threads` row. The next `task_started` or `user_message` ends the stop. A command started before the stop
 gets no `PostToolUse`, because Codex polls it no more, and its app-server lives on. The reader therefore deletes the
-entries of a stopped thread that are older than the stop, so the thread does not inherit their due times. On
+entries of an idle or stopped thread that predate the end of its turn, so rejected commands missing PostToolUse
+cannot keep a completed chat in the working section. Manual reminders and live PID or lock jobs are retained. On
 2026-10-04 at 02:27 the one command of the failed turn had no process left. A thread appears with its first hook call, and it disappears with its Codex app-server, after
 `SessionEnd`, or after twelve hours without any hook call. One that claims to work or wait but has been silent for six
 hours most likely missed its `Stop`, and it counts as idle. A thread archived in the app, marked by `archived` in the
@@ -195,7 +199,7 @@ continued presence alone does not prove that a session is working.
 |---|---|---|
 | `pid` | a process with this pid and this starttime exists, which also rules out a reused pid | the Claude Code hook, `run-local.sh`, `add --pid` |
 | `lock` | the writer still holds an `flock` on the entry file | `agent-eta run` |
-| `pair` | the matching Codex `PostToolUse` has not deleted it, the Codex app-server it was recorded under still runs, and it has not expired | the Codex hook |
+| `pair` | the matching Codex `PostToolUse` has not deleted it, the Codex app-server it was recorded under still runs, its turn has not ended, and it has not expired | the Codex hook |
 | none | it has not expired | `agent-eta add` |
 
 An entry expires once it is overdue by its own length, but never earlier than one hour after its due time. An entry

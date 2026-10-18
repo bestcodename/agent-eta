@@ -846,29 +846,74 @@ def tail_records(path, size=ROLLOUT_TAIL):
     return records
 
 
+def codex_async_answers(payload):
+    """Question identities from native async reply envelopes, never from ordinary prose."""
+    for part in payload.get("content") or []:
+        if not isinstance(part, dict):
+            continue
+        text = part.get("text") or ""
+        if not isinstance(text, str):
+            continue
+        match = re.search(r"<send_user_message_question_reply>\s*(.*?)\s*</send_user_message_question_reply>",
+                          text, re.S)
+        if not match:
+            continue
+        try:
+            replies = json.loads(match[1])
+            for reply in replies if isinstance(replies, list) else []:
+                identity = json.loads(reply.get("questionItemId", "null"))
+                if (isinstance(identity, list) and len(identity) == 3
+                        and identity[0] == "request_user_input_async"
+                        and isinstance(identity[1], str) and isinstance(identity[2], int)):
+                    yield identity[1], identity[2]
+        except (ValueError, TypeError, AttributeError):
+            continue
+
+
 def codex_pending(path):
     """What a Codex thread waits for according to its transcript, as (reason, since), or None.
 
     Reads the end of the rollout transcript. A tool call is a `response_item` and its answer
     follows as the matching `*_output` with the same call_id, so a `request_user_input` call
-    without one is an open question. In plan mode a turn ends with an `item_completed` event of
+    without one is an open question. Async delivery acknowledgements are not answers;
+    native reply envelopes close each requested question separately. In plan mode a turn ends with an `item_completed` event of
     type `Plan` before its `task_complete`, and the app then asks whether to implement the plan,
     so a last finished turn that carries a plan waits for its approval.
     """
     records = tail_records(path)
     if records is None:
         return None
-    asked, planned, finished, resets, last = {}, set(), None, None, None
+    asked, async_asked, planned, finished, resets, last = {}, {}, set(), None, None, None
     for record in records:
         payload = record["payload"]
         kind = payload.get("type")
         if record.get("type") == "response_item":
             if kind in ("function_call", "custom_tool_call") and payload.get("name") in CODEX_QUESTION_TOOLS:
                 asked[payload.get("call_id")] = record.get("timestamp")
+            elif kind == "function_call" and payload.get("name") == "request_user_input_async":
+                try:
+                    args = json.loads(payload.get("arguments") or "{}")
+                    count = len(args.get("questions") or [])
+                    if count:
+                        async_asked[payload.get("call_id")] = (record.get("timestamp"), set(range(count)))
+                except (ValueError, TypeError, AttributeError):
+                    pass
             elif kind in ("function_call_output", "custom_tool_call_output"):
                 asked.pop(payload.get("call_id"), None)
+                if payload.get("call_id") in async_asked:
+                    try:
+                        result = json.loads(payload.get("output") or "{}")
+                    except (ValueError, TypeError):
+                        result = {}
+                    if not isinstance(result, dict) or result.get("accepted") is not True:
+                        async_asked.pop(payload["call_id"], None)
             elif kind == "message" and payload.get("role") == "user":
                 finished = None
+                for call, index in codex_async_answers(payload):
+                    if call in async_asked:
+                        async_asked[call][1].discard(index)
+                        if not async_asked[call][1]:
+                            del async_asked[call]
         elif record.get("type") == "event_msg":
             if kind == "item_completed" and (payload.get("item") or {}).get("type") == "Plan":
                 planned.add(payload.get("turn_id"))
@@ -879,6 +924,8 @@ def codex_pending(path):
             elif kind == "token_count":
                 resets = exhausted_until(payload.get("rate_limits")) or resets
                 last = payload.get("rate_limits") if fullest_reset(payload.get("rate_limits")) else last
+    if async_asked:
+        return "async question", parse_stamp(next(iter(async_asked.values()))[0]) or 0, None
     if asked:
         return "question", parse_stamp(list(asked.values())[-1]) or 0, None
     if finished and isinstance(finished[2], dict):
@@ -991,8 +1038,11 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
             if answered:
                 state, since, waiting_for = "working", answered, None
         # A turn that ended with an error fires no Stop hook, so the transcript decides on its own.
-        # An open question only counts inside a turn, and a plan only once its turn has ended.
-        if pending and pending[2] and pending[2] <= now:
+        # Synchronous questions count inside a turn; async questions also survive Stop.
+        # A plan only counts once its turn has ended.
+        if pending and pending[0] == "async question":
+            state, since, waiting_for = "waiting", pending[1] or since, "question"
+        elif pending and pending[2] and pending[2] <= now:
             # The usage limit has reset, so the thread only waits for its next prompt. It has rested
             # since its failed turn ended, which is the age the Codex app shows for it.
             state, since = "idle", pending[1] or since
@@ -1523,8 +1573,8 @@ def sessions_view(directory, now, tasks=None, usage=None):
 
     The ETA of a session is the turn ETA its agent set with `agent-eta turn`, or else the
     latest due time among its tasks. A task whose session is not known, such as a local run,
-    stands as a session of its own. A Codex command from before its thread stopped never gets
-    its PostToolUse, so its entry is deleted here. A session that does not work while its
+    stands as a session of its own. A Codex command left without PostToolUse when its turn
+    ends is deleted here. A session that does not work while its
     account has a reached usage limit counts as stopped until that limit resets.
     """
     tasks = rows(directory, now) if tasks is None else tasks
@@ -1594,9 +1644,12 @@ def limit_stops(sessions, usage, now):
 
 
 def stopped_before(session, task):
-    """Whether a Codex command was started in a turn that has since failed. Codex polls such a
-    command no more, so it is over even while its app-server lives on."""
-    return (session["state"] == "stopped" and (task.get("holder") or {}).get("type") == "pair"
+    """Whether an unpaired Codex command predates a completed or failed turn.
+
+    A denied command can miss PostToolUse even though Stop arrives. The shared app-server
+    staying alive does not prove that command still runs. PID and lock holders are unaffected.
+    """
+    return (session["state"] in ("idle", "stopped") and (task.get("holder") or {}).get("type") == "pair"
             and (task.get("started") or 0) <= (session.get("since") or 0))
 
 

@@ -12,6 +12,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - QML tests in `test_qml/` for `WindowJumper.qml` and `SessionRow.qml` with Qt Quick Test, a stub
   `org.kde.taskmanager`, `test_qml.py` and a CI job in a `debian:trixie` container
 
+## [1.1.2] - 2026-10-18
+
+### Fixed
+
+- Discard unfinished Codex hook pairs after Stop or Interrupt so rejected commands cannot keep an idle chat working;
+  manual reminders and verified PID or lock jobs remain intact
+- Recognize native asynchronous questions until every requested answer arrives, including after Stop; the immediate
+  accepted result does not clear the waiting state
+
 ## [1.1.1] - 2026-10-18
 
 ### Fixed
