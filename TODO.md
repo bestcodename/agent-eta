@@ -80,6 +80,20 @@ priority.
       version on laptop and desktop, reload Plasma and verify the modal. Preserve storage formats, ownership,
       expiry, hook definitions and native trust records. Desktop native hook review remains a user step.
       Remote push and integration merge require separate authorization. Implementation remains pending.
+11. Fix the Agent ETA modal's reset countdown, which reads one minute short. At 22:13 a 23:00 reset showed "resets in
+    46m". `formatIn` in `plasmoid/contents/code/logic.mjs` floors the remaining seconds, while both clock times drop
+    their seconds, so the countdown loses a minute for all but the first second of each minute. This is probably the
+    reported case; logging `resets_at` and `now` when the row renders settles it. Count whole clock minutes instead,
+    as `floor(resets_at / 60) - floor(now / 60)`. `format_span` in `agent-eta` floors the same way for the REMAINING
+    column next to DUE (ca. 30 minutes).
+12. (low) Show a privacy-reduced Agent ETA summary on the locked screen if a supported route keeps it simple. Proposed
+    content: counts per state, the nearest ETA and usage percentages with reset times, with no session titles,
+    labels, paths, prompts or account names. Candidate routes on Plasma 6.3.6, none tested yet, are an MPRIS player,
+    which the lock screen's media controls (`lockscreen/MediaControls.qml` in the `org.kde.plasma.desktop` shell)
+    already show and which would also appear in the panel's media widget; a wallpaper plugin selected for the lock
+    screen that renders the summary; or a user-level override of the shell's lockscreen QML, which Plasma updates can
+    break. Drop the item if every route needs patched system files or a privileged helper. Evaluate the routes first
+    (ca. 1 hour).
 
 Waiting: counter-test for the agent-eta Codex permission fix of 0.66.7 (ca. 15 Minuten). The Codex weekly limit is
 used up until 2026-10-08 03:22. In a Codex thread with the reviewer set to `user`, an escalated `sleep 60` must show
@@ -89,14 +103,6 @@ the log database only.
 
 ## Bug follow-up (2026-10-18)
 
-- Fixed in 1.1.1: Prevent orphaned Claude ETA tasks from appearing as working sessions after handoff or completion.
-  Reproduction: the Claude session is absent, but its retained manual SEC reminder (`add-afa18602`) creates a
-  synthetic working row. The reminder now remains unknown and keeps its deadline and Mark done action; verified
-  running background tasks remain working. No reminders are automatically completed.
-- Fixed in 1.1.2: A rejected Codex command missed PostToolUse and kept this idle chat in the working section despite
-  its native Stop event. Discard completed-turn hook pairs while preserving reminders and verified jobs.
-- Fixed in 1.1.2: Native request_user_input_async questions were not recognized. Track delivery separately from
-  answers, retain waiting after Stop and clear each question only from its matching native reply.
 - Live Codex setup: Laptop handlers reviewed; both intended chats registered and appeared in the modal. Native
   working, idle and SessionEnd removal observed, with the independent reminder retained. Laptop Plasma reload and
   QML suite passed after sandbox access was changed. Laptop 1.1.2 red question status was confirmed
