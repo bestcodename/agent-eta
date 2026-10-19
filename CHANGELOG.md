@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- TODO item 10 records the agreed Python model and widget contract refactor with its acceptance criteria
 - QML tests in `test_qml/` for `WindowJumper.qml` and `SessionRow.qml` with Qt Quick Test, a stub
   `org.kde.taskmanager`, `test_qml.py` and a CI job in a `debian:trixie` container
 
