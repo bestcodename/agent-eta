@@ -7,6 +7,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-20
+
+### Added
+
+- A handoff refuses a destination folder that Claude Code or Codex does not trust yet, before
+  the source is paused and again before the launch, and names the remedy
+- A refused handoff sends a notification outside `--dry-run`
+- TODO items 14 to 16 record the late-registration race, the approval lost on a second hop and the plan read
+  that asks permission in Manual mode
+
+### Changed
+
+- An approved Claude Code destination starts with `--permission-mode manual`, and its prompt says not to ask for
+  approval again
+
+### Fixed
+
+- A native plan the source writes while the handoff waits replaces a forked summary
+- `plan_origin` names the plan that was handed over
+
 ## [1.2.2] - 2026-10-20
 
 ### Fixed

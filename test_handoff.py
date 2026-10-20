@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -50,6 +51,8 @@ class StubEnv(handoff.Env):
         self.clock = 1_800_000_000.0
         self.opened, self.printed, self.notes, self.ran, self.events = [], [], [], [], []
         self.frozen = set()
+        # What trust() answers, one per call, and None once they are used up. The real lookup runs in Trust.
+        self.trust_answers = []
 
     def lookup(self, source):
         session = self.sessions.get("%s:%s" % source)
@@ -87,6 +90,9 @@ class StubEnv(handoff.Env):
     def registered(self, record):
         return len(self.opened) > 0 and self.clock >= record["launched"] + self.register_after
 
+    def trust(self, target, account, cwd):
+        return self.trust_answers.pop(0) if self.trust_answers else None
+
     def notify(self, text):
         self.notes.append(text)
 
@@ -113,8 +119,12 @@ class Base(unittest.TestCase):
         self.plan = write(os.path.join(self.tmp, "plan.md"), PLAN)
         self.codex = write(os.path.join(self.tmp, "bin", "codex"), "#!/bin/sh\nexit 1\n")
         os.chmod(self.codex, 0o755)
+        # No test reads the real trust records of the clients.
+        self.home, self.codex_home = os.path.join(self.tmp, "home"), os.path.join(self.tmp, "codex")
+        os.makedirs(self.home)
         patcher = mock.patch.dict(os.environ, {"CLAUDE_PLAN_PROGRESS_DIR": os.path.join(self.tmp, "progress"),
-                                               "AGENT_ETA_CODEX_BIN": self.codex})
+                                               "AGENT_ETA_CODEX_BIN": self.codex, "HOME": self.home,
+                                               "CODEX_HOME": self.codex_home})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -182,10 +192,16 @@ class Plans(Base):
 
 class Commands(Base):
     def test_destination_commands_follow_the_phase(self):
-        self.assertEqual(["claude-account", "run", "work", "--session-id", "u", "go"],
-                         handoff.destination_command("claude", "work", "/d", "u", True, "go"))
-        self.assertEqual(["claude", "--session-id", "u", "--permission-mode", "plan", "go"],
-                         handoff.destination_command("claude", None, "/d", "u", False, "go"))
+        for account, start in (("work", ["claude-account", "run", "work"]), (None, ["claude"])):
+            self.assertEqual(start + ["--session-id", "u", "--permission-mode", "manual", "go"],
+                             handoff.destination_command("claude", account, "/d", "u", True, "go"))
+            self.assertEqual(start + ["--session-id", "u", "--permission-mode", "plan", "go"],
+                             handoff.destination_command("claude", account, "/d", "u", False, "go"))
+        record = {"id": "h-1", "source": "codex:t1"}
+        approved = handoff.handover_prompt(record, "/p/plan.md", True)
+        self.assertIn("The plan is approved", approved)
+        self.assertNotIn("not approved", approved)
+        self.assertIn("not approved yet", handoff.handover_prompt(record, "/p/plan.md", False))
         self.assertEqual([self.codex, "-C", "/d", "go"], handoff.destination_command("codex", None, "/d", None, True, "go"))
         self.assertEqual([self.codex, "-C", "/d", "-s", "read-only", "-a", "on-request", "go"],
                          handoff.destination_command("codex", None, "/d", None, False, "go"))
@@ -442,7 +458,171 @@ class Transfer(Base):
                            env=env, root=self.root)
         self.assertEqual(1, code)
         self.assertEqual(["completed", "completed", "refused"], [r["state"] for r in env.printed])
-        self.assertEqual(2, len(env.notes))
+        self.assertEqual(3, len(env.notes))
+
+    def test_an_untrusted_destination_is_refused_before_anything_runs(self):
+        forked = {(self.codex, "exec", "fork"): (0, "# Forked\n\n## Steps\n\n1. Go\n")}
+        for dry_run, notes in ((False, 1), (True, 0)):
+            env = StubEnv({"codex:t1": self.session(self.process())}, forked)
+            env.trust_answers = ["Claude Code does not trust it yet"]
+            code = handoff.run(["codex:t1"], "claude", account="work", dry_run=dry_run, env=env, root=self.root)
+            self.assertEqual((1, "refused", "Claude Code does not trust it yet"),
+                             (code, env.printed[-1]["state"], env.printed[-1]["error"]))
+            self.assertFalse([argv for argv in env.ran if argv[1:3] == ["exec", "fork"]])
+            self.assertEqual(([], [], notes), (env.events, env.opened, len(env.notes)))
+        self.assertEqual(["locks"], os.listdir(self.root))
+
+    def test_trust_lost_while_waiting_fails_the_move_and_thaws_the_source(self):
+        proc = self.process()
+        env = StubEnv({"claude:s1": self.session(proc)})
+        env.trust_answers = [None, "Codex marks it as untrusted"]
+        code, result = self.run_one(env)
+        self.assertEqual((1, "failed", "Codex marks it as untrusted"), (code, result["state"], result["error"]))
+        self.assertEqual((["freeze", "thaw"], []), (env.events, env.opened))
+        self.assertIsNone(proc.poll())
+
+    def moved(self, records, during=None, plan_path=None):
+        """Hand claude:s1 to Codex while its fork would write a summary, running `during` while the move waits."""
+        transcript = jsonl(os.path.join(self.tmp, "t.jsonl"), records)
+        proc, calls = self.process(), []
+
+        def waiting(env):
+            calls.append(1)
+            if len(calls) == 2 and during:
+                during()
+            return self.session(proc, transcript=transcript)
+        env = StubEnv({"claude:s1": waiting},
+                      {("claude-account", "run", "work", "--resume"): (0, "# Forked\n\n## Steps\n\n1. Go\n")})
+        code = handoff.run(["claude:s1"], "codex", plan_path=plan_path, env=env, root=self.root)
+        result = env.printed[-1]
+        self.assertEqual((0, "completed"), (code, result["state"]))
+        with open(os.path.join(self.root, result["id"], "plan.md")) as handle:
+            return result, handle.read()
+
+    def test_a_plan_the_source_writes_while_waiting_replaces_the_forked_summary(self):
+        native = os.path.join(self.tmp, "plans", "native.md")
+        attachment = {"type": "attachment", "attachment": {"type": "plan_mode", "planFilePath": native}}
+        result, text = self.moved([attachment], lambda: write(native, "# Native\n\n## Steps\n\n1. Plan on\n"))
+        self.assertEqual(("transcript", "planning"), (result["plan_origin"], result["phase"]))
+        self.assertIn("# Native", text)
+        self.assertNotIn("# Forked", text)
+        self.assertIn("read-only", result["command"])
+
+    def test_an_approval_recorded_while_waiting_replaces_the_forked_summary(self):
+        progress = os.path.join(self.tmp, "progress", "s1.json")
+        result, text = self.moved([Plans.approval(self, "toolu_1")], lambda: write(progress, json.dumps(
+            {"approval": "toolu_1", "done": 1, "total": 3, "plan": self.plan})))
+        self.assertEqual(("plan-progress", "implementation"), (result["plan_origin"], result["phase"]))
+        self.assertIn("- Next step: 2. Second", text)
+        self.assertNotIn("read-only", result["command"])
+
+    def test_a_forked_summary_stays_without_a_plan_and_a_given_plan_stays_anyway(self):
+        result, text = self.moved([])
+        self.assertEqual(("fork", "planning"), (result["plan_origin"], result["phase"]))
+        self.assertIn("# Forked", text)
+        native = write(os.path.join(self.tmp, "plans", "native.md"), "# Native\n")
+        attachment = {"type": "attachment", "attachment": {"type": "plan_mode", "planFilePath": native}}
+        shutil.rmtree(self.root)
+        os.makedirs(self.root)
+        result, text = self.moved([attachment], plan_path=self.plan)
+        self.assertEqual("option", result["plan_origin"])
+        self.assertIn("# Plan", text)
+        self.assertNotIn("# Native", text)
+
+
+class Trust(Base):
+    """The preflight against fixture records of both clients, which it reads without changing them."""
+
+    def setUp(self):
+        super().setUp()
+        self.second = os.path.join(self.tmp, "second")
+        self.env = handoff.Env(lambda source: None, lambda: [("main", os.path.join(self.home, ".claude")),
+                                                             ("second", self.second)])
+
+    def claude(self, path, accepted):
+        return write(path, json.dumps({"oauthAccount": {"secret": "s3cr3t"}, "projects": {
+            key: {"hasTrustDialogAccepted": value} for key, value in accepted.items()}}))
+
+    def codex_config(self, levels):
+        return write(os.path.join(self.codex_home, "config.toml"), "model = \"x\"\n" + "".join(
+            "[projects.%s]\ntrust_level = %s\n" % (json.dumps(key), json.dumps(level)) for key, level in levels.items()))
+
+    def files(self):
+        found = {}
+        for top in (self.home, self.codex_home, self.second):
+            for folder, _, names in os.walk(top):
+                for name in names:
+                    with open(os.path.join(folder, name), "rb") as handle:
+                        found[os.path.join(folder, name)] = handle.read()
+        return found
+
+    def trust(self, target, account, cwd):
+        before = self.files()
+        refusal = self.env.trust(target, account, cwd)
+        self.assertEqual(before, self.files())
+        return refusal
+
+    def test_claude_reads_the_record_of_the_account_it_starts_in(self):
+        self.claude(os.path.join(self.home, ".claude.json"), {self.repo: True})
+        self.assertIsNone(self.trust("claude", "main", self.repo))
+        self.assertIsNone(self.trust("claude", None, self.repo))
+        refusal = self.trust("claude", "second", self.repo)
+        self.assertIn("account second", refusal)
+        self.assertIn("cd %s && claude-account run second" % shlex.quote(self.repo), refusal)
+        self.claude(os.path.join(self.second, ".claude.json"), {self.repo: True})
+        self.assertIsNone(self.trust("claude", "second", self.repo))
+        self.assertIn("not registered", self.trust("claude", "other", self.repo))
+        single = handoff.Env(lambda source: None, lambda: [(None, self.second)])
+        self.assertIsNone(single.trust("claude", "second", self.repo))
+
+    def test_claude_walks_up_to_the_repository_and_its_main_checkout(self):
+        state = os.path.join(self.home, ".claude.json")
+        deeper = os.path.join(self.repo, "sub", "deeper")
+        os.makedirs(deeper)
+        worktree = os.path.join(self.tmp, "worktree")
+        subprocess.run(["git", "-C", self.repo, "worktree", "add", "-q", "--detach", worktree], check=True)
+        self.claude(state, {self.repo: True})
+        for cwd in (deeper, worktree):
+            self.assertIsNone(self.trust("claude", None, cwd))
+        self.claude(state, {os.path.join(self.repo, "sub"): True})
+        self.assertIsNone(self.trust("claude", None, deeper))
+        self.assertIn("does not trust", self.trust("claude", None, self.repo))
+        plain = os.path.join(self.tmp, "plain", "a", "b")
+        os.makedirs(plain)
+        self.claude(state, {os.path.join(self.tmp, "plain"): True, self.repo: False})
+        self.assertIsNone(self.trust("claude", None, plain))
+        self.assertIn("does not trust", self.trust("claude", None, self.repo))
+
+    def test_claude_refuses_the_home_directory_and_unreadable_records(self):
+        state = self.claude(os.path.join(self.home, ".claude.json"), {self.home: True})
+        self.assertIn("for one session only", self.trust("claude", None, self.home))
+        os.remove(state)
+        self.assertIn("does not trust", self.trust("claude", None, self.repo))
+        write(state, "{broken s3cr3t")
+        refusal = self.trust("claude", None, self.repo)
+        self.assertEqual("%s cannot be read" % state, refusal)
+
+    def test_codex_needs_a_trusted_entry(self):
+        refusal = self.trust("codex", None, self.repo)
+        self.assertIn("run `%s -C %s` once" % (self.codex, shlex.quote(self.repo)), refusal)
+        config = self.codex_config({self.repo: "trusted"})
+        self.assertIsNone(self.trust("codex", None, self.repo))
+        write(config, "[projects\ns3cr3t")
+        self.assertEqual("%s cannot be read" % config, self.trust("codex", None, self.repo))
+
+    def test_codex_takes_the_entry_of_the_directory_before_the_main_checkout(self):
+        sub = os.path.join(self.repo, "sub")
+        os.makedirs(sub)
+        worktree = os.path.join(self.tmp, "worktree")
+        subprocess.run(["git", "-C", self.repo, "worktree", "add", "-q", "--detach", worktree], check=True)
+        self.codex_config({self.repo: "trusted"})
+        for cwd in (sub, worktree):
+            self.assertIsNone(self.trust("codex", None, cwd))
+        self.codex_config({self.repo: "trusted", sub: "untrusted"})
+        self.assertIn("marks %s as untrusted" % sub, self.trust("codex", None, sub))
+        self.codex_config({self.repo: "untrusted", sub: "trusted"})
+        self.assertIsNone(self.trust("codex", None, sub))
+        self.assertIn("as untrusted", self.trust("codex", None, worktree))
 
 
 if __name__ == "__main__":

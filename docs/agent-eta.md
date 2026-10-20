@@ -350,7 +350,8 @@ the command prints one JSON record per source.
    and `status.json`. `plan.md` is the plan with a "Handover" section of phase, progress, next step, directory,
    branch, HEAD, dirty paths and a pointer to the plan's verification. Once the source is paused at its boundary, the
    snapshot is written again with the plan's current progress, the git state and the command, since the source may
-   have worked on while the handoff waited. A plan from `--plan` or from a fork keeps its text.
+   have worked on while the handoff waited. A plan from `--plan` keeps its text, and a plan the source wrote
+   meanwhile replaces a forked summary, so `plan_origin` names the plan that was handed over.
 3. **The boundary**: the source must be idle or stopped, with no open question and no verified background writer.
    The command waits up to `--wait` seconds and then reports `waiting` without changing anything.
 4. **The move**: the source process moves into the transient user scope `agent-eta-handoff-<id>.scope`, is frozen
@@ -365,8 +366,12 @@ the command prints one JSON record per source.
    terminal back from a stopped foreground job, which then stops again at its next read, measured on 2026-10-20.
    Polls run every 5 seconds (`AGENT_ETA_HANDOFF_POLL`).
 
-Claude Code starts as `claude-account run ACCOUNT --session-id UUID PROMPT`, with `--permission-mode plan` while the
-plan is unapproved. Codex starts as `codex -C DIR PROMPT`, read-only with `-a on-request` while the plan is unapproved,
+Claude Code starts as `claude-account run ACCOUNT --session-id UUID --permission-mode MODE PROMPT`. The mode is `plan`
+while the plan is unapproved and `manual` once it is approved, so a `plan` default in the account's settings does not
+start the planning over, and the prompt tells it not to ask for approval again. Manual mode grants nothing beyond the
+permission rules, so an unattended destination stops at its first other action and shows `waiting (permission)`.
+The first such action is reading `plan.md`, which lies outside the working directory, see [TODO.md](../TODO.md) item 16.
+Codex starts as `codex -C DIR PROMPT`, read-only with `-a on-request` while the plan is unapproved,
 because Codex has no flag that starts it in plan mode. `codex` is `AGENT_ETA_CODEX_BIN`, else the one on PATH, else the
 desktop package's `/usr/lib/chatgpt/resources/codex`, and without one the handoff is refused before the pause. The
 desktop package's binary starts with `--no-daemon`, because through the app's shared server it refuses an interactive
@@ -374,6 +379,29 @@ start with "this CLI has no complete local package", measured on 2026-10-20. Nei
 configuration. Without `--account`, the Claude Code account is the first eligible one from `claude-account targets
 --json`, and otherwise the only registered one. A lock per source and the records make a repeated request report the
 earlier move.
+
+Neither client starts unattended in a folder it does not trust yet. Each shows its trust question and waits, and the
+move would end in the registration timeout. The handoff therefore reads the destination's own record before it pauses
+the source, and refuses the move with the remedy. It never writes an entry or answers a question.
+
+- **Claude Code** is checked in `~/.claude.json` for the primary account and in `DIR/.claude.json` for another
+  registered one. The folder counts as trusted when the main checkout of its repository, which a linked worktree shares,
+  or any directory from the folder up to the repository's toplevel accepted the dialog, or any directory up to `/`
+  outside a repository, as Claude Code 2.1.304 decides. The home directory is refused, because Claude Code keeps its
+  trust there for one session only. The check runs before a fork could spend minutes on a plan.
+- **Codex** is checked in both phases, because 0.163 asks in the read-only start of an unapproved plan as well,
+  measured on 2026-10-20. Its entry for the folder in `$CODEX_HOME/config.toml` or `~/.codex/config.toml`, else
+  the entry of the repository's main checkout, must hold `trust_level = "trusted"`. A subdirectory and a linked
+  worktree of a trusted checkout started without the question and a fresh repository asked, measured on 0.163 on
+  2026-10-20. An entry with `untrusted` is refused as well.
+
+The check runs again once the source is paused, since trust may have changed while it waited, and a refusal at
+that point fails the move and thaws the source. Every refusal outside `--dry-run` sends a notification, because a
+trigger starts its handoff detached and only once per window. `--dry-run` shows a refusal without moving anything.
+
+Three limits stay open, the third being the plan read of item 16. A destination that starts after the registration timeout works beside the thawed source, see
+[TODO.md](../TODO.md) item 14. A Claude Code session that a handoff started holds no ExitPlanMode approval, so a later
+move of it to Codex forks a summary and plans again, see item 15.
 
 Every chat of the Codex desktop app runs in one shared app-server, so pausing one would pause all of them. Such a
 thread is refused with "desktop chats cannot be gated", and only a Codex thread with a process of its own can move.
@@ -698,10 +726,12 @@ signals and the handoff field, and keeps the contract fixtures current. `test_ha
 both providers, the forked one-shot, the destination commands per phase, the launcher's quoting, the snapshot with a
 dirty tree, the refreshed snapshot, Codex resolution and registration, and `--dry-run`. Against real `sleep`
 processes and a recording freezer it covers the gate, the thaw after a failed registration, a cancel, SIGHUP, any
-other error, a refusing freezer, a source turning busy after the pause, a reused pid, duplicates, the lock and a
-partial batch. `test_handoff_e2e.py` runs `agent-eta handoff` as a subprocess against a real interactive bash in a pty,
+other error, a refusing freezer, a source turning busy after the pause, a reused pid, duplicates, the lock, a
+partial batch, a refusal before anything runs, trust lost while waiting, and a native plan replacing a forked
+summary. Its `Trust` cases read fixture records of both clients under a temporary `HOME` and `CODEX_HOME`, without
+changing them, for each account, the walk, worktrees, the home directory and unreadable records. `test_handoff_e2e.py` runs `agent-eta handoff` as a subprocess against a real interactive bash in a pty,
 whose foreground job is the source, with the real collectors and the real freezer, and only a fake terminal and a fake
-Codex. It covers a completed move, a registration timeout and a cancel, and checks that the job keeps the terminal. It
+Codex. It covers a completed move, a registration timeout, a cancel and a refusal for an untrusted folder, and checks that the job keeps the terminal. It
 is skipped without a systemd user manager.
 
 `test_accounts.py` uses isolated homes and stub native clients for authentication, logout, mismatches, cache
