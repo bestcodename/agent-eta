@@ -217,6 +217,15 @@ class Commands(Base):
         self.assertIn("plan's `## Verification` section", text)
         self.assertEqual([self.codex, "-C", self.repo], record["command"][:3])
 
+    def test_the_desktop_bundle_starts_without_its_shared_server(self):
+        link = os.path.join(self.tmp, "bin", "bundled")
+        with mock.patch.object(handoff.agent_eta_providers, "DESKTOP_CODEX", os.path.realpath(self.codex)):
+            os.symlink(self.codex, link)
+            with mock.patch.dict(os.environ, {"AGENT_ETA_CODEX_BIN": link}):
+                self.assertEqual([link, "--no-daemon", "-C", "/d", "go"],
+                                 handoff.destination_command("codex", None, "/d", None, True, "go"))
+        self.assertNotIn("--no-daemon", handoff.destination_command("codex", None, "/d", None, True, "go"))
+
     def test_codex_resolves_off_path_and_a_missing_one_refuses_before_anything_changes(self):
         with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):
             self.assertEqual(self.codex, handoff.destination_command("codex", None, "/d", None, True, "go")[0])

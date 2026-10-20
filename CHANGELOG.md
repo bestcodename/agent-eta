@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-20
+
+### Fixed
+
+- A handoff to Codex starts the desktop app's bundled CLI with `--no-daemon`, without which it exited at once
+
 ## [1.2.1] - 2026-10-20
 
 ### Added
