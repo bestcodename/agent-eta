@@ -199,7 +199,42 @@ export function detailLine(session, now) {
     if (session.due) {
         parts.push(`due ${formatClock(session.due, now)}`);
     }
+    const moving = handoffText(session);
+    if (moving) {
+        parts.push(moving);
+    }
     return parts.join(" · ");
+}
+
+const PROVIDERS = {claude: "Claude Code", codex: "Codex"};
+const HANDOFF_PENDING = ["prepared", "launched", "waiting"];
+
+// The latest handoff of a session while it is pending or after it failed. A completed one ends the source.
+export function handoffText(session) {
+    const status = session.handoff && session.handoff.status;
+    if (!status) {
+        return "";
+    }
+    const target = PROVIDERS[status.target] || status.target;
+    if (HANDOFF_PENDING.includes(status.state)) {
+        return `handoff to ${target} pending`;
+    }
+    if (status.state === "failed" || status.state === "cancelled") {
+        return `handoff to ${target} ${status.state}` + (status.error ? `: ${status.error}` : "");
+    }
+    return "";
+}
+
+// The session menu's handoff entry: the other provider, the command and, when it cannot move, why.
+export function handoffAction(session, command) {
+    const view = session && session.handoff;
+    if (!view || !view.targets || view.targets.length === 0) {
+        return null;
+    }
+    const target = view.targets.find(name => name !== session.agent) || view.targets[0];
+    const text = `Hand off to ${PROVIDERS[target] || target}` + (view.available ? "" : ` (${view.reason})`);
+    return {text: text, enabled: !!view.available,
+            command: `${command} handoff ${shellQuote(session.agent + ":" + session.id)} --to ${target}`};
 }
 
 function sessionsOf(listing) {

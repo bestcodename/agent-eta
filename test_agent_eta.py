@@ -20,6 +20,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 _SRC = pathlib.Path(__file__).with_name("agent-eta")
 _spec = importlib.util.spec_from_loader(
@@ -1115,6 +1116,56 @@ class Usage(StateTest):
         [window] = json.loads(self.cli("--json").stdout)["usage"]
         self.assertEqual((window["agent"], window["minutes"], window["used"]), ("claude", 300, 5.0))
 
+
+
+class CodexLimitTrigger(unittest.TestCase):
+    """The Stop hook's handoff of a Codex thread at its usage threshold."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(prefix="agent-eta-trigger-")
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.config = os.path.join(self.dir, "config.json")
+        patcher = unittest.mock.patch.dict(os.environ, {"AGENT_ETA_CONFIG": self.config})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.proc = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(lambda: (self.proc.kill(), self.proc.wait()))
+        self.started = []
+        self.record({"pid": self.proc.pid})
+
+    def record(self, app):
+        eta.write_atomic(eta.codex_session_path(self.dir, "t1"), {"id": "t1", "state": "idle", "app": app})
+
+    def fire(self, used, minutes=300, resets_at=2000):
+        usage = [eta.usage_window("codex", minutes, used, resets_at, 900)]
+        return eta.codex_limit_trigger(self.dir, "t1", 1000, usage, lambda command, log: self.started.append(command))
+
+    def test_a_window_at_its_threshold_starts_one_handoff(self):
+        self.assertEqual(self.fire(89), "handoff-below")
+        self.assertEqual(self.fire(90), "handoff-started")
+        self.assertEqual(self.started[0][2:], ["handoff", "codex:t1", "--to", "claude", "--wait", "1800"])
+        self.assertEqual(self.fire(95), "handoff-known")
+        self.assertEqual(self.fire(94, minutes=10080), "handoff-below")
+        self.assertEqual(self.fire(95, minutes=10080), "handoff-started")
+        self.assertEqual(len(self.started), 2)
+
+    def test_a_reset_window_triggers_nothing(self):
+        self.assertEqual(self.fire(100, resets_at=500), "handoff-below")
+
+    def test_the_config_sets_thresholds_and_can_switch_it_off(self):
+        with open(self.config, "w") as handle:
+            json.dump({"codex_handoff": {"five_hour_percent": 80, "weekly_percent": "x"}}, handle)
+        self.assertEqual(self.fire(85), "handoff-started")
+        self.assertEqual(eta.handoff_trigger_settings()["weekly_percent"], 95)
+        with open(self.config, "w") as handle:
+            json.dump({"codex_handoff": {"enabled": False}}, handle)
+        self.assertEqual(self.fire(99, resets_at=3000), "handoff-off")
+
+    def test_a_desktop_chat_is_skipped(self):
+        self.record({})
+        self.assertEqual(self.fire(99), "handoff-ungated")
+        self.assertEqual(self.started, [])
 
 if __name__ == "__main__":
     unittest.main()

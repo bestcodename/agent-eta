@@ -113,6 +113,9 @@ CLAUDE_STATES = {"busy": "working", "shell": "working", "waiting": "waiting", "i
 CODEX_STATES = {"UserPromptSubmit": "working", "PreToolUse": "working", "PostToolUse": "working",
                 "PermissionRequest": "waiting", "Stop": "idle", "Interrupt": "idle"}
 TURN_ENDS = ("UserPromptSubmit", "Stop", "Interrupt", "SessionEnd")
+# The Codex limit trigger's defaults, overridden by `codex_handoff` in ~/.config/agent-eta/config.json.
+HANDOFF_TRIGGER = {"enabled": True, "five_hour_percent": 90, "weekly_percent": 95}
+HANDOFF_WAIT = 1800
 # Codex tools that put a question to the user. No hook sees them, and none sees a plan waiting
 # for approval either, so the reader looks for both in the thread's rollout transcript.
 # Measured on codex-cli 0.159.2.
@@ -1727,6 +1730,11 @@ def codex_event(directory, payload):
             actions.append(codex_pre(directory, payload))
         else:
             actions.append(codex_post(directory, payload))
+    if event == "Stop" and thread:
+        try:
+            actions.append(codex_limit_trigger(directory, thread, time.time()))
+        except Exception as exc:  # The trigger must never cost the hook its state update.
+            actions.append("handoff-error-%s" % type(exc).__name__)
     if event in TURN_ENDS and thread and remove(turn_path(directory, "codex", {"id": thread})):
         actions.append("turn-cleared")
     if event == "SessionEnd" and thread:
@@ -1736,6 +1744,54 @@ def codex_event(directory, payload):
         state = CODEX_STATES[event]
         actions.append(codex_state(directory, payload, state, "permission" if state == "waiting" else None))
     return "+".join(actions) or "ignored"
+
+
+def handoff_trigger_settings():
+    """The Codex limit trigger's settings from the agent-eta config, over its defaults."""
+    raw = accounts_api.AccountStore().settings().get("codex_handoff")
+    settings = dict(HANDOFF_TRIGGER)
+    for key, value in (raw.items() if isinstance(raw, dict) else ()):
+        if key in settings and type(value) in ((bool,) if key == "enabled" else (int, float)):
+            settings[key] = value
+    return settings
+
+
+def codex_limit_trigger(directory, thread, now, usage=None, start=None):
+    """At Stop, hand a Codex thread to Claude Code once a Codex usage window reached its threshold.
+
+    It starts `agent-eta handoff codex:<thread> --to claude` detached, once per thread and set of
+    tripped windows. A thread that shares its process with others, as every desktop chat does, cannot
+    be paused and is skipped. A reset clears the trip and never moves a session back.
+    """
+    settings = handoff_trigger_settings()
+    if not settings["enabled"]:
+        return "handoff-off"
+    thresholds = {300: settings["five_hour_percent"], 10080: settings["weekly_percent"]}
+    tripped = sorted("%d@%s" % (w["minutes"], w["resets_at"]) for w in (codex_usage() if usage is None else usage)
+                     if w["minutes"] in thresholds and w["used"] >= thresholds[w["minutes"]]
+                     and (not isinstance(w["resets_at"], (int, float)) or w["resets_at"] > now))
+    if not tripped:
+        return "handoff-below"
+    path = os.path.join(sub_dir(directory, "handoff-triggers"), "codex-%s.json" % safe_id(thread))
+    if (read_json(path) or {}).get("windows") == tripped:
+        return "handoff-known"
+    app = (read_json(codex_session_path(directory, thread)) or {}).get("app") or {}
+    try:
+        with open("/proc/%d/cmdline" % app["pid"], "rb") as handle:
+            if b"app-server" in handle.read():
+                return "handoff-ungated"
+    except (KeyError, TypeError, OSError):
+        return "handoff-ungated"
+    write_atomic(path, {"windows": tripped, "at": int(now)})
+    command = [sys.executable, os.path.realpath(__file__), "handoff", "codex:%s" % thread, "--to", "claude",
+               "--wait", str(HANDOFF_WAIT)]
+    (start or spawn_logged)(command, os.path.join(sub_dir(directory, "handoff-triggers"), "codex-%s.log" % safe_id(thread)))
+    return "handoff-started"
+
+
+def spawn_logged(command, log_path):
+    with open(log_path, "a") as log:
+        subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
 
 
 def claude_env():
@@ -1906,6 +1962,19 @@ def handoff_inspect(source):
     return None
 
 
+def handoff_batch(agent, target, account):
+    """Move every session of `agent` that can be paused to `target`, detached, logging into the handoff
+    folder. Each source is reported separately in the log and in its own record."""
+    sources = ["%s:%s" % (s["agent"], s["id"]) for s in snapshot(state_dir(), time.time()).sessions
+               if s["agent"] == agent and s["handoff"]["available"] and not s["dormant"]]
+    if not sources:
+        raise AccountError("No %s session can move" % {"claude": "Claude Code", "codex": "Codex"}[agent])
+    command = [sys.executable, os.path.realpath(__file__), "handoff"] + sources + ["--to", target]
+    if account and target == "claude":
+        command += ["--account", account]
+    spawn_logged(command, os.path.join(handoff_api.handoff_root(), time.strftime("batch-%Y%m%d-%H%M%S.log")))
+
+
 def cmd_handoff(args):
     env = handoff_api.Env(handoff_inspect, claude_accounts)
     return handoff_api.run(args.sources, args.to, account=args.account, plan_path=args.plan, wait=args.wait,
@@ -1955,7 +2024,8 @@ def main(argv=None):
         argv.insert(0, "list")
     args = build_parser().parse_args(argv)
     handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done,
-                "turn": cmd_turn, "handoff": cmd_handoff, "account": accounts_api.account_action,
+                "turn": cmd_turn, "handoff": cmd_handoff,
+                "account": lambda args: accounts_api.account_action(args, handoff_batch),
                 "tab": konsole_api.tab_action}
     try:
         return handlers[args.cmd](args)

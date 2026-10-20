@@ -261,6 +261,17 @@ class Actions(Isolated):
         with self.assertRaises(providers.AccountError):
             accounts.account_action(self.args("handoff", "codex"))
 
+    def test_moves_across_providers_go_to_the_batch_of_agent_eta(self):
+        self.registered(("work", "private"))
+        moved = []
+        args = self.args("handoff", "codex")
+        args.source = "claude"
+        accounts.account_action(args, lambda *call: moved.append(call))
+        args = self.args("handoff", "claude:private")
+        args.source = "codex"
+        accounts.account_action(args, lambda *call: moved.append(call))
+        self.assertEqual(moved, [("claude", "codex", None), ("codex", "claude", "private")])
+
     def test_claude_launch_uses_konsole_argv_without_shell_interpolation(self):
         self.registered()
         account = self.store.find("claude:work")

@@ -26,6 +26,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   destination's registration; Claude to Claude delegates to `claude-account handoff --only`
 - `agent_eta_handoff.py` with `test_handoff.py`, which drives the gate with real processes
 - Contract sessions carry `handoff` with `available`, `reason`, `targets` and the latest move's `status`
+- The Codex Stop hook hands a thread to Claude Code at 90 % of its 5-hour or 95 % of its weekly window, once per
+  window, with `codex_handoff` settings in `~/.config/agent-eta/config.json`
+- The session menu offers a handoff to the other provider, disabled with the reason, and rows show a pending or
+  failed handoff
+- Account rows move all Codex sessions to a Claude account and all Claude sessions to Codex, through
+  `account handoff ID --from claude|codex`
 
 ### Changed
 

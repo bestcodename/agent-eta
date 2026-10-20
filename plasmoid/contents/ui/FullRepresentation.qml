@@ -197,6 +197,16 @@ PlasmaExtras.Representation {
             visible: !!accountMenu.account && accountMenu.account.provider === "claude" && accountMenu.account.can_remove
             onClicked: root.accountAction("handoff", accountMenu.account)
         }
+        PlasmaExtras.MenuItem {
+            text: i18n("Move all Codex sessions here")
+            visible: !!accountMenu.account && accountMenu.account.provider === "claude"
+            onClicked: root.accountAction("handoff", accountMenu.account, null, "codex")
+        }
+        PlasmaExtras.MenuItem {
+            text: i18n("Move all Claude sessions here")
+            visible: !!accountMenu.account && accountMenu.account.provider === "codex"
+            onClicked: root.accountAction("handoff", accountMenu.account, null, "claude")
+        }
     }
 
     PlasmaExtras.PlaceholderMessage {
@@ -261,6 +271,14 @@ PlasmaExtras.Representation {
             icon: "edit-copy"
             visible: !!(actions.session && Logic.resumeCommand(actions.session))
             onClicked: root.act("copy", actions.session, actions.task)
+        }
+        PlasmaExtras.MenuItem {
+            readonly property var handoff: Logic.handoffAction(actions.session, root.command)
+            text: handoff ? handoff.text : ""
+            icon: "go-next"
+            visible: !!handoff
+            enabled: !!handoff && handoff.enabled
+            onClicked: root.act("handoff", actions.session, actions.task)
         }
         PlasmaExtras.MenuItem {
             text: i18n("Mark done")

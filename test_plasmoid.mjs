@@ -307,3 +307,21 @@ test("the dormant threshold reads in whole hours", () => {
     assert.equal(logic.formatDuration(3600), "1 hour");
     assert.equal(logic.formatDuration(5400), "1h 30m");
 });
+
+test("handoff entries name the other provider and why a session cannot move", () => {
+    const claude = {agent: "claude", id: "s'1", handoff: {available: true, reason: null, targets: ["codex", "claude"], status: null}};
+    assert.deepEqual(logic.handoffAction(claude, "agent-eta"),
+        {text: "Hand off to Codex", enabled: true, command: "agent-eta handoff 'claude:s'\\''1' --to codex"});
+    const desktop = {agent: "codex", id: "t1", handoff: {available: false, reason: "desktop chats cannot be gated", targets: ["claude"], status: null}};
+    assert.deepEqual(logic.handoffAction(desktop, "agent-eta").text, "Hand off to Claude Code (desktop chats cannot be gated)");
+    assert.equal(logic.handoffAction(desktop, "agent-eta").enabled, false);
+    assert.equal(logic.handoffAction({agent: "dsh", handoff: {available: false, targets: []}}, "agent-eta"), null);
+});
+
+test("rows show a pending or failed handoff and forget a completed one", () => {
+    const at = (state, error) => ({agent: "claude", state: "idle", handoff: {status: {state, target: "codex", error}}});
+    assert.equal(logic.handoffText(at("launched")), "handoff to Codex pending");
+    assert.equal(logic.handoffText(at("failed", "did not register")), "handoff to Codex failed: did not register");
+    assert.equal(logic.handoffText(at("completed")), "");
+    assert.match(logic.detailLine(at("waiting"), 0), /handoff to Codex pending$/);
+});

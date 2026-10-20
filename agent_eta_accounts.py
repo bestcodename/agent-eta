@@ -248,7 +248,9 @@ def handoff_here(store, account):
             subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
 
 
-def account_action(args):
+def account_action(args, batch=None):
+    """`batch(agent, target, account_name)` moves every available session of `agent` across providers,
+    which only agent-eta itself can, since it collects the sessions."""
     store = AccountStore()
     action = args.account_action
     if action == "enable":
@@ -268,7 +270,13 @@ def account_action(args):
                 directory = valid_directory(args.directory)
                 store.configure(lambda data: data.setdefault("default_directories", {}).update({account["id"]: directory}))
         elif action == "handoff":
-            handoff_here(store, account)
+            source = getattr(args, "source", None) or "claude"
+            if source == account["provider"]:
+                handoff_here(store, account)
+            elif batch is None:
+                raise AccountError("Sessions cannot move between providers here")
+            else:
+                batch(source, account["provider"], account["name"] if account["registered"] else None)
         elif action == "remove":
             if account["provider"] == "codex":
                 store.configure(lambda data: data.update(codex_disabled=True))
@@ -308,5 +316,8 @@ def add_parser(sub):
         parser.add_argument("id", help="codex, claude:NAME or claude:default")
         if action == "launch":
             parser.add_argument("--directory")
+        elif action == "handoff":
+            parser.add_argument("--from", dest="source", choices=("claude", "codex"),
+                                help="the provider whose sessions move, Claude by default")
         elif action == "default-directory":
             parser.add_argument("directory", nargs="?")

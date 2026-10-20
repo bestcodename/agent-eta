@@ -123,6 +123,10 @@ PlasmoidItem {
             Qt.openUrlExternally("file://" + encodeURI(session.cwd));
         } else if (action === "copy") {
             clipboard.content = Logic.resumeCommand(session);
+        } else if (action === "handoff") {
+            // It waits for a safe boundary, up to half an hour, and reports through its records and a notification.
+            const entry = Logic.handoffAction(session, command);
+            if (entry && entry.enabled) runner.detach(entry.command);
         } else if (action === "done" && task) {
             runner.run(command + " done " + Logic.shellQuote(task.id), () => refresh());
         }
@@ -132,8 +136,9 @@ PlasmoidItem {
     }
 
     // Account actions have one implementation in the CLI. Errors survive ordinary polls.
-    function accountAction(action, account, directory) {
+    function accountAction(action, account, directory, source) {
         let args = " account " + action + " " + Logic.shellQuote(account.id);
+        if (source) args += " --from " + source;
         if (directory !== undefined && directory !== null)
             args += action === "launch" ? " --directory " + Logic.shellQuote(directory) : " " + Logic.shellQuote(directory);
         runner.run(command + args, (code, stdout, stderr) => {
