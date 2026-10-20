@@ -39,7 +39,8 @@ def jsonl(path, records):
 
 
 class StubEnv(handoff.Env):
-    """An Env with a fake clock, a recorded terminal and canned sessions and commands."""
+    """An Env with a fake clock, a recorded terminal and freezer, and canned sessions and commands. The real
+    freezer runs in test_handoff_e2e."""
 
     def __init__(self, sessions, commands=None, register_after=0):
         super().__init__(self.lookup, lambda: [("work", "/nonexistent")], out=self.collect)
@@ -47,7 +48,8 @@ class StubEnv(handoff.Env):
         self.commands = commands or {}
         self.register_after = register_after
         self.clock = 1_800_000_000.0
-        self.opened, self.printed, self.notes, self.ran = [], [], [], []
+        self.opened, self.printed, self.notes, self.ran, self.events = [], [], [], [], []
+        self.frozen = set()
 
     def lookup(self, source):
         session = self.sessions.get("%s:%s" % source)
@@ -63,6 +65,20 @@ class StubEnv(handoff.Env):
                 code, out = result
                 return subprocess.CompletedProcess(argv, code, out, "stub failed" if code else "")
         return super().run(argv, timeout, cwd)
+
+    def freeze(self, unit, pid):
+        self.frozen.add(unit)
+        self.events.append("freeze")
+
+    def resume(self, unit):
+        if unit in self.frozen:
+            self.frozen.discard(unit)
+            self.events.append("thaw")
+        return True
+
+    def signal(self, pid, start, signum):
+        self.events.append(signal.Signals(signum).name)
+        return super().signal(pid, start, signum)
 
     def open_terminal(self, tabs):
         with open(tabs, "r", encoding="utf-8") as handle:
@@ -110,17 +126,6 @@ class Base(unittest.TestCase):
         return dict({"state": "idle", "waiting_for": None, "running": False, "gate": pid,
                      "proc_start": handoff.Env.proc_start(None, pid) if pid else None, "pid": pid,
                      "cwd": self.repo, "account": "work", "transcript": None, "rollout": None}, **extra)
-
-    def state(self, proc, expect=None):
-        """The process state letter; with `expect`, waits up to a second for it, since signals land
-        asynchronously."""
-        for _ in range(100):
-            with open("/proc/%d/stat" % proc.pid) as handle:
-                found = handle.read().rsplit(")", 1)[1].split()[0]
-            if expect is None or found == expect:
-                return found
-            time.sleep(0.01)
-        return found
 
 
 class Plans(Base):
@@ -251,6 +256,7 @@ class Transfer(Base):
         code, result = self.run_one(env)
         self.assertEqual((0, "completed"), (code, result["state"]))
         self.assertEqual(-signal.SIGHUP, proc.wait(timeout=5))
+        self.assertEqual(["freeze", "SIGHUP", "thaw"], env.events)
         self.assertIn("command: /bin/sh ", env.opened[0])
         with open(os.path.join(self.root, result["id"], "status.json")) as handle:
             self.assertEqual("completed", json.load(handle)["state"])
@@ -261,7 +267,7 @@ class Transfer(Base):
         code, result = self.run_one(env)
         self.assertEqual((1, "failed"), (code, result["state"]))
         self.assertIn("did not register", result["error"])
-        self.assertNotEqual("T", self.state(proc))
+        self.assertEqual(["freeze", "thaw"], env.events)
         self.assertIsNone(proc.poll())
 
     def test_a_busy_source_is_left_alone_until_the_wait_ends(self):
@@ -270,30 +276,66 @@ class Transfer(Base):
         code, result = self.run_one(env, wait=30)
         self.assertEqual((1, "waiting"), (code, result["state"]))
         self.assertEqual([], env.opened)
-        self.assertNotEqual("T", self.state(proc))
+        self.assertEqual([], env.events)
 
     def test_a_source_that_turns_busy_after_the_stop_is_resumed_and_waited_for(self):
         proc, calls = self.process(), []
 
         def flapping(env):
             calls.append(1)
-            return self.session(proc, state="working" if len(calls) == 2 else "idle")
+            return self.session(proc, state="working" if len(calls) == 3 else "idle")
         env = StubEnv({"claude:s1": flapping})
         code, result = self.run_one(env)
         self.assertEqual((0, "completed"), (code, result["state"]))
-        self.assertGreaterEqual(len(calls), 4)
+        self.assertGreaterEqual(len(calls), 5)
+        self.assertEqual(["freeze", "thaw", "freeze", "SIGHUP", "thaw"], env.events)
 
     def test_a_cancel_after_the_stop_resumes_the_source(self):
         proc = self.process()
         env = StubEnv({"claude:s1": self.session(proc)})
 
         def cancel(tabs):
-            self.assertEqual("T", self.state(proc, "T"))
+            self.assertEqual({handoff.scope(json.load(open(os.path.join(os.path.dirname(tabs), "status.json"))))},
+                             env.frozen)
             raise KeyboardInterrupt
         env.open_terminal = cancel
         code, result = self.run_one(env)
         self.assertEqual((1, "cancelled"), (code, result["state"]))
-        self.assertNotEqual("T", self.state(proc))
+        self.assertEqual(["freeze", "thaw"], env.events)
+        self.assertIsNone(proc.poll())
+
+    def test_any_error_after_the_pause_thaws_the_source_and_is_recorded(self):
+        proc = self.process()
+        env = StubEnv({"claude:s1": self.session(proc)})
+
+        def broken(tabs):
+            raise ValueError("collector broke")
+        env.open_terminal = broken
+        with self.assertRaisesRegex(ValueError, "collector broke"):
+            self.run_one(env)
+        self.assertEqual(["freeze", "thaw"], env.events)
+        self.assertIsNone(proc.poll())
+        (folder,) = [name for name in os.listdir(self.root) if name != "locks"]
+        with open(os.path.join(self.root, folder, "status.json")) as handle:
+            record = json.load(handle)
+        self.assertEqual(("failed", "ValueError: collector broke"), (record["state"], record["error"]))
+        self.assertEqual("systemctl --user thaw %s" % handoff.scope(record), record["resume_source"])
+
+    def test_a_source_that_stays_frozen_is_reported_with_its_recovery(self):
+        env = StubEnv({"claude:s1": self.session(self.process())}, register_after=10 ** 6)
+        env.resume = lambda unit: False
+        code, result = self.run_one(env)
+        self.assertEqual((1, "failed"), (code, result["state"]))
+        self.assertIn("still frozen, run resume_source", result["error"])
+
+    def test_sighup_to_the_handoff_cancels_like_sigterm(self):
+        proc = self.process()
+        env = StubEnv({"claude:s1": self.session(proc)})
+        env.open_terminal = lambda tabs: os.kill(os.getpid(), signal.SIGHUP)
+        previous = signal.getsignal(signal.SIGHUP)
+        code, result = self.run_one(env)
+        self.assertEqual((1, "cancelled"), (code, result["state"]))
+        self.assertEqual(previous, signal.getsignal(signal.SIGHUP))
         self.assertIsNone(proc.poll())
 
     def test_a_reused_pid_is_never_signalled(self):
@@ -302,6 +344,17 @@ class Transfer(Base):
         code, result = self.run_one(env)
         self.assertEqual((1, "failed"), (code, result["state"]))
         self.assertIn("replaced", result["error"])
+        self.assertEqual([], env.events)
+        self.assertIsNone(proc.poll())
+
+    def test_a_freezer_that_refuses_fails_the_move_before_anything_changes(self):
+        proc = self.process()
+        env = StubEnv({"claude:s1": self.session(proc)}, {("busctl",): (1, "")})
+        env.freeze = lambda unit, pid: handoff.Env.freeze(env, unit, pid)
+        code, result = self.run_one(env)
+        self.assertEqual((1, "failed"), (code, result["state"]))
+        self.assertIn("cannot move into a scope", result["error"])
+        self.assertEqual([], env.opened)
         self.assertIsNone(proc.poll())
 
     def test_a_repeated_request_reports_the_earlier_move(self):
