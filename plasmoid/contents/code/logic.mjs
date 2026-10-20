@@ -96,6 +96,15 @@ export function formatClock(epoch, now) {
     return time;
 }
 
+// The seconds from `now` to `epoch` in whole clock minutes once the two lie in different minutes, so a
+// span reads as the difference of the clock times shown beside it: a reset at 06:55:06 is 2h 33m away
+// at 04:22:30, where the seconds give 2h 32m 36s. Within one minute the seconds stay, which keeps `<1m`
+// and a passed reset apart, and the sign is always that of the seconds.
+export function clockSpan(epoch, now) {
+    const minutes = Math.floor(epoch / 60) - Math.floor(now / 60);
+    return minutes ? minutes * 60 : epoch - now;
+}
+
 // A span ahead as `<1m`, `49m`, `12h 13m` or `2d 3h`, for the countdown behind a clock time. A span
 // that is unknown or already over gives "".
 export function formatIn(seconds) {
@@ -115,13 +124,13 @@ export function formatIn(seconds) {
 
 // A reset as `in 12h 13m (24:00)`, or the clock time alone once it has passed.
 export function resetText(epoch, now) {
-    const left = epoch ? formatIn(epoch - now) : "";
+    const left = epoch ? formatIn(clockSpan(epoch, now)) : "";
     return left ? `in ${left} (${formatClock(epoch, now)})` : formatClock(epoch, now);
 }
 
 // How long a state has lasted, as `1h 5m (17:25)` with the clock time it began.
 export function sinceText(epoch, now) {
-    return `${formatIn(now - epoch)} (${formatClock(epoch, now)})`;
+    return `${formatIn(clockSpan(now, epoch))} (${formatClock(epoch, now)})`;
 }
 
 // A usage window length as `5h` or `7d`.
@@ -171,10 +180,12 @@ export function title(session) {
     return session.turn_label ? `${session.name} · ${session.turn_label}` : session.name || "-";
 }
 
-// The right-hand text of a row: how long is left, how far it ran over, or nothing.
-export function etaText(item) {
+// The right-hand text of a row at `now`: how long is left, how far it ran over, or nothing. It counts
+// to the due time the row shows beside it.
+export function etaText(item, now) {
     if (item.due) {
-        return item.remaining < 0 ? `${formatSpan(-item.remaining)} over` : `${formatSpan(item.remaining)} left`;
+        const left = clockSpan(item.due, now);
+        return left < 0 ? `${formatSpan(-left)} over` : `${formatSpan(left)} left`;
     }
     return (item.activity_state || item.state) === "working" ? "no ETA" : "";
 }
@@ -484,7 +495,7 @@ export function tooltipLines(listing, max) {
     const live = sessionsOf(listing).filter(session => !session.dormant);
     const lines = live.slice(0, max).map(session => {
         const detail = [stateLabel(session) + (session.waiting_for ? ` (${session.waiting_for})` : "")];
-        const eta = etaText(session);
+        const eta = etaText(session, listing.now);
         if (eta && eta !== "no ETA") {
             detail.push(eta);
         }

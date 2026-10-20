@@ -430,6 +430,7 @@
       "due": 1760000300,
       "eta_source": "tasks",
       "eta_started": 1759999700,
+      "gate_reason": "it has no running session",
       "handoff": {
         "available": false,
         "reason": "only Claude Code and Codex sessions move",

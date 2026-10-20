@@ -39,7 +39,8 @@ def jsonl(path, records):
 
 
 class StubEnv(handoff.Env):
-    """An Env with a fake clock, a recorded terminal and canned sessions and commands."""
+    """An Env with a fake clock, a recorded terminal and freezer, and canned sessions and commands. The real
+    freezer runs in test_handoff_e2e."""
 
     def __init__(self, sessions, commands=None, register_after=0):
         super().__init__(self.lookup, lambda: [("work", "/nonexistent")], out=self.collect)
@@ -47,7 +48,8 @@ class StubEnv(handoff.Env):
         self.commands = commands or {}
         self.register_after = register_after
         self.clock = 1_800_000_000.0
-        self.opened, self.printed, self.notes, self.ran = [], [], [], []
+        self.opened, self.printed, self.notes, self.ran, self.events = [], [], [], [], []
+        self.frozen = set()
 
     def lookup(self, source):
         session = self.sessions.get("%s:%s" % source)
@@ -63,6 +65,20 @@ class StubEnv(handoff.Env):
                 code, out = result
                 return subprocess.CompletedProcess(argv, code, out, "stub failed" if code else "")
         return super().run(argv, timeout, cwd)
+
+    def freeze(self, unit, pid):
+        self.frozen.add(unit)
+        self.events.append("freeze")
+
+    def resume(self, unit):
+        if unit in self.frozen:
+            self.frozen.discard(unit)
+            self.events.append("thaw")
+        return True
+
+    def signal(self, pid, start, signum):
+        self.events.append(signal.Signals(signum).name)
+        return super().signal(pid, start, signum)
 
     def open_terminal(self, tabs):
         with open(tabs, "r", encoding="utf-8") as handle:
@@ -95,7 +111,10 @@ class Base(unittest.TestCase):
         subprocess.run(git + ["add", "a.txt"], check=True)
         subprocess.run(git + ["commit", "-q", "-m", "init"], check=True)
         self.plan = write(os.path.join(self.tmp, "plan.md"), PLAN)
-        patcher = mock.patch.dict(os.environ, {"CLAUDE_PLAN_PROGRESS_DIR": os.path.join(self.tmp, "progress")})
+        self.codex = write(os.path.join(self.tmp, "bin", "codex"), "#!/bin/sh\nexit 1\n")
+        os.chmod(self.codex, 0o755)
+        patcher = mock.patch.dict(os.environ, {"CLAUDE_PLAN_PROGRESS_DIR": os.path.join(self.tmp, "progress"),
+                                               "AGENT_ETA_CODEX_BIN": self.codex})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -110,17 +129,6 @@ class Base(unittest.TestCase):
         return dict({"state": "idle", "waiting_for": None, "running": False, "gate": pid,
                      "proc_start": handoff.Env.proc_start(None, pid) if pid else None, "pid": pid,
                      "cwd": self.repo, "account": "work", "transcript": None, "rollout": None}, **extra)
-
-    def state(self, proc, expect=None):
-        """The process state letter; with `expect`, waits up to a second for it, since signals land
-        asynchronously."""
-        for _ in range(100):
-            with open("/proc/%d/stat" % proc.pid) as handle:
-                found = handle.read().rsplit(")", 1)[1].split()[0]
-            if expect is None or found == expect:
-                return found
-            time.sleep(0.01)
-        return found
 
 
 class Plans(Base):
@@ -162,12 +170,12 @@ class Plans(Base):
         self.assertIsNone(handoff.codex_plan(os.path.join(self.tmp, "missing.jsonl")))
 
     def test_a_missing_plan_comes_from_a_forked_one_shot_or_needs_preparation(self):
-        env = StubEnv({"codex:t1": self.session(self.process())}, {("codex", "exec", "fork"): (0, "# Forked\n\n## Steps\n\n1. Go\n")})
-        record, _, text = handoff.prepare(("codex", "t1"), "claude", "work", None, env, self.root, dry_run=True)
+        env = StubEnv({"codex:t1": self.session(self.process())}, {(self.codex, "exec", "fork"): (0, "# Forked\n\n## Steps\n\n1. Go\n")})
+        record, _, _, text = handoff.prepare(("codex", "t1"), "claude", "work", None, env, self.root, dry_run=True)
         self.assertEqual(("fork", "planning"), (record["plan_origin"], record["phase"]))
         self.assertIn("--permission-mode", record["command"])
         self.assertIn("# Forked", text)
-        env = StubEnv({"codex:t1": self.session(self.process())}, {("codex", "exec", "fork"): (1, "")})
+        env = StubEnv({"codex:t1": self.session(self.process())}, {(self.codex, "exec", "fork"): (1, "")})
         with self.assertRaisesRegex(handoff.HandoffError, "preparation needed"):
             handoff.prepare(("codex", "t1"), "claude", "work", None, env, self.root, dry_run=True)
 
@@ -178,8 +186,8 @@ class Commands(Base):
                          handoff.destination_command("claude", "work", "/d", "u", True, "go"))
         self.assertEqual(["claude", "--session-id", "u", "--permission-mode", "plan", "go"],
                          handoff.destination_command("claude", None, "/d", "u", False, "go"))
-        self.assertEqual(["codex", "-C", "/d", "go"], handoff.destination_command("codex", None, "/d", None, True, "go"))
-        self.assertEqual(["codex", "-C", "/d", "-s", "read-only", "-a", "on-request", "go"],
+        self.assertEqual([self.codex, "-C", "/d", "go"], handoff.destination_command("codex", None, "/d", None, True, "go"))
+        self.assertEqual([self.codex, "-C", "/d", "-s", "read-only", "-a", "on-request", "go"],
                          handoff.destination_command("codex", None, "/d", None, False, "go"))
 
     def test_the_launcher_quotes_paths_drops_session_markers_and_runs_once(self):
@@ -197,7 +205,7 @@ class Commands(Base):
         write(os.path.join(self.tmp, "progress", "s1.json"),
               json.dumps({"approval": "toolu_1", "done": 1, "total": 3, "plan": self.plan}))
         env = StubEnv({"claude:s1": self.session(self.process(), transcript=transcript)})
-        record, _, _ = handoff.prepare(("claude", "s1"), "codex", None, None, env, self.root)
+        record, _, _, _ = handoff.prepare(("claude", "s1"), "codex", None, None, env, self.root)
         folder = os.path.join(self.root, record["id"])
         self.assertEqual(0o700, os.stat(folder).st_mode & 0o777)
         with open(os.path.join(folder, "plan.md")) as handle:
@@ -207,7 +215,37 @@ class Commands(Base):
         self.assertIn("feature/x at", text)
         self.assertIn("dirty file.txt", text)
         self.assertIn("plan's `## Verification` section", text)
-        self.assertEqual(["codex", "-C", self.repo], record["command"][:3])
+        self.assertEqual([self.codex, "-C", self.repo], record["command"][:3])
+
+    def test_codex_resolves_off_path_and_a_missing_one_refuses_before_anything_changes(self):
+        with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):
+            self.assertEqual(self.codex, handoff.destination_command("codex", None, "/d", None, True, "go")[0])
+        proc = self.process()
+        env = StubEnv({"claude:s1": self.session(proc)})
+        with mock.patch.dict(os.environ, {"AGENT_ETA_CODEX_BIN": os.path.join(self.tmp, "missing")}):
+            code = handoff.run(["claude:s1"], "codex", plan_path=self.plan, env=env, root=self.root)
+        self.assertEqual((1, "refused"), (code, env.printed[-1]["state"]))
+        self.assertIn("codex executable is unavailable", env.printed[-1]["error"])
+        self.assertEqual([], env.events)
+
+    def test_a_codex_destination_registers_by_its_first_user_message(self):
+        def message(role, text):
+            return {"type": "response_item", "payload": {"type": "message", "role": role,
+                                                         "content": [{"type": "input_text", "text": text}]}}
+        preamble = [message("developer", "x" * 1000) for _ in range(70)]
+        rollout = jsonl(os.path.join(self.tmp, "codex", "sessions", "2026", "10", "20", "rollout-x.jsonl"),
+                        preamble + [message("user", "agent-eta handoff h-1: you take over")])
+        self.assertGreater(os.path.getsize(rollout), 70 * 1024)
+        self.assertTrue(handoff.prompted(rollout, "h-1"))
+        self.assertFalse(handoff.prompted(rollout, "h-1", limit=64 * 1024))
+        quoted = jsonl(os.path.join(self.tmp, "quoted.jsonl"), [
+            message("developer", "h-1"), {"type": "response_item", "payload": {"type": "function_call_output",
+                                                                               "output": "h-1"}}, "h-1"])
+        self.assertFalse(handoff.prompted(quoted, "h-1"))
+        with mock.patch.dict(os.environ, {"CODEX_HOME": os.path.join(self.tmp, "codex")}):
+            env = handoff.Env(lambda source: None, lambda: [])
+            self.assertTrue(env.registered({"target": "codex", "id": "h-1", "launched": time.time() - 1}))
+            self.assertFalse(env.registered({"target": "codex", "id": "h-1", "launched": time.time() + 60}))
 
     def test_dry_run_writes_nothing(self):
         env = StubEnv({"claude:s1": self.session(self.process())})
@@ -251,6 +289,7 @@ class Transfer(Base):
         code, result = self.run_one(env)
         self.assertEqual((0, "completed"), (code, result["state"]))
         self.assertEqual(-signal.SIGHUP, proc.wait(timeout=5))
+        self.assertEqual(["freeze", "SIGHUP", "thaw"], env.events)
         self.assertIn("command: /bin/sh ", env.opened[0])
         with open(os.path.join(self.root, result["id"], "status.json")) as handle:
             self.assertEqual("completed", json.load(handle)["state"])
@@ -261,7 +300,7 @@ class Transfer(Base):
         code, result = self.run_one(env)
         self.assertEqual((1, "failed"), (code, result["state"]))
         self.assertIn("did not register", result["error"])
-        self.assertNotEqual("T", self.state(proc))
+        self.assertEqual(["freeze", "thaw"], env.events)
         self.assertIsNone(proc.poll())
 
     def test_a_busy_source_is_left_alone_until_the_wait_ends(self):
@@ -270,30 +309,66 @@ class Transfer(Base):
         code, result = self.run_one(env, wait=30)
         self.assertEqual((1, "waiting"), (code, result["state"]))
         self.assertEqual([], env.opened)
-        self.assertNotEqual("T", self.state(proc))
+        self.assertEqual([], env.events)
 
     def test_a_source_that_turns_busy_after_the_stop_is_resumed_and_waited_for(self):
         proc, calls = self.process(), []
 
         def flapping(env):
             calls.append(1)
-            return self.session(proc, state="working" if len(calls) == 2 else "idle")
+            return self.session(proc, state="working" if len(calls) == 3 else "idle")
         env = StubEnv({"claude:s1": flapping})
         code, result = self.run_one(env)
         self.assertEqual((0, "completed"), (code, result["state"]))
-        self.assertGreaterEqual(len(calls), 4)
+        self.assertGreaterEqual(len(calls), 5)
+        self.assertEqual(["freeze", "thaw", "freeze", "SIGHUP", "thaw"], env.events)
 
     def test_a_cancel_after_the_stop_resumes_the_source(self):
         proc = self.process()
         env = StubEnv({"claude:s1": self.session(proc)})
 
         def cancel(tabs):
-            self.assertEqual("T", self.state(proc, "T"))
+            self.assertEqual({handoff.scope(json.load(open(os.path.join(os.path.dirname(tabs), "status.json"))))},
+                             env.frozen)
             raise KeyboardInterrupt
         env.open_terminal = cancel
         code, result = self.run_one(env)
         self.assertEqual((1, "cancelled"), (code, result["state"]))
-        self.assertNotEqual("T", self.state(proc))
+        self.assertEqual(["freeze", "thaw"], env.events)
+        self.assertIsNone(proc.poll())
+
+    def test_any_error_after_the_pause_thaws_the_source_and_is_recorded(self):
+        proc = self.process()
+        env = StubEnv({"claude:s1": self.session(proc)})
+
+        def broken(tabs):
+            raise ValueError("collector broke")
+        env.open_terminal = broken
+        with self.assertRaisesRegex(ValueError, "collector broke"):
+            self.run_one(env)
+        self.assertEqual(["freeze", "thaw"], env.events)
+        self.assertIsNone(proc.poll())
+        (folder,) = [name for name in os.listdir(self.root) if name != "locks"]
+        with open(os.path.join(self.root, folder, "status.json")) as handle:
+            record = json.load(handle)
+        self.assertEqual(("failed", "ValueError: collector broke"), (record["state"], record["error"]))
+        self.assertEqual("systemctl --user thaw %s" % handoff.scope(record), record["resume_source"])
+
+    def test_a_source_that_stays_frozen_is_reported_with_its_recovery(self):
+        env = StubEnv({"claude:s1": self.session(self.process())}, register_after=10 ** 6)
+        env.resume = lambda unit: False
+        code, result = self.run_one(env)
+        self.assertEqual((1, "failed"), (code, result["state"]))
+        self.assertIn("still frozen, run resume_source", result["error"])
+
+    def test_sighup_to_the_handoff_cancels_like_sigterm(self):
+        proc = self.process()
+        env = StubEnv({"claude:s1": self.session(proc)})
+        env.open_terminal = lambda tabs: os.kill(os.getpid(), signal.SIGHUP)
+        previous = signal.getsignal(signal.SIGHUP)
+        code, result = self.run_one(env)
+        self.assertEqual((1, "cancelled"), (code, result["state"]))
+        self.assertEqual(previous, signal.getsignal(signal.SIGHUP))
         self.assertIsNone(proc.poll())
 
     def test_a_reused_pid_is_never_signalled(self):
@@ -302,6 +377,40 @@ class Transfer(Base):
         code, result = self.run_one(env)
         self.assertEqual((1, "failed"), (code, result["state"]))
         self.assertIn("replaced", result["error"])
+        self.assertEqual([], env.events)
+        self.assertIsNone(proc.poll())
+
+    def test_the_snapshot_is_refreshed_once_the_source_is_paused(self):
+        transcript = jsonl(os.path.join(self.tmp, "t.jsonl"), [Plans.approval(self, "toolu_1")])
+        progress = os.path.join(self.tmp, "progress", "s1.json")
+        write(progress, json.dumps({"approval": "toolu_1", "done": 1, "total": 3, "plan": self.plan}))
+        proc, calls = self.process(), []
+
+        def working(env):
+            calls.append(1)
+            if len(calls) == 2:
+                write(progress, json.dumps({"approval": "toolu_1", "done": 2, "total": 3, "plan": self.plan}))
+                write(os.path.join(self.repo, "late.txt"), "x")
+            return self.session(proc, transcript=transcript, state="working" if len(calls) == 2 else "idle")
+        env = StubEnv({"claude:s1": working})
+        code = handoff.run(["claude:s1"], "codex", env=env, root=self.root)
+        result = env.printed[-1]
+        self.assertEqual((0, "completed"), (code, result["state"]))
+        with open(os.path.join(self.root, result["id"], "plan.md")) as handle:
+            text = handle.read()
+        self.assertIn("- Progress: 2/3 steps done", text)
+        self.assertIn("- Next step: 3. Third", text)
+        self.assertIn("late.txt", text)
+        self.assertNotIn(".plan.md.tmp", os.listdir(os.path.join(self.root, result["id"])))
+
+    def test_a_freezer_that_refuses_fails_the_move_before_anything_changes(self):
+        proc = self.process()
+        env = StubEnv({"claude:s1": self.session(proc)}, {("busctl",): (1, "")})
+        env.freeze = lambda unit, pid: handoff.Env.freeze(env, unit, pid)
+        code, result = self.run_one(env)
+        self.assertEqual((1, "failed"), (code, result["state"]))
+        self.assertIn("cannot move into a scope", result["error"])
+        self.assertEqual([], env.opened)
         self.assertIsNone(proc.poll())
 
     def test_a_repeated_request_reports_the_earlier_move(self):

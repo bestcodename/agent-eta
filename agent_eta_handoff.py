@@ -11,10 +11,11 @@ session that continues the source's plan:
    "Handover" section of progress, next step, branch, HEAD and dirty paths, and status.json.
 3. The source must reach a safe boundary: no turn running, nothing waiting for an answer and no verified
    background writer. The command waits up to --wait seconds and reports without forcing.
-4. The source process is stopped with SIGSTOP and checked again, the destination opens in a new Konsole
-   window, and once it registered the source gets SIGHUP and SIGCONT. A failure or a timeout resumes the
-   source with SIGCONT and keeps status.json with the commands for recovery. Every signal checks the
-   process start time first, so a reused pid is never hit.
+4. The source process moves into a transient systemd user scope, is frozen there and checked again, the
+   destination opens in a new Konsole window, and once it registered the source gets SIGHUP and is thawed.
+   The cgroup freezer leaves job control alone, while SIGSTOP would hand the terminal back to the shell. A
+   failure, a timeout, a cancel or any error thaws the source and keeps status.json with the commands for
+   recovery. Every pause and signal checks the process start time first, so a reused pid is never hit.
 
 A Codex thread of the desktop app shares one app-server with every other thread, so it cannot be paused on
 its own and is refused as a source. Every collaborator that touches the system comes in through `Env`, which
@@ -33,6 +34,8 @@ import time
 import uuid
 from datetime import datetime
 
+import agent_eta_providers
+
 # Variables a session hands to the commands it runs. A claude started with the Claude ones believes it is a
 # child session and saves no transcript, measured on 2026-10-16, and the Codex ones would mark the new
 # session as running inside a Codex sandbox.
@@ -43,8 +46,9 @@ INHERITED = ("CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SSE_PORT", 
 # launcher again. The first run swaps the script for one that only starts the user's shell.
 ONE_SHOT = r"""printf '#!/bin/sh\nexec "${SHELL:-/bin/sh}"\n' > "$0.tmp" && mv "$0.tmp" "$0" """.rstrip()
 # How long a destination may take to register, and how often the boundary and the registration are polled.
-REGISTER_TIMEOUT = 300
-POLL = 5
+# The variables exist for tests and for a forced timeout.
+REGISTER_TIMEOUT = float(os.environ.get("AGENT_ETA_HANDOFF_REGISTER_TIMEOUT") or 300)
+POLL = float(os.environ.get("AGENT_ETA_HANDOFF_POLL") or 5)
 # The states of a handoff record that a repeated request reports instead of starting over.
 SETTLED = ("launched", "completed")
 SOURCE = re.compile(r"^(claude|codex):([A-Za-z0-9._-]+)$")
@@ -182,7 +186,15 @@ def fork_command(source, account):
         claude = ["claude-account", "run", account] if account else ["claude"]
         return claude + ["--resume", ident, "--fork-session", "--no-session-persistence", "-p",
                          "--permission-mode", "plan", PLAN_REQUEST]
-    return ["codex", "exec", "fork", "-c", 'sandbox_mode="read-only"', "--ephemeral", ident, PLAN_REQUEST]
+    return [codex(), "exec", "fork", "-c", 'sandbox_mode="read-only"', "--ephemeral", ident, PLAN_REQUEST]
+
+
+def codex():
+    """The Codex CLI, which the desktop package keeps off PATH."""
+    try:
+        return agent_eta_providers.executable("codex")
+    except agent_eta_providers.AccountError as exc:
+        raise HandoffError(str(exc))
 
 
 # --- snapshot ------------------------------------------------------------------------------
@@ -245,7 +257,7 @@ def destination_command(target, account, cwd, session_id, approved, prompt):
             argv += ["--permission-mode", "plan"]
     else:
         # Codex has no flag that starts in plan mode, so an unapproved plan starts read-only and asks.
-        argv = ["codex", "-C", cwd] + ([] if approved else ["-s", "read-only", "-a", "on-request"])
+        argv = [codex(), "-C", cwd] + ([] if approved else ["-s", "read-only", "-a", "on-request"])
     return argv + [prompt]
 
 
@@ -352,6 +364,42 @@ class Env:
         except OSError:
             return False
 
+    def pause(self, unit, pid, start):
+        """Freeze pid in the transient scope `unit`, only while it is still the process that started at
+        `start`. Raises HandoffError, with the source still running, when that fails."""
+        if not pid or self.proc_start(pid) != start:
+            raise HandoffError("the source process is gone or was replaced")
+        self.freeze(unit, pid)
+
+    def cgroup(self, pid):
+        for line in (read_text("/proc/%d/cgroup" % pid) or "").splitlines():
+            if line.startswith("0::"):
+                return line[3:]
+        return None
+
+    def freeze(self, unit, pid):
+        if not (self.cgroup(pid) or "").endswith("/" + unit):
+            result = self.run(["busctl", "--user", "call", "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+                               "org.freedesktop.systemd1.Manager", "StartTransientUnit", "ssa(sv)a(sa(sv))", unit,
+                               "fail", "1", "PIDs", "au", "1", str(pid), "0"])
+            if result.returncode != 0:
+                raise HandoffError("the source cannot move into a scope: %s" % (result.stderr or "").strip())
+            for _ in range(50):
+                if (self.cgroup(pid) or "").endswith("/" + unit):
+                    break
+                time.sleep(0.02)
+            else:
+                raise HandoffError("the source did not move into %s" % unit)
+        result = self.run(["systemctl", "--user", "freeze", unit])
+        if result.returncode != 0:
+            raise HandoffError("the source cannot be frozen: %s" % (result.stderr or "").strip())
+
+    def resume(self, unit):
+        """Thaw `unit`. True when nothing of it stays frozen, which includes a unit that is gone."""
+        self.run(["systemctl", "--user", "thaw", unit])
+        state = self.run(["systemctl", "--user", "show", "-P", "FreezerState", unit]).stdout.strip()
+        return state not in ("frozen", "freezing")
+
     def open_terminal(self, tabs):
         terminal = shlex.split(os.environ.get("AGENT_ETA_HANDOFF_TERMINAL") or "konsole --tabs-from-file")
         env = {key: value for key, value in os.environ.items() if key not in INHERITED}
@@ -376,9 +424,8 @@ class Env:
                 try:
                     if os.path.getmtime(path) < handoff["launched"] - 5:
                         continue
-                    with open(path, "r", encoding="utf-8", errors="replace") as handle:
-                        if handoff["id"] in handle.read(65536):
-                            return True
+                    if prompted(path, handoff["id"]):
+                        return True
                 except OSError:
                     continue
         return False
@@ -395,6 +442,37 @@ class Env:
         return time.time()
 
 
+def scope(handoff):
+    """The transient user scope that holds the paused source of a handoff."""
+    return "agent-eta-handoff-%s.scope" % handoff["id"]
+
+
+def prompted(rollout, text, limit=4 << 20):
+    """Whether a user message within the first `limit` bytes of a Codex rollout contains `text`. A rollout
+    opens with tens of KiB of instructions and context, and other messages may quote a handoff ID."""
+    needle, read = text.encode(), 0
+    with open(rollout, "rb") as handle:
+        for line in handle:
+            read += len(line)
+            if read > limit:
+                break
+            if needle not in line:
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(record, dict) or record.get("type") != "response_item":
+                continue
+            payload = record.get("payload")
+            if not isinstance(payload, dict) or payload.get("type") != "message" or payload.get("role") != "user":
+                continue
+            parts = payload.get("content") or []
+            if any(isinstance(part, dict) and text in str(part.get("text") or "") for part in parts):
+                return True
+    return False
+
+
 def safe(session):
     """Whether a session sits at a boundary where it can move: no turn running, nothing waiting for an
     answer and no verified background writer. A stop at the usage limit counts as a boundary."""
@@ -403,11 +481,15 @@ def safe(session):
     return not session.get("waiting_for") or session.get("waiting_for") == "usage limit"
 
 
+def recorded_plan(source, session):
+    return claude_plan(source[1], session.get("transcript")) if source[0] == "claude" \
+        else codex_plan(session.get("rollout"))
+
+
 def resolve_plan(source, session, plan_path, env):
     if plan_path:
         return given_plan(plan_path)
-    found = claude_plan(source[1], session.get("transcript")) if source[0] == "claude" \
-        else codex_plan(session.get("rollout"))
+    found = recorded_plan(source, session)
     if found:
         return found
     result = env.run(fork_command(source, session.get("account")), timeout=900, cwd=session.get("cwd"))
@@ -439,7 +521,7 @@ def choose_account(target, account, env):
 
 
 def prepare(source, target, account, plan_path, env, root, dry_run=False):
-    """The handoff record and its snapshot, written unless dry_run."""
+    """The handoff record, the session, the plan and the snapshot text, written unless dry_run."""
     session = env.inspect(source)
     if session is None:
         raise HandoffError("%s:%s is no running session" % source)
@@ -450,23 +532,42 @@ def prepare(source, target, account, plan_path, env, root, dry_run=False):
     now = env.now()
     handoff = {"id": "%s-%s" % (datetime.fromtimestamp(now).strftime("%Y%m%d-%H%M%S"), secrets.token_hex(3)),
                "source": "%s:%s" % source, "target": target, "account": account, "cwd": session["cwd"],
-               "created": int(now), "state": "prepared", "phase": plan["phase"], "plan_origin": plan["origin"],
+               "created": int(now), "state": "prepared", "plan_origin": plan["origin"],
                "session_id": str(uuid.uuid4()) if target == "claude" else None, "launched": None}
+    handoff["resume_source"] = "systemctl --user thaw %s" % scope(handoff)
     folder = os.path.join(root, handoff["id"])
-    plan_file = os.path.join(folder, "plan.md")
-    git = git_state(session["cwd"], env.run)
-    text = plan["text"].rstrip("\n") + "\n\n" + handover_section(handoff, plan, git, now)
-    prompt = handover_prompt(handoff, plan_file, plan["approved"])
-    handoff["command"] = destination_command(target, account, session["cwd"], handoff["session_id"],
-                                             plan["approved"], prompt)
-    handoff["resume_source"] = "kill -CONT %s" % session["pid"]
+    text = snapshot(handoff, plan, env, folder)
     if dry_run:
-        return handoff, session, text
+        return handoff, session, plan, text
     os.makedirs(folder, mode=0o700)
-    with open(plan_file, "w", encoding="utf-8") as handle:
+    save(folder, handoff, text)
+    return handoff, session, plan, text
+
+
+def snapshot(handoff, plan, env, folder):
+    """Set the phase and the destination command of a handoff and return the text of its plan.md."""
+    git = git_state(handoff["cwd"], env.run)
+    handoff["phase"] = plan["phase"]
+    prompt = handover_prompt(handoff, os.path.join(folder, "plan.md"), plan["approved"])
+    handoff["command"] = destination_command(handoff["target"], handoff["account"], handoff["cwd"],
+                                             handoff["session_id"], plan["approved"], prompt)
+    return plan["text"].rstrip("\n") + "\n\n" + handover_section(handoff, plan, git, env.now())
+
+
+def save(folder, handoff, text):
+    temporary = os.path.join(folder, ".plan.md.tmp")
+    with open(temporary, "w", encoding="utf-8") as handle:
         handle.write(text)
+    os.replace(temporary, os.path.join(folder, "plan.md"))
     write_record(folder, handoff)
-    return handoff, session, text
+
+
+def refresh(handoff, session, plan, env, folder):
+    """Bring the snapshot up to date once the source is paused, since the turns it ran while the handoff
+    waited may have moved its plan and its tree. A plan from --plan or from a fork keeps its text."""
+    if plan["origin"] not in ("fork", "option"):
+        plan = recorded_plan(parse_source(handoff["source"]), session) or plan
+    save(folder, handoff, snapshot(handoff, plan, env, folder))
 
 
 def launch(handoff, env, root):
@@ -482,24 +583,32 @@ def launch(handoff, env, root):
     env.open_terminal(tabs)
 
 
-def transfer(handoff, session, env, root, wait):
-    """Wait for a safe boundary, pause the source, launch, confirm and end the source. A cancel through
-    Ctrl-C or SIGTERM resumes the source and records the move as cancelled."""
+def transfer(handoff, session, plan, env, root, wait):
+    """Wait for a safe boundary, pause the source, launch, confirm and end the source. Every way out thaws
+    the source: a cancel through Ctrl-C, SIGTERM or SIGHUP records the move as cancelled, any other error as
+    failed before it propagates, and a completed move has sent SIGHUP before the thaw."""
     folder = os.path.join(root, handoff["id"])
     try:
-        return gated_transfer(handoff, session, env, folder, root, wait)
+        return gated_transfer(handoff, session, plan, env, folder, root, wait)
     except KeyboardInterrupt:
-        env.signal(session["gate"], session["proc_start"], signal.SIGCONT)
-        handoff.update(state="cancelled", error="cancelled; the source was resumed"
-                       + ("" if not handoff.get("launched") else ", and the destination window stays open"))
+        handoff.update(state="cancelled", error="cancelled"
+                       + ("" if not handoff.get("launched") else "; the destination window stays open"))
         write_record(folder, handoff)
         return False
+    except Exception as exc:
+        handoff.update(state="failed", error="%s: %s" % (type(exc).__name__, exc))
+        write_record(folder, handoff)
+        raise
+    finally:
+        if not env.resume(scope(handoff)):
+            handoff.update(error="%s; the source is still frozen, run resume_source" % handoff.get("error"))
+            write_record(folder, handoff)
 
 
-def gated_transfer(handoff, session, env, folder, root, wait):
+def gated_transfer(handoff, session, plan, env, folder, root, wait):
     source = parse_source(handoff["source"])
     deadline = env.now() + wait
-    pid, start = session["gate"], session["proc_start"]
+    pid, start, unit = session["gate"], session["proc_start"], scope(handoff)
     while True:
         current = env.inspect(source)
         if current is None:
@@ -507,23 +616,26 @@ def gated_transfer(handoff, session, env, folder, root, wait):
             write_record(folder, handoff)
             return False
         if safe(current):
-            if not env.signal(pid, start, signal.SIGSTOP):
-                handoff.update(state="failed", error="the source process is gone or was replaced")
+            try:
+                env.pause(unit, pid, start)
+            except HandoffError as exc:
+                handoff.update(state="failed", error=str(exc))
                 write_record(folder, handoff)
                 return False
             again = env.inspect(source)
             if again is not None and safe(again):
                 break
-            env.signal(pid, start, signal.SIGCONT)
+            if not env.resume(unit):
+                raise HandoffError("the source cannot be thawed after it turned busy")
         if env.now() >= deadline:
             handoff.update(state="waiting", error="no safe boundary within %d s; nothing was changed" % wait)
             write_record(folder, handoff)
             return False
         env.sleep(POLL)
+    refresh(handoff, again, plan, env, folder)
     try:
         launch(handoff, env, root)
     except OSError as exc:
-        env.signal(pid, start, signal.SIGCONT)
         handoff.update(state="failed", error="launch failed: %s" % exc)
         write_record(folder, handoff)
         return False
@@ -532,14 +644,11 @@ def gated_transfer(handoff, session, env, folder, root, wait):
     registered_by = env.now() + REGISTER_TIMEOUT
     while not env.registered(handoff):
         if env.now() >= registered_by:
-            env.signal(pid, start, signal.SIGCONT)
-            handoff.update(state="failed", error="the destination did not register within %d s; the source "
-                                                 "was resumed" % REGISTER_TIMEOUT)
+            handoff.update(state="failed", error="the destination did not register within %d s" % REGISTER_TIMEOUT)
             write_record(folder, handoff)
             return False
-        env.sleep(1)
+        env.sleep(min(1, POLL))
     env.signal(pid, start, signal.SIGHUP)
-    env.signal(pid, start, signal.SIGCONT)
     handoff.update(state="completed", error=None)
     write_record(folder, handoff)
     return True
@@ -563,8 +672,8 @@ def handoff_one(text, target, account, plan_path, wait, dry_run, env, root):
     if dry_run:
         if source[0] == "claude" and target == "claude":
             return {"source": text, "delegate": ["claude-account", "handoff", "…", account or "?", "--only", source[1]]}
-        handoff, _, plan = prepare(source, target, account, plan_path, env, root, dry_run=True)
-        return dict(handoff, plan=plan)
+        handoff, _, _, text = prepare(source, target, account, plan_path, env, root, dry_run=True)
+        return dict(handoff, plan=text)
     with SourceLock(root, source):
         previous = latest_by_source(root).get(text)
         if previous and previous.get("state") in SETTLED:
@@ -574,8 +683,8 @@ def handoff_one(text, target, account, plan_path, wait, dry_run, env, root):
             if session is None:
                 raise HandoffError("%s is no running session" % text)
             return {"source": text, "state": "completed", "report": delegate_claude(source, account, wait, env, session)}
-        handoff, session, _ = prepare(source, target, account, plan_path, env, root)
-        transfer(handoff, session, env, root, wait)
+        handoff, session, plan, _ = prepare(source, target, account, plan_path, env, root)
+        transfer(handoff, session, plan, env, root, wait)
         return handoff
 
 
@@ -587,12 +696,13 @@ def run(sources, target, account=None, plan_path=None, wait=1800, dry_run=False,
     """Hand every source over, one after another, and report each separately. A cancel ends the batch.
     Returns the exit code."""
     root = root or handoff_root()
-    previous = signal.signal(signal.SIGTERM, interrupt) if not dry_run else None
+    previous = {} if dry_run else {signum: signal.signal(signum, interrupt)
+                                   for signum in (signal.SIGTERM, signal.SIGHUP)}
     try:
         return run_all(sources, target, account, plan_path, wait, dry_run, env, root)
     finally:
-        if previous is not None:
-            signal.signal(signal.SIGTERM, previous)
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 def run_all(sources, target, account, plan_path, wait, dry_run, env, root):

@@ -58,10 +58,12 @@ test("usage bars get a faint tick at every hour or day of the window", () => {
 });
 
 test("rows say what is left, what ran over and where the session stands", () => {
-    assert.equal(logic.etaText({due: NOW + 600, remaining: 600}), "10m left");
-    assert.equal(logic.etaText({due: NOW - 180, remaining: -180}), "3m over");
-    assert.equal(logic.etaText({state: "working", due: null}), "no ETA");
-    assert.equal(logic.etaText({state: "idle", due: null}), "");
+    assert.equal(logic.etaText({due: NOW + 600, remaining: 600}, NOW), "10m left");
+    assert.equal(logic.etaText({due: NOW - 180, remaining: -180}, NOW), "3m over");
+    // NOW is 03:12:47, so a due time 10m 20s ahead is 03:23:07, eleven minutes on the clock.
+    assert.equal(logic.etaText({due: NOW + 620, remaining: 620}, NOW), "11m left");
+    assert.equal(logic.etaText({state: "working", due: null}, NOW), "no ETA");
+    assert.equal(logic.etaText({state: "idle", due: null}, NOW), "");
     const waiting = session({state: "waiting", waiting_for: "permission", account: "ndcnet"});
     assert.equal(logic.detailLine(waiting, NOW), "claude/ndcnet · shop · waiting (permission) for 2m (03:10)");
     const failed = session({agent: "dsh", account: null, model: "qwen3-coder", state: "waiting",
@@ -76,11 +78,36 @@ test("countdowns read like `12h 13m` and follow the clock time of a reset", () =
         assert.equal(logic.formatIn(seconds), text);
     }
     const reset = Date.UTC(2026, 9, 5, 22, 0) / 1000;
-    assert.equal(logic.resetText(reset, reset - 44_000), "in 12h 13m (00:00)");
+    // 11:46:40 to 00:00 reads 12h 14m on the clock, although 44,000 seconds are 12h 13m 20s.
+    assert.equal(logic.resetText(reset, reset - 44_000), "in 12h 14m (00:00)");
     assert.equal(logic.resetText(reset, reset - 3 * 86400), "in 3d 0h (06.10. 00:00)");
     assert.equal(logic.resetText(reset, reset + 60), "00:00");
     assert.equal(logic.resetText(null, NOW), "-");
     assert.equal(logic.sinceText(NOW - 3900, NOW), "1h 5m (02:07)");
+    // From 02:07:57 to 03:12:47 the clocks say 1h 5m, the seconds 1h 4m 50s.
+    assert.equal(logic.sinceText(NOW - 3890, NOW), "1h 5m (02:07)");
+});
+
+// The minutes of a local clock time, counted from the epoch, so two of them subtract to what the
+// clocks read. It goes through the Date fields rather than the seconds, which is what it checks.
+function clockMinutes(epoch) {
+    const moment = new Date(epoch * 1000);
+    return Date.UTC(moment.getFullYear(), moment.getMonth(), moment.getDate(), moment.getHours(),
+                    moment.getMinutes()) / 60000;
+}
+
+test("a countdown is the difference of the two clock times it stands between", () => {
+    // Measured on 2026-10-20: the Codex 5-hour window reset at 06:55:06, and at 04:22:30 the modal
+    // read "resets in 2h 32m".
+    const reset = 1792472106;
+    assert.equal(logic.resetText(reset, 1792462950), "in 2h 33m (06:55)");
+    for (let now = reset - 7200; now < reset; now += 1) {
+        const minutes = clockMinutes(reset) - clockMinutes(now);
+        const left = minutes < 1 ? "<1m" : minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+        assert.equal(logic.resetText(reset, now), `in ${left} (06:55)`, `now ${now}`);
+        assert.equal(logic.etaText({due: reset, remaining: reset - now}, now),
+                     `${minutes < 1 ? "<1m" : logic.formatSpan(minutes * 60)} left`, `now ${now}`);
+    }
 });
 
 test("the folder picker decodes local paths and rejects other URL types", () => {
@@ -226,7 +253,7 @@ test("rows show agent-eta's activity labels and lights", () => {
     assert.match(logic.detailLine(question, mixed.now), /working, question open \(question\)/);
     const owner = find(mixed, "claude:1");
     assert.deepEqual([owner.state, logic.stateLabel(owner), logic.stateLight(owner)], ["idle", "working", "green"]);
-    assert.equal(logic.etaText(owner), "8m left");
+    assert.equal(logic.etaText(owner, mixed.now), "8m left");
     assert.equal(logic.stateLight(find(mixed, "claude:2")), "yellow");
     assert.equal(logic.stateLight(find(mixed, "task:reminder")), "grey");
     assert.equal(logic.stateLight({}), "grey");

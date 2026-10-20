@@ -7,6 +7,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-20
+
+### Added
+
+- `test_handoff_e2e.py` runs a handoff end to end against a real bash job in a pty with the real collectors and
+  the cgroup freezer
+- `AGENT_ETA_HANDOFF_REGISTER_TIMEOUT` and `AGENT_ETA_HANDOFF_POLL`
+- TODO item 13 records the handoff cases left open
+
+### Fixed
+
+- Countdowns count whole clock minutes, so the widget's `resets in`, `for` and row ETAs and the CLI's REMAINING
+  and FOR equal the difference of the clock times beside them; a 06:55 reset read `2h 32m` at 04:22
+- The handoff pauses its source with the cgroup freezer in a transient user scope instead of SIGSTOP, which
+  handed the terminal of a foreground job back to its shell
+- Any error, and SIGHUP to the handoff, thaws the source and records the move
+- The handoff resolves the Codex CLI off PATH and refuses before the pause when it is missing
+- A Codex destination registers by its first user message, beyond the first 64 KiB of its rollout
+- The handoff refreshes progress, next step, git state and command once the source is paused
+- The owner of tasks without a live session offers no handoff
+- A test meant to turn the source busy after the pause turned it busy before
+
+### Removed
+
+- TODO item 11, the reset countdown
+
 ## [1.2.0] - 2026-10-20
 
 ### Added

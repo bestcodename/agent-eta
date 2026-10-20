@@ -486,7 +486,7 @@ def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, h
                 "agent": task.get("agent"), "id": session.get("id"), "pid": session.get("pid"),
                 "name": task.get("session_name") or "-", "state": "unknown", "reported_state": "unknown",
                 "waiting_for": None, "since": task.get("started"), "cwd": task.get("cwd"), "tasks": [],
-                "key": key_text(key)}
+                "key": key_text(key), "gate_reason": "it has no running session"}
             sessions.append(owner)
         owner["tasks"].append(task)
     for session in sessions:

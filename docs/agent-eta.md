@@ -72,7 +72,9 @@ the dormant ones. A blank line separates the session table from the usage table.
 
 A session's ETA is the turn ETA its agent set with `agent-eta turn`, shown with the turn's label after a `·`. Without
 one, it is the latest due time among its tasks. Without either, REMAINING reads `0` for an idle session, `?` for a
-working one and `-` for one that waits for you. DUE reads `?` wherever REMAINING does, for tasks too. Due times are Europe/Berlin. Names
+working one and `-` for one that waits for you. DUE reads `?` wherever REMAINING does, for tasks too. Due times are Europe/Berlin.
+REMAINING, FOR and every countdown of the widget count whole clock minutes, so they equal the difference of the clock
+times beside them: a reset at 06:55:06 reads `2h 33m` from 04:22:00 to 04:22:59. Names
 are resolved at read time, so a renamed session shows its current name. A Claude Code session shows the name in
 `~/.claude/sessions/<pid>.json`, unless that name is only derived from the directory (`nameSource: "derived"`, as in
 `ai-0b`). Then the latest `custom-title` or `ai-title` in its transcript wins, which is the title Claude Code itself
@@ -346,19 +348,27 @@ the command prints one JSON record per source.
    too, the handoff stops with "preparation needed".
 2. **The snapshot** goes to `~/.local/state/agent-eta/handoff/<id>/` (`AGENT_ETA_HANDOFF_DIR`, mode 0700) as `plan.md`
    and `status.json`. `plan.md` is the plan with a "Handover" section of phase, progress, next step, directory,
-   branch, HEAD, dirty paths and a pointer to the plan's verification.
+   branch, HEAD, dirty paths and a pointer to the plan's verification. Once the source is paused at its boundary, the
+   snapshot is written again with the plan's current progress, the git state and the command, since the source may
+   have worked on while the handoff waited. A plan from `--plan` or from a fork keeps its text.
 3. **The boundary**: the source must be idle or stopped, with no open question and no verified background writer.
    The command waits up to `--wait` seconds and then reports `waiting` without changing anything.
-4. **The move**: the source process gets SIGSTOP and is checked again, the destination opens in a new Konsole window
+4. **The move**: the source process moves into the transient user scope `agent-eta-handoff-<id>.scope`, is frozen
+   there with the cgroup freezer and is checked again. The destination opens in a new Konsole window
    (`AGENT_ETA_HANDOFF_TERMINAL`, default `konsole --tabs-from-file`) with the agent markers of the source removed, and
-   once it registered within 300 seconds the source gets SIGHUP and SIGCONT. Claude Code registers through the
-   session id the handoff gave it, and Codex through a rollout whose prompt carries the handoff id. A failure, a
-   timeout or a cancel by Ctrl-C or SIGTERM resumes the source with SIGCONT and keeps `status.json`. Every signal
-   checks the process start time first, so a reused pid is never hit.
+   once it registered within 300 seconds (`AGENT_ETA_HANDOFF_REGISTER_TIMEOUT`) the source gets SIGHUP and is thawed,
+   so it ends without running in between. Claude Code registers through the session id the handoff gave it, and Codex
+   through a rollout whose first user message carries the handoff id, searched in the first 4 MiB. A failure, a
+   timeout, a cancel by Ctrl-C, SIGTERM or SIGHUP, and any other error thaw the source and keep `status.json`, whose
+   `resume_source` holds `systemctl --user thaw` for a source that stayed frozen. Every pause and signal checks the
+   process start time first, so a reused pid is never hit. The freezer replaces SIGSTOP because bash takes the
+   terminal back from a stopped foreground job, which then stops again at its next read, measured on 2026-10-20.
+   Polls run every 5 seconds (`AGENT_ETA_HANDOFF_POLL`).
 
 Claude Code starts as `claude-account run ACCOUNT --session-id UUID PROMPT`, with `--permission-mode plan` while the
 plan is unapproved. Codex starts as `codex -C DIR PROMPT`, read-only with `-a on-request` while the plan is unapproved,
-because Codex has no flag that starts it in plan mode. Neither gets model or effort flags, so each uses its own
+because Codex has no flag that starts it in plan mode. `codex` is `AGENT_ETA_CODEX_BIN`, else the one on PATH, else the
+desktop package's `/usr/lib/chatgpt/resources/codex`, and without one the handoff is refused before the pause. Neither gets model or effort flags, so each uses its own
 configuration. Without `--account`, the Claude Code account is the first eligible one from `claude-account targets
 --json`, and otherwise the only registered one. A lock per source and the records make a repeated request report the
 earlier move.
@@ -367,10 +377,10 @@ Every chat of the Codex desktop app runs in one shared app-server, so pausing on
 thread is refused with "desktop chats cannot be gated", and only a Codex thread with a process of its own can move.
 The listing's `handoff` field says per session whether it can move, where to, why not and how its latest move went.
 
-Two triggers start a handoff by themselves, each detached and once per tripped window.
+Two triggers start a handoff by themselves, each detached and once per tripped window and session.
 
-- **Claude Code**: bestcodename/ai's usage guard hands the session to Codex when no other Claude account is free and
-  its `codex_handoff` setting allows it.
+- **Claude Code**: bestcodename/ai's usage guard hands each session that prompts to Codex when no other Claude account
+  is free and its `codex_handoff` setting allows it.
 - **Codex**: the Stop hook hands the thread to Claude Code at 90 % of its 5-hour window or 95 % of its weekly window.
   A reset never moves a session back. The settings live in `~/.config/agent-eta/config.json`:
 
@@ -684,8 +694,13 @@ of one process, the resume commands and their quoting, and each notification tra
 `test_model.py` covers the model with no-mutation checks, effective activity, ETAs, usage groups, the summary, the
 signals and the handoff field, and keeps the contract fixtures current. `test_handoff.py` covers plan resolution for
 both providers, the forked one-shot, the destination commands per phase, the launcher's quoting, the snapshot with a
-dirty tree and `--dry-run`. Against real `sleep` processes it covers the gate, the resume after a failed
-registration, a cancel, a source turning busy after the stop, a reused pid, duplicates, the lock and a partial batch.
+dirty tree, the refreshed snapshot, Codex resolution and registration, and `--dry-run`. Against real `sleep`
+processes and a recording freezer it covers the gate, the thaw after a failed registration, a cancel, SIGHUP, any
+other error, a refusing freezer, a source turning busy after the pause, a reused pid, duplicates, the lock and a
+partial batch. `test_handoff_e2e.py` runs `agent-eta handoff` as a subprocess against a real interactive bash in a pty,
+whose foreground job is the source, with the real collectors and the real freezer, and only a fake terminal and a fake
+Codex. It covers a completed move, a registration timeout and a cancel, and checks that the job keeps the terminal. It
+is skipped without a systemd user manager.
 
 `test_accounts.py` uses isolated homes and stub native clients for authentication, logout, mismatches, cache
 persistence, identity changes, expired readings, refresh failures, the 50-empty-rollout regression, throttling and

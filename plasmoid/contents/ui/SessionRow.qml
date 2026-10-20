@@ -81,7 +81,7 @@ PlasmaComponents3.ItemDelegate {
                     font.bold: row.session.activity_state === "waiting"
                 }
                 PlasmaComponents3.Label {
-                    text: Logic.etaText(row.session)
+                    text: Logic.etaText(row.session, row.now)
                     visible: text !== ""
                     color: row.session.overdue ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
                     textFormat: Text.PlainText

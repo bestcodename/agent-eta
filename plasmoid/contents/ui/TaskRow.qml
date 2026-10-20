@@ -28,7 +28,7 @@ ColumnLayout {
             font: Kirigami.Theme.smallFont
         }
         PlasmaComponents3.Label {
-            text: taskRow.task.due ? Logic.etaText(taskRow.task) + " · " + Logic.formatClock(taskRow.task.due, taskRow.now)
+            text: taskRow.task.due ? Logic.etaText(taskRow.task, taskRow.now) + " · " + Logic.formatClock(taskRow.task.due, taskRow.now)
                                    : i18n("no ETA")
             color: taskRow.task.overdue ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
             textFormat: Text.PlainText
