@@ -43,43 +43,6 @@ priority.
    Label the result as an estimate at the current average rate and distinguish it from the reset time.
    Handle zero usage, zero elapsed time, missing or stale readings, and exhausted quotas explicitly.
    If the window resets before projected exhaustion, show that the quota is estimated to last until reset.
-10. (next) Make Python authoritative for shared Agent ETA rules, following the refactor agreed on 2026-10-19.
-    Keep the native Plasma widget, Python backend, polling model, layout and color policy. QML and small
-    JavaScript helpers retain presentation and interactions. Correct inconsistent activity labels across surfaces.
-    Implementation and acceptance criteria:
-
-    - Extract a pure, typed Python model for effective activity, stable identities, sections, summary counts,
-      progress selection and usage grouping. Keep process inspection, hooks, storage and account refresh outside
-      the model. Build one snapshot with one timestamp for terminal and JSON output, without mutating inputs.
-    - Preserve the reported agent state for diagnosis; derive effective activity separately. An idle owner with
-      verified background work displays as working. Unattached reminders remain unknown and contribute no work.
-    - Extend `list --json --all` additively with `schema_version: 1`, stable session/window keys, `activity_state`,
-      semantic light values, `summary`, ordered `sections`, ordered `usage_groups` and `notification_signals`.
-      Preserve existing fields, section numbers and task references. Groups reference existing entities by key.
-      Summary supplies counts, tray status, badge count and the selected progress-session key.
-    - Compute notification eligibility in Python. Signals describe identity, active condition, rising/falling
-      edge, new-item behavior, deduplication key and message parameters for waiting, overdue and usage-reset events.
-      The widget compares successive signals and handles formatting, preferences, delivery and duplicate
-      suppression. Preserve first-poll suppression and existing notification behavior.
-    - Validate the contract in the widget and remove duplicate activity/count/order rules. Keep date/duration
-      formatting, usage-bar geometry, window selection, clipboard, menus and folding in QML/JavaScript. Render
-      backend decisions consistently in the CLI, rows, tooltips, summaries and notifications.
-    - Retain the last valid snapshot and its update time on malformed/incompatible output or timeout; show an
-      explicit failure, including an update-required message for an older CLI. Notify only between valid snapshots.
-      Retain polling intervals and menu pauses; use unique request identities, bounded lifetimes and rejection of
-      late completions so stale responses cannot replace newer data.
-    - Move domain assertions into Python tests and share Python-produced contract fixtures with JavaScript/QML
-      tests. Cover reminder retention, verified jobs, missing PostToolUse, Stop/Interrupt/SessionEnd, partial async
-      answers, dormant sessions, account limits, usage ordering, stale/missing readings, resets, multiple trays,
-      malformed contracts, timeouts and out-of-order completions. Keep UI and formatting coverage in JS/QML.
-    - Run Python, JavaScript, QML and installer suites. Verify live working, red question wait, answered/working
-      and idle states; compare CLI/widget classifications, counts and progress. Test Mark done on disposable
-      entries only. Recheck both checkouts and preserve unrelated work, including desktop `.idea/`.
-    - Continue the existing feature branch unless its state has changed; release as 1.2.0 or the next unused minor.
-      Update README, architecture/contract documentation, changelog and TODO records. Install the same tested
-      version on laptop and desktop, reload Plasma and verify the modal. Preserve storage formats, ownership,
-      expiry, hook definitions and native trust records. Desktop native hook review remains a user step.
-      Remote push and integration merge require separate authorization. Implementation remains pending.
 11. Fix the Agent ETA modal's reset countdown, which reads one minute short. At 22:13 a 23:00 reset showed "resets in
     46m". `formatIn` in `plasmoid/contents/code/logic.mjs` floors the remaining seconds, while both clock times drop
     their seconds, so the countdown loses a minute for all but the first second of each minute. This is probably the

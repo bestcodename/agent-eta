@@ -5,6 +5,7 @@ ETA and its background tasks, and shows the usage windows of every account. Sess
 Completed Codex turns stay idle even when a rejected command misses its completion hook; unanswered native questions
 show as waiting. A Plasma 6 tray widget shows the same overview, raises a session's window and Konsole tab on click and offers account
 actions such as starting a session, logging in and moving all Claude Code sessions to another account.
+`agent-eta handoff` moves a session between Claude Code and Codex with its plan, by hand or at a usage limit.
 
 Hooks and the agents' own session registries fill the list, so an agent only has to write down the ETA it states anyway.
 
@@ -30,7 +31,8 @@ agent-eta                          # sessions, their tasks and the usage windows
 agent-eta add --eta 10m --label "Run the test suite"
 agent-eta done <id>
 agent-eta turn --eta 20m --label "Long refactor"
-agent-eta list --json --all        # what the widget reads
+agent-eta list --json --all        # what the widget reads, contract schema 1
+agent-eta handoff claude:<session> --to codex   # continue a session's plan in Codex
 ```
 
 The hooks for Claude Code and Codex, every command and the widget are described in

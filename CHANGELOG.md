@@ -40,12 +40,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Rows, tooltips, detail lines and the CLI STATE column show the activity label, so an idle owner of a running
   job reads working and a Codex turn with an open async question reads "working, question open"
 - `Runner.qml` gives every run its own source and reports a timeout with exit code 124
+- The dsh collectors moved to `agent_eta_dsh.py` and the state-file helpers to `agent_eta_store.py`
+- `docs/agent-eta.md` documents contract schema 1, the handoff and its triggers
 
 ### Fixed
 
 - The dormant toggle names the real 2-hour threshold instead of 12 hours
 - A late answer to a timed-out run can no longer reach the callback of a newer run
 - A Codex turn that runs on with an open async question is no longer marked stopped by a reached account limit
+
+### Removed
+
+- TODO item 10, done with this release
 
 ## [1.1.2] - 2026-10-18
 

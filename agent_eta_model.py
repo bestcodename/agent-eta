@@ -64,6 +64,11 @@ class Snapshot:
 
 # --- identities ---------------------------------------------------------------------------
 
+def clip(text):
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= LABEL_MAX else text[:LABEL_MAX - 1] + "…"
+
+
 def agent_label(agent, account):
     return "%s/%s" % (agent, account) if account else agent
 
@@ -512,6 +517,8 @@ def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, h
 # The version of the `list --json` contract. It grows only by additions, and anything else is a
 # new version the widget refuses until it is updated.
 SCHEMA_VERSION = 1
+# The longest label a task or a session title keeps.
+LABEL_MAX = 80
 # Where `agent-eta handoff` moves a session of each agent. Claude to Claude stays a resume.
 HANDOFF_TARGETS = {"claude": ("codex", "claude"), "codex": ("claude",)}
 

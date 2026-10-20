@@ -302,6 +302,82 @@ disables automatic workers. `AGENT_ETA_CODEX_BIN`, `CLAUDE_BIN`, `AGENT_ETA_CLAU
 `AGENT_ETA_TERMINAL_BIN`, `AGENT_ETA_OPENER_BIN` and `AGENT_ETA_QDBUS_BIN` override the native binaries. Codex resolution checks PATH and
 then the desktop bundle at `/usr/lib/chatgpt/resources/codex`.
 
+### The list contract
+
+`agent_eta_model.py` decides everything the CLI and the widget share. The collectors in `agent-eta` read registries,
+hooks, transcripts and processes, and `build_snapshot()` turns their output into one snapshot with one timestamp. It
+does no I/O, reads no clock and changes none of its inputs. `agent-eta list` renders that snapshot as the text table,
+and `list --json` publishes it as contract schema 1, which the widget validates and only formats.
+
+| Key | Content |
+|---|---|
+| `schema_version` | `1`. A listing without it makes the widget report "agent-eta CLI too old, update it" |
+| `labels` | the state and section labels and `dormant_after` in seconds |
+| `sessions` | every session with `key`, `reported_state` as its agent reported it, `activity_state` as it effectively is, `activity_label`, `light` (`attention`, `caution`, `active`, `off`), `dormant`, `section`, its ETA fields, its task ids and `handoff` |
+| `tasks`, `usage`, `accounts` | the tasks, usage windows and accounts, each with a `key` |
+| `summary` | the counts per state, `light`, `badge_count`, `status` and `progress_session_key` for the tray icon |
+| `sections`, `usage_groups` | the display order, as lists of keys |
+| `notification_signals` | one signal per waiting, overdue or reset condition, with `key`, `kind`, `entity_key`, `active`, `edge`, `notify_on_new`, `dedupe_key` and `message_params` |
+
+Keys are `claude:<pid>`, `codex:<thread>`, `task:<id>`, `window:<agent>:<minutes>`, `account:<id>` and
+`usage:<agent>`. An idle session that owns verified background work is working, while a reminder without a holder
+proves nothing. A Codex turn that runs on while an async question waits stays red and reads "working, question open".
+The widget sends a notification only between two valid listings, for a rising signal with `notify_on_new` or for a
+falling reset, and never on the first poll. `test_model.py` writes the fixtures in `test_fixtures/contract-v1/` when
+`AGENT_ETA_WRITE_FIXTURES=1` is set and fails when they are stale, and the JavaScript and QML tests read them.
+
+### Handoff between Claude Code and Codex
+
+```sh
+agent-eta handoff claude:<session> --to codex [--plan PATH] [--wait 1800] [--dry-run]
+agent-eta handoff codex:<thread> --to claude [--account NAME]
+agent-eta handoff claude:<session> --to claude --account NAME   # delegates to claude-account handoff --only
+```
+
+A move between providers starts a fresh session that continues the source's plan. Claude Code to Claude Code stays a
+resume through `claude-account handoff --only`, which keeps the conversation. Each source is handled on its own, and
+the command prints one JSON record per source.
+
+1. **The plan** comes from `--plan`. Otherwise a Claude Code session's plan comes from its plan-progress record in
+   `~/.local/state/claude-plan-progress/<session>.json`, which counts as approved only while the transcript holds the
+   matching ExitPlanMode approval, and then from the transcript's `plan_mode` attachment while it still plans. A Codex
+   thread's plan is the latest `Plan` item of its rollout, approved once a later turn starts outside plan mode.
+   Without a plan, a forked one-shot of the source writes one, read-only and without saving a session. If that fails
+   too, the handoff stops with "preparation needed".
+2. **The snapshot** goes to `~/.local/state/agent-eta/handoff/<id>/` (`AGENT_ETA_HANDOFF_DIR`, mode 0700) as `plan.md`
+   and `status.json`. `plan.md` is the plan with a "Handover" section of phase, progress, next step, directory,
+   branch, HEAD, dirty paths and a pointer to the plan's verification.
+3. **The boundary**: the source must be idle or stopped, with no open question and no verified background writer.
+   The command waits up to `--wait` seconds and then reports `waiting` without changing anything.
+4. **The move**: the source process gets SIGSTOP and is checked again, the destination opens in a new Konsole window
+   (`AGENT_ETA_HANDOFF_TERMINAL`, default `konsole --tabs-from-file`) with the agent markers of the source removed, and
+   once it registered within 300 seconds the source gets SIGHUP and SIGCONT. Claude Code registers through the
+   session id the handoff gave it, and Codex through a rollout whose prompt carries the handoff id. A failure, a
+   timeout or a cancel by Ctrl-C or SIGTERM resumes the source with SIGCONT and keeps `status.json`. Every signal
+   checks the process start time first, so a reused pid is never hit.
+
+Claude Code starts as `claude-account run ACCOUNT --session-id UUID PROMPT`, with `--permission-mode plan` while the
+plan is unapproved. Codex starts as `codex -C DIR PROMPT`, read-only with `-a on-request` while the plan is unapproved,
+because Codex has no flag that starts it in plan mode. Neither gets model or effort flags, so each uses its own
+configuration. Without `--account`, the Claude Code account is the first eligible one from `claude-account targets
+--json`, and otherwise the only registered one. A lock per source and the records make a repeated request report the
+earlier move.
+
+Every chat of the Codex desktop app runs in one shared app-server, so pausing one would pause all of them. Such a
+thread is refused with "desktop chats cannot be gated", and only a Codex thread with a process of its own can move.
+The listing's `handoff` field says per session whether it can move, where to, why not and how its latest move went.
+
+Two triggers start a handoff by themselves, each detached and once per tripped window.
+
+- **Claude Code**: bestcodename/ai's usage guard hands the session to Codex when no other Claude account is free and
+  its `codex_handoff` setting allows it.
+- **Codex**: the Stop hook hands the thread to Claude Code at 90 % of its 5-hour window or 95 % of its weekly window.
+  A reset never moves a session back. The settings live in `~/.config/agent-eta/config.json`:
+
+  ```json
+  {"codex_handoff": {"enabled": true, "five_hour_percent": 90, "weekly_percent": 95}}
+  ```
+
 ## Install
 
 ```sh
@@ -423,6 +499,8 @@ and what the hook did. The command text never goes there. The log rotates at 256
   accounts offer Login and Remove controls. A left or right click anywhere on an account's row opens its menu, with
   **New session in the default directory**, **New session in…**, **Set default directory…**, **Log in** and, for a
   registered Claude account, **Move all sessions here** (see [claude-account.md](https://github.com/bestcodename/ai/blob/main/docs/claude-account.md#handing-sessions-to-another-account)).
+  A Claude account also offers **Move all Codex sessions here** and the Codex row **Move all Claude sessions here**,
+  which run `agent-eta account handoff ID --from codex|claude` and hand every session that can move over at once.
   The pointer turns into a hand wherever a click does something, on account rows and session rows alike. Cancelling a folder chooser starts no process.
   CLI action failures remain in the footer across ordinary polls.
 - **A click on a row** jumps to the session's window. A right click offers that and four more actions.
@@ -439,6 +517,8 @@ and what the hook did. The command text never goes there. The log rotates at 256
   - *Copy resume command* puts `cd <cwd> && claude-account run <account> --resume <id>` on the clipboard, or
     `claude --resume <id>` for a session outside the accounts. A Codex thread copies its `codex://` link, since there is
     no Codex CLI on the `PATH`. A dsh session has no resume command, so the action is missing there.
+  - *Hand off to Codex* or *Hand off to Claude Code* runs `agent-eta handoff` detached. It is disabled with the
+    reason where the session cannot move, and the detail line shows a pending or failed handoff.
   - *Mark done* removes an entry from `agent-eta add` and shows only on such a task.
 - **Notifications** go out when a session's or a task's ETA turns overdue and when a usage limit resets. One for a
   session that starts waiting exists as well, but it is off by default since 0.71.0, because the red pulsing orb already
@@ -600,6 +680,12 @@ package link of the first version and the refusal to replace something foreign. 
 `logic.mjs` and skips them where node is missing. Those cover the formatting and the reset countdown, the summary, the
 traffic light of the orb and of each session, the sections, the usage bars with their traffic-light bands and fade, the window choice between PhpStorm windows
 of one process, the resume commands and their quoting, and each notification transition.
+
+`test_model.py` covers the model with no-mutation checks, effective activity, ETAs, usage groups, the summary, the
+signals and the handoff field, and keeps the contract fixtures current. `test_handoff.py` covers plan resolution for
+both providers, the forked one-shot, the destination commands per phase, the launcher's quoting, the snapshot with a
+dirty tree and `--dry-run`. Against real `sleep` processes it covers the gate, the resume after a failed
+registration, a cancel, a source turning busy after the stop, a reused pid, duplicates, the lock and a partial batch.
 
 `test_accounts.py` uses isolated homes and stub native clients for authentication, logout, mismatches, cache
 persistence, identity changes, expired readings, refresh failures, the 50-empty-rollout regression, throttling and
