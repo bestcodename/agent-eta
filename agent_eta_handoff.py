@@ -257,7 +257,11 @@ def destination_command(target, account, cwd, session_id, approved, prompt):
             argv += ["--permission-mode", "plan"]
     else:
         # Codex has no flag that starts in plan mode, so an unapproved plan starts read-only and asks.
-        argv = [codex(), "-C", cwd] + ([] if approved else ["-s", "read-only", "-a", "on-request"])
+        binary = codex()
+        # The desktop bundle refuses an interactive start through the app's shared server.
+        bundled = os.path.realpath(binary) == agent_eta_providers.DESKTOP_CODEX
+        argv = [binary] + (["--no-daemon"] if bundled else []) + ["-C", cwd] \
+            + ([] if approved else ["-s", "read-only", "-a", "on-request"])
     return argv + [prompt]
 
 

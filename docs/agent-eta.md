@@ -368,7 +368,9 @@ the command prints one JSON record per source.
 Claude Code starts as `claude-account run ACCOUNT --session-id UUID PROMPT`, with `--permission-mode plan` while the
 plan is unapproved. Codex starts as `codex -C DIR PROMPT`, read-only with `-a on-request` while the plan is unapproved,
 because Codex has no flag that starts it in plan mode. `codex` is `AGENT_ETA_CODEX_BIN`, else the one on PATH, else the
-desktop package's `/usr/lib/chatgpt/resources/codex`, and without one the handoff is refused before the pause. Neither gets model or effort flags, so each uses its own
+desktop package's `/usr/lib/chatgpt/resources/codex`, and without one the handoff is refused before the pause. The
+desktop package's binary starts with `--no-daemon`, because through the app's shared server it refuses an interactive
+start with "this CLI has no complete local package", measured on 2026-10-20. Neither gets model or effort flags, so each uses its own
 configuration. Without `--account`, the Claude Code account is the first eligible one from `claude-account targets
 --json`, and otherwise the only registered one. A lock per source and the records make a repeated request report the
 earlier move.

@@ -19,10 +19,15 @@ class AccountError(Exception):
     """A safe, user-facing account or launch failure."""
 
 
+# The Codex CLI bundled with the desktop app. Interactive, it runs only with --no-daemon, measured on
+# codex-cli 0.163.0-alpha.10.2 on 2026-10-20.
+DESKTOP_CODEX = "/usr/lib/chatgpt/resources/codex"
+
+
 def executable(kind):
     """Resolve desktop binaries even when Plasma's PATH lacks ~/.local/bin."""
     candidates = {
-        "codex": [os.environ.get("AGENT_ETA_CODEX_BIN"), shutil.which("codex"), "/usr/lib/chatgpt/resources/codex"],
+        "codex": [os.environ.get("AGENT_ETA_CODEX_BIN"), shutil.which("codex"), DESKTOP_CODEX],
         "claude": [os.environ.get("CLAUDE_BIN"), str(Path.home() / ".local/bin/claude"), shutil.which("claude")],
         "claude-account": [os.environ.get("AGENT_ETA_CLAUDE_ACCOUNT_BIN"), str(Path.home() / ".local/bin/claude-account"),
                            shutil.which("claude-account")],
