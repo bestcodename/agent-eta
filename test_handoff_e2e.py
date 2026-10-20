@@ -89,6 +89,7 @@ class Handoff(unittest.TestCase):
         self.root = os.path.join(self.tmp, "handoff")
         codex = self.write("bin/codex", "#!/bin/sh\nexit 0\n")
         os.chmod(codex, 0o755)
+        self.trusted = self.write("codex/config.toml", "[projects.%s]\ntrust_level = \"trusted\"\n" % json.dumps(self.repo))
         terminal = self.write("bin/terminal.py", TERMINAL)
         self.env = dict(os.environ, AGENT_ETA_DIR=self.path("state"), AGENT_ETA_HANDOFF_DIR=self.root,
                         CODEX_HOME=self.path("codex"), DSH_HOME=self.path("dsh"), CLAUDE_CONFIG_DIR=self.account,
@@ -211,6 +212,19 @@ class Handoff(unittest.TestCase):
         record = self.finish(self.handoff(FAKE_TERMINAL="silent", AGENT_ETA_HANDOFF_REGISTER_TIMEOUT="2"))
         self.assertEqual("failed", record["state"])
         self.assertIn("did not register", record["error"])
+        self.assert_usable()
+
+    def test_an_untrusted_destination_is_refused_before_the_pause(self):
+        self.source("idle", 1)
+        os.remove(self.trusted)
+        proc = self.handoff()
+        out, err = proc.communicate(timeout=60)
+        self.assertNotIn("Traceback", err)
+        result = json.loads(out)
+        self.assertEqual("refused", result["state"])
+        self.assertIn("Codex does not trust %s yet" % self.repo, result["error"])
+        self.assertFalse(os.path.exists(self.log))
+        self.assertNotIn("agent-eta-handoff-", handoff.Env.cgroup(None, self.job))
         self.assert_usable()
 
     def test_a_cancel_thaws_a_usable_source(self):

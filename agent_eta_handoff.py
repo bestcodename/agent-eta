@@ -7,12 +7,13 @@ session that continues the source's plan:
 
 1. The plan comes from --plan, else from the source's records (see claude_plan() and codex_plan()), else from a
    forked one-shot of the source that prints a brief plan. Without any, the handoff stops as "preparation needed".
+   A destination that would stop at its client's trust question is refused before anything changes (Env.trust()).
 2. A snapshot under ~/.local/state/agent-eta/handoff/<id>/ (mode 0700) keeps plan.md, the plan with a
    "Handover" section of progress, next step, branch, HEAD and dirty paths, and status.json.
 3. The source must reach a safe boundary: no turn running, nothing waiting for an answer and no verified
    background writer. The command waits up to --wait seconds and reports without forcing.
-4. The source process moves into a transient systemd user scope, is frozen there and checked again, the
-   destination opens in a new Konsole window, and once it registered the source gets SIGHUP and is thawed.
+4. The source process moves into a transient systemd user scope, is frozen there and checked again, the snapshot
+   is refreshed and the destination's trust checked again, the destination opens in a new Konsole window, and once it registered the source gets SIGHUP and is thawed.
    The cgroup freezer leaves job control alone, while SIGSTOP would hand the terminal back to the shell. A
    failure, a timeout, a cancel or any error thaws the source and keeps status.json with the commands for
    recovery. Every pause and signal checks the process start time first, so a reused pid is never hit.
@@ -31,6 +32,7 @@ import shlex
 import signal
 import subprocess
 import time
+import tomllib
 import uuid
 from datetime import datetime
 
@@ -244,7 +246,9 @@ def handover_section(handoff, plan, git, now):
 def handover_prompt(handoff, plan_path, approved):
     prompt = ("agent-eta handoff %s: you take over the work of %s. Read %s, starting with its section "
               "\"Handover\", and continue at the next unfinished step." % (handoff["id"], handoff["source"], plan_path))
-    if not approved:
+    if approved:
+        prompt += " The plan is approved: check the recorded state against the repository and continue without asking for approval again."
+    else:
         prompt += " The plan is not approved yet: continue planning only, and ask the user to approve it before changing anything."
     return prompt
 
@@ -252,9 +256,10 @@ def handover_prompt(handoff, plan_path, approved):
 def destination_command(target, account, cwd, session_id, approved, prompt):
     """The command that starts the destination. Each provider uses its own model and effort settings."""
     if target == "claude":
-        argv = (["claude-account", "run", account] if account else ["claude"]) + ["--session-id", session_id]
-        if not approved:
-            argv += ["--permission-mode", "plan"]
+        # An approved plan starts in Manual mode, which overrides a `plan` default of the account's settings
+        # and grants nothing beyond its permission rules.
+        argv = (["claude-account", "run", account] if account else ["claude"]) \
+            + ["--session-id", session_id, "--permission-mode", "manual" if approved else "plan"]
     else:
         # Codex has no flag that starts in plan mode, so an unapproved plan starts read-only and asks.
         binary = codex()
@@ -268,6 +273,66 @@ def destination_command(target, account, cwd, session_id, approved, prompt):
 def launcher(argv):
     unset = " ".join("-u %s" % name for name in INHERITED)
     return "#!/bin/sh\n%s\nexec env %s %s\n" % (ONE_SHOT, unset, " ".join(shlex.quote(arg) for arg in argv))
+
+
+# --- trust -----------------------------------------------------------------------------------
+
+def workspace_roots(cwd, run):
+    """The toplevel of the repository around cwd and its main checkout, which a linked worktree shares, or
+    (None, None) outside of one."""
+    result = run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"])
+    lines = result.stdout.splitlines() if result.returncode == 0 else []
+    if len(lines) != 2:
+        return None, None
+    toplevel, common = lines
+    return toplevel, os.path.dirname(common) if os.path.basename(common) == ".git" else toplevel
+
+
+def read_config(path, parse):
+    """A client's own record as a dict, {} when it is missing, or None when it cannot be read or parsed."""
+    try:
+        with open(path, "rb") as handle:
+            data = parse(handle)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def projects(config, field):
+    """`field` of each project entry of a client's record, keyed by the entry's real path."""
+    entries = config.get("projects") if isinstance(config.get("projects"), dict) else {}
+    return {os.path.realpath(key): value.get(field) for key, value in entries.items() if isinstance(value, dict)}
+
+
+def claude_trusted(state, cwd, roots):
+    """Whether Claude Code starts in cwd without its trust dialog, as 2.1.304 decides: the main checkout of the
+    repository, or any directory from cwd up to its toplevel, or up to / outside of one, accepted the dialog.
+    Claude Code keeps trust for the home directory for one session and never stores it."""
+    cwd = os.path.realpath(cwd)
+    if cwd == os.path.realpath(os.path.expanduser("~")):
+        return False
+    accepted = {path for path, value in projects(state, "hasTrustDialogAccepted").items() if value is True}
+    toplevel, main = roots
+    if main and os.path.realpath(main) in accepted:
+        return True
+    stop, path = os.path.realpath(toplevel) if toplevel else "/", cwd
+    while path not in accepted:
+        if path in (stop, os.path.dirname(path)):
+            return False
+        path = os.path.dirname(path)
+    return True
+
+
+def codex_trust_level(config, cwd, roots):
+    """The trust level Codex applies in cwd: that of its own entry, else that of the repository's main checkout,
+    which a subdirectory and a linked worktree share. Measured on Codex 0.163 on 2026-10-20."""
+    levels = projects(config, "trust_level")
+    for path in (cwd, roots[1]):
+        if path and os.path.realpath(path) in levels:
+            return levels[os.path.realpath(path)]
+    return None
 
 
 # --- records ---------------------------------------------------------------------------------
@@ -434,6 +499,46 @@ class Env:
                     continue
         return False
 
+    def trust(self, target, account, cwd):
+        """Why the destination would stop at its client's trust question in cwd, or None. It only reads the
+        client's own record and never answers the question for the user. Codex 0.163 asks in a read-only
+        start with -s and -a too, so both phases are checked."""
+        roots = workspace_roots(cwd, self.run)
+        if target == "claude":
+            # A single registration keeps no name, so it stands for any account, as in registered().
+            directories = dict(self.accounts())
+            directory = directories.get(account) or (directories.get(None) if len(directories) == 1 else None)
+            if account and not directory:
+                return "Claude Code account %s is not registered" % account
+            primary = os.path.expanduser("~/.claude")
+            if account is None or os.path.realpath(directory) == os.path.realpath(primary):
+                path = primary + ".json"
+            else:
+                path = os.path.join(directory, ".claude.json")
+            state = read_config(path, json.load)
+            if state is None:
+                return "%s cannot be read" % path
+            if os.path.realpath(cwd) == os.path.realpath(os.path.expanduser("~")):
+                return ("Claude Code keeps its trust for the home directory %s for one session only, so it cannot "
+                        "start there unattended; hand over from a project directory" % cwd)
+            if claude_trusted(state, cwd, roots):
+                return None
+            command = ["claude-account", "run", account] if account else ["claude"]
+            return ("Claude Code (%s) does not trust %s yet: run `cd %s && %s` once, accept the trust dialog, quit "
+                    "and retry" % ("account %s" % account if account else "the default account", cwd,
+                                   shlex.quote(cwd), shlex.join(command)))
+        path = os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "config.toml")
+        config = read_config(path, tomllib.load)
+        if config is None:
+            return "%s cannot be read" % path
+        level = codex_trust_level(config, cwd, roots)
+        if level == "trusted":
+            return None
+        if level == "untrusted":
+            return "Codex marks %s as untrusted, so it cannot continue there unattended" % cwd
+        command = destination_command("codex", None, cwd, None, True, "")[:-1]
+        return "Codex does not trust %s yet: run `%s` once, trust the folder, quit and retry" % (cwd, shlex.join(command))
+
     def notify(self, text):
         command = shlex.split(os.environ.get("AGENT_ETA_HANDOFF_NOTIFY", "notify-send --app-name=agent-eta"))
         if command:
@@ -532,11 +637,13 @@ def prepare(source, target, account, plan_path, env, root, dry_run=False):
     if session.get("gate") is None:
         raise HandoffError("%s:%s: %s" % (source + (session.get("gate_reason") or "it cannot be paused",)))
     account = choose_account(target, account, env)
+    # Trust is checked before a fork may spend minutes of the scarce quota on a plan.
+    require_trust(env, target, account, session["cwd"])
     plan = resolve_plan(source, session, plan_path, env)
     now = env.now()
     handoff = {"id": "%s-%s" % (datetime.fromtimestamp(now).strftime("%Y%m%d-%H%M%S"), secrets.token_hex(3)),
                "source": "%s:%s" % source, "target": target, "account": account, "cwd": session["cwd"],
-               "created": int(now), "state": "prepared", "plan_origin": plan["origin"],
+               "created": int(now), "state": "prepared",
                "session_id": str(uuid.uuid4()) if target == "claude" else None, "launched": None}
     handoff["resume_source"] = "systemctl --user thaw %s" % scope(handoff)
     folder = os.path.join(root, handoff["id"])
@@ -548,10 +655,17 @@ def prepare(source, target, account, plan_path, env, root, dry_run=False):
     return handoff, session, plan, text
 
 
+def require_trust(env, target, account, cwd):
+    refusal = env.trust(target, account, cwd)
+    if refusal:
+        raise HandoffError(refusal)
+
+
 def snapshot(handoff, plan, env, folder):
-    """Set the phase and the destination command of a handoff and return the text of its plan.md."""
+    """Set the plan origin, the phase and the destination command of a handoff and return the text of its
+    plan.md."""
     git = git_state(handoff["cwd"], env.run)
-    handoff["phase"] = plan["phase"]
+    handoff["plan_origin"], handoff["phase"] = plan["origin"], plan["phase"]
     prompt = handover_prompt(handoff, os.path.join(folder, "plan.md"), plan["approved"])
     handoff["command"] = destination_command(handoff["target"], handoff["account"], handoff["cwd"],
                                              handoff["session_id"], plan["approved"], prompt)
@@ -568,8 +682,9 @@ def save(folder, handoff, text):
 
 def refresh(handoff, session, plan, env, folder):
     """Bring the snapshot up to date once the source is paused, since the turns it ran while the handoff
-    waited may have moved its plan and its tree. A plan from --plan or from a fork keeps its text."""
-    if plan["origin"] not in ("fork", "option"):
+    waited may have moved its plan and its tree. A plan from --plan keeps its text, and a plan the source wrote
+    meanwhile replaces a forked summary."""
+    if plan["origin"] != "option":
         plan = recorded_plan(parse_source(handoff["source"]), session) or plan
     save(folder, handoff, snapshot(handoff, plan, env, folder))
 
@@ -637,6 +752,12 @@ def gated_transfer(handoff, session, plan, env, folder, root, wait):
             return False
         env.sleep(POLL)
     refresh(handoff, again, plan, env, folder)
+    # Trust may have changed while the handoff waited.
+    refusal = env.trust(handoff["target"], handoff["account"], handoff["cwd"])
+    if refusal:
+        handoff.update(state="failed", error=refusal)
+        write_record(folder, handoff)
+        return False
     try:
         launch(handoff, env, root)
     except OSError as exc:
@@ -719,7 +840,8 @@ def run_all(sources, target, account, plan_path, wait, dry_run, env, root):
         if result.get("state") in ("failed", "waiting", "cancelled"):
             failed = True
         env.out(json.dumps(result, indent=2, sort_keys=True))
-        if not dry_run and result.get("state") in ("completed", "failed", "waiting", "cancelled"):
+        # A refusal notifies too, since a trigger starts its handoff detached and only once per window.
+        if not dry_run and result.get("state") in ("completed", "failed", "waiting", "cancelled", "refused"):
             env.notify("%s → %s: %s" % (text, target, result.get("error") or result["state"]))
         if result.get("state") == "cancelled":
             break

@@ -20,7 +20,7 @@ systemctl --user restart plasma-plasmashell.service   # load a new or changed wi
 The installer links `~/.local/bin/agent-eta` to the checkout, so a `git pull` updates the CLI. The widget is a copy in
 `~/.local/share/plasma/plasmoids`, so it needs the installer and a plasmashell restart after each change.
 
-Requirements are Python 3 with the standard library only (CI runs 3.13), and Plasma 6 for the widget. The Claude Code
+Requirements are Python 3.11 or later with the standard library only (CI runs 3.13), and Plasma 6 for the widget. The Claude Code
 account features use `claude-account` from [bestcodename/ai](https://github.com/bestcodename/ai) when it is on `PATH`
 or in `~/.local/bin`, and the usage windows come from that repository's `scripts/claude-usage/statusline.py`.
 
@@ -34,6 +34,9 @@ agent-eta turn --eta 20m --label "Long refactor"
 agent-eta list --json --all        # what the widget reads, contract schema 1
 agent-eta handoff claude:<session> --to codex   # continue a session's plan in Codex
 ```
+
+A handoff refuses a folder the destination client does not trust yet, and its message names the command that opens
+the client there once to accept the trust question.
 
 The hooks for Claude Code and Codex, every command and the widget are described in
 [docs/agent-eta.md](docs/agent-eta.md).
