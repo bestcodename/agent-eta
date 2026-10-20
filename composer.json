@@ -1,7 +1,7 @@
 {
   "name": "bestcodename/agent-eta",
   "description": "List running Claude Code, Codex, dsh and local-model sessions with their state, ETA and usage, in the terminal and the Plasma tray",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "project",
   "license": "MIT",
   "authors": [

@@ -43,12 +43,6 @@ priority.
    Label the result as an estimate at the current average rate and distinguish it from the reset time.
    Handle zero usage, zero elapsed time, missing or stale readings, and exhausted quotas explicitly.
    If the window resets before projected exhaustion, show that the quota is estimated to last until reset.
-11. Fix the Agent ETA modal's reset countdown, which reads one minute short. At 22:13 a 23:00 reset showed "resets in
-    46m". `formatIn` in `plasmoid/contents/code/logic.mjs` floors the remaining seconds, while both clock times drop
-    their seconds, so the countdown loses a minute for all but the first second of each minute. This is probably the
-    reported case; logging `resets_at` and `now` when the row renders settles it. Count whole clock minutes instead,
-    as `floor(resets_at / 60) - floor(now / 60)`. `format_span` in `agent-eta` floors the same way for the REMAINING
-    column next to DUE (ca. 30 minutes).
 12. (low) Show a privacy-reduced Agent ETA summary on the locked screen if a supported route keeps it simple. Proposed
     content: counts per state, the nearest ETA and usage percentages with reset times, with no session titles,
     labels, paths, prompts or account names. Candidate routes on Plasma 6.3.6, none tested yet, are an MPRIS player,
@@ -57,6 +51,11 @@ priority.
     screen that renders the summary; or a user-level override of the shell's lockscreen QML, which Plasma updates can
     break. Drop the item if every route needs patched system files or a privileged helper. Evaluate the routes first
     (ca. 1 hour).
+13. (low) Two handoff cases stay open. A handoff killed with SIGKILL while its source is frozen leaves it frozen;
+    `status.json` names `systemctl --user thaw` in `resume_source`, but nothing runs it. An account row's batch to a
+    Claude account without a registered name passes no `--account`, so `choose_account()` may pick another eligible
+    account than the clicked one. Proposal: thaw the scopes of dead handoffs on the next `agent-eta list`, and pass
+    the account directory to the batch (ca. 2 hours).
 
 Waiting: counter-test for the agent-eta Codex permission fix of 0.66.7 (ca. 15 Minuten). The Codex weekly limit is
 used up until 2026-10-08 03:22. In a Codex thread with the reviewer set to `user`, an escalated `sleep 60` must show
