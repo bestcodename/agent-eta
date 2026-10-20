@@ -1,0 +1,63 @@
+{
+  "accounts": [],
+  "labels": {
+    "dormant_after": 7200,
+    "question_open": "working, question open",
+    "sections": [
+      "Needs you",
+      "Working",
+      "Stopped until a limit resets",
+      "Dormant"
+    ],
+    "states": {
+      "idle": "idle",
+      "stopped": "stopped",
+      "unknown": "unknown",
+      "waiting": "waiting",
+      "working": "working"
+    }
+  },
+  "notification_signals": [],
+  "now": 1760000000,
+  "schema_version": 1,
+  "sections": [
+    {
+      "index": 0,
+      "session_keys": [],
+      "title": "Needs you"
+    },
+    {
+      "index": 1,
+      "session_keys": [],
+      "title": "Working"
+    },
+    {
+      "index": 2,
+      "session_keys": [],
+      "title": "Stopped until a limit resets"
+    },
+    {
+      "index": 3,
+      "session_keys": [],
+      "title": "Dormant"
+    }
+  ],
+  "sessions": [],
+  "summary": {
+    "attention": 0,
+    "badge_count": 0,
+    "dormant": 0,
+    "idle": 0,
+    "light": "off",
+    "live": 0,
+    "overdue": 0,
+    "progress_session_key": null,
+    "status": "passive",
+    "stopped": 0,
+    "waiting": 0,
+    "working": 0
+  },
+  "tasks": [],
+  "usage": [],
+  "usage_groups": []
+}

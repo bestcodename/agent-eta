@@ -483,7 +483,7 @@ class Sessions(StateTest):
 
     def test_manual_reminder_is_not_replaced_by_an_account_usage_limit(self):
         self.put("reminder", agent="codex", eta=600, session={"id": "ended"})
-        usage = [{"agent": "codex", "remaining": 3600, "reached": True, "resets_at": int(time.time()) + 3600,
+        usage = [{"agent": "codex", "used": 100, "remaining": 3600, "reached": True, "resets_at": int(time.time()) + 3600,
                   "minutes": 300}]
         [session] = eta.sessions_view(self.dir, time.time(), usage=usage)
         self.assertEqual(session["state"], "unknown")

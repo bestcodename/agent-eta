@@ -1,0 +1,254 @@
+{
+  "accounts": [],
+  "labels": {
+    "dormant_after": 7200,
+    "question_open": "working, question open",
+    "sections": [
+      "Needs you",
+      "Working",
+      "Stopped until a limit resets",
+      "Dormant"
+    ],
+    "states": {
+      "idle": "idle",
+      "stopped": "stopped",
+      "unknown": "unknown",
+      "waiting": "waiting",
+      "working": "working"
+    }
+  },
+  "notification_signals": [
+    {
+      "active": false,
+      "dedupe_key": "waiting:claude:2:1759999940",
+      "edge": "rising",
+      "entity_key": "claude:2",
+      "key": "waiting:claude:2",
+      "kind": "waiting",
+      "message_params": {
+        "agent": "claude",
+        "name": "turn",
+        "waiting_for": "input"
+      },
+      "notify_on_new": true
+    },
+    {
+      "active": false,
+      "dedupe_key": "overdue:claude:2:1760000030",
+      "edge": "rising",
+      "entity_key": "claude:2",
+      "key": "overdue:claude:2",
+      "kind": "overdue",
+      "message_params": {
+        "due": 1760000030,
+        "name": "turn",
+        "turn_label": null
+      },
+      "notify_on_new": false
+    },
+    {
+      "active": false,
+      "dedupe_key": "waiting:claude:3:1759999940",
+      "edge": "rising",
+      "entity_key": "claude:3",
+      "key": "waiting:claude:3",
+      "kind": "waiting",
+      "message_params": {
+        "agent": "claude",
+        "name": "asks soon",
+        "waiting_for": "input"
+      },
+      "notify_on_new": true
+    },
+    {
+      "active": false,
+      "dedupe_key": "overdue:claude:3:None",
+      "edge": "rising",
+      "entity_key": "claude:3",
+      "key": "overdue:claude:3",
+      "kind": "overdue",
+      "message_params": {
+        "due": null,
+        "name": "asks soon",
+        "turn_label": null
+      },
+      "notify_on_new": false
+    },
+    {
+      "active": false,
+      "dedupe_key": "overdue:task:ci:1760000100",
+      "edge": "rising",
+      "entity_key": "task:ci",
+      "key": "overdue:task:ci",
+      "kind": "overdue",
+      "message_params": {
+        "due": 1760000100,
+        "label": "ci",
+        "session_name": "ci"
+      },
+      "notify_on_new": false
+    },
+    {
+      "active": true,
+      "dedupe_key": "reset:window:codex:300:1760000060",
+      "edge": "falling",
+      "entity_key": "window:codex:300",
+      "key": "reset:window:codex:300",
+      "kind": "reset",
+      "message_params": {
+        "agent": "codex",
+        "minutes": 300,
+        "reading_pending": false
+      },
+      "notify_on_new": false
+    }
+  ],
+  "now": 1760000000,
+  "schema_version": 1,
+  "sections": [
+    {
+      "index": 0,
+      "session_keys": [],
+      "title": "Needs you"
+    },
+    {
+      "index": 1,
+      "session_keys": [
+        "claude:2",
+        "claude:3"
+      ],
+      "title": "Working"
+    },
+    {
+      "index": 2,
+      "session_keys": [],
+      "title": "Stopped until a limit resets"
+    },
+    {
+      "index": 3,
+      "session_keys": [],
+      "title": "Dormant"
+    }
+  ],
+  "sessions": [
+    {
+      "activity_label": "working",
+      "activity_state": "working",
+      "agent": "claude",
+      "cwd": "/work",
+      "dormant": false,
+      "due": 1760000030,
+      "eta_source": "turn",
+      "eta_started": 1759999400,
+      "id": "s-2",
+      "key": "claude:2",
+      "light": "active",
+      "name": "turn",
+      "overdue": false,
+      "pid": 2,
+      "progress": 0.9523809523809523,
+      "remaining": 30,
+      "reported_state": "working",
+      "section": 1,
+      "since": 1759999940,
+      "state": "working",
+      "tasks": [
+        "ci"
+      ],
+      "turn_label": null,
+      "waiting_for": null
+    },
+    {
+      "activity_label": "working",
+      "activity_state": "working",
+      "agent": "claude",
+      "cwd": "/work",
+      "dormant": false,
+      "due": null,
+      "eta_source": null,
+      "eta_started": null,
+      "id": "s-3",
+      "key": "claude:3",
+      "light": "active",
+      "name": "asks soon",
+      "overdue": false,
+      "pid": 3,
+      "progress": null,
+      "remaining": null,
+      "reported_state": "working",
+      "section": 1,
+      "since": 1759999940,
+      "state": "working",
+      "tasks": [],
+      "turn_label": null,
+      "waiting_for": null
+    }
+  ],
+  "summary": {
+    "attention": 0,
+    "badge_count": 0,
+    "dormant": 0,
+    "idle": 0,
+    "light": "active",
+    "live": 2,
+    "overdue": 0,
+    "progress_session_key": "claude:2",
+    "status": "active",
+    "stopped": 0,
+    "waiting": 0,
+    "working": 2
+  },
+  "tasks": [
+    {
+      "agent": "claude",
+      "cwd": "/work",
+      "due": 1760000100,
+      "holder": {
+        "type": "pid"
+      },
+      "id": "ci",
+      "key": "task:ci",
+      "label": "ci",
+      "overdue": false,
+      "progress": 0.8333333333333334,
+      "remaining": 100,
+      "session": {
+        "id": "s-2",
+        "pid": 2
+      },
+      "session_name": "ci",
+      "source": "add",
+      "started": 1759999500,
+      "version": 1
+    }
+  ],
+  "usage": [
+    {
+      "agent": "codex",
+      "ahead": true,
+      "elapsed": 99.66666666666667,
+      "key": "window:codex:300",
+      "minutes": 300,
+      "pace": 0.3333333333333286,
+      "reached": true,
+      "remaining": 60,
+      "resets_at": 1760000060,
+      "seen_at": 1759999970,
+      "used": 100.0
+    }
+  ],
+  "usage_groups": [
+    {
+      "account_key": null,
+      "agent": "codex",
+      "ahead": true,
+      "key": "usage:codex",
+      "reached": true,
+      "reset_window_key": "window:codex:300",
+      "used": 100.0,
+      "window_keys": [
+        "window:codex:300"
+      ]
+    }
+  ]
+}

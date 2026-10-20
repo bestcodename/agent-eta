@@ -4,7 +4,7 @@ import org.kde.plasma.components as PlasmaComponents3
 
 // A traffic-light dot, as the tray orb with a count and as the state marker of a session row. A
 // plain dot instead of an icon, because nothing about it should look like a button. The light names
-// come from logic.mjs, stateLight() and summary().light.
+// come from logic.mjs, lightColour() of agent-eta's semantic lights.
 Rectangle {
     id: dot
 

@@ -7,12 +7,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-20
+
 ### Added
 
 - TODO item 10 records the agreed Python model and widget contract refactor with its acceptance criteria
 - TODO items 11 and 12 record the reset countdown fix and the lock screen summary
 - QML tests in `test_qml/` for `WindowJumper.qml` and `SessionRow.qml` with Qt Quick Test, a stub
   `org.kde.taskmanager`, `test_qml.py` and a CI job in a `debian:trixie` container
+- `agent_eta_model.py`, a pure model that builds one snapshot per listing with effective activity, ETAs, order,
+  sections, tray summary, usage groups and notification signals, covered by `test_model.py`
+- `list --json` contract schema 1 with `schema_version`, stable keys, `reported_state`, `activity_state`,
+  `activity_label`, semantic `light`, `summary`, `sections`, `usage_groups`, `notification_signals` and `labels`
+- Contract fixtures in `test_fixtures/contract-v1/`, written by the model and read by the JavaScript and QML tests
+- QML tests for contract rendering and for `Runner.qml` timeouts and late answers
+
+### Changed
+
+- The widget validates each listing, keeps the last valid one on a failure and names an outdated CLI
+- The widget takes order, sections, counts, usage groups and notification eligibility from the contract
+- Rows, tooltips, detail lines and the CLI STATE column show the activity label, so an idle owner of a running
+  job reads working and a Codex turn with an open async question reads "working, question open"
+- `Runner.qml` gives every run its own source and reports a timeout with exit code 124
+
+### Fixed
+
+- The dormant toggle names the real 2-hour threshold instead of 12 hours
+- A late answer to a timed-out run can no longer reach the callback of a newer run
+- A Codex turn that runs on with an open async question is no longer marked stopped by a reached account limit
 
 ## [1.1.2] - 2026-10-18
 

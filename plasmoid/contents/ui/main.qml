@@ -9,8 +9,9 @@ import "../code/logic.mjs" as Logic
 import "../code/shared.js" as Shared
 
 // The agent-eta tray widget. It polls `agent-eta list --json --all` and shows the result as a tray
-// icon with a badge, a tooltip on hover and the full overview in a popup. See docs/agent-eta.md,
-// section "Tray widget".
+// icon with a badge, a tooltip on hover and the full overview in a popup. A listing that fails the
+// contract check leaves the last valid one in place with its update time, and notifications only
+// compare two valid listings. See docs/agent-eta.md, section "Tray widget".
 PlasmoidItem {
     id: root
 
@@ -80,21 +81,17 @@ PlasmoidItem {
 
     function refresh() {
         runner.run(command + " list --json --all", (code, stdout, stderr) => {
-            let next = null;
-            try {
-                next = code === 0 ? JSON.parse(stdout) : null;
-            } catch (error) {
-                next = null;
-            }
-            if (!next) {
-                failure = (stderr || stdout || i18n("exit code %1", code)).trim().split("\n").pop();
+            const checked = code === 0 ? Logic.validateListing(stdout) : null;
+            if (!checked || !checked.listing) {
+                failure = checked ? checked.error
+                    : (stderr || stdout || i18n("exit code %1", code)).trim().split("\n").pop();
                 return;
             }
             failure = "";
-            for (const event of Logic.transitions(listing, next)) {
+            for (const event of Logic.signalEvents(listing, checked.listing)) {
                 notify(event);
             }
-            listing = next;
+            listing = checked.listing;
             updatedAt = Date.now();
         });
     }

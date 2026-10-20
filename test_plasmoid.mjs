@@ -6,6 +6,7 @@
 process.env.TZ = "Europe/Berlin";
 
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
 import test from "node:test";
 
 import * as logic from "./plasmoid/contents/code/logic.mjs";
@@ -21,8 +22,13 @@ function session(fields) {
     }, fields);
 }
 
-function listing(sessions, tasks = [], usage = []) {
-    return {now: NOW, sessions, tasks, usage};
+// A contract listing agent-eta's model wrote, see test_model.py.
+function fixture(name) {
+    return JSON.parse(readFileSync(new URL(`./test_fixtures/contract-v1/${name}.json`, import.meta.url), "utf8"));
+}
+
+function find(data, key) {
+    return data.sessions.find(session => session.key === key);
 }
 
 test("spans read like the REMAINING column", () => {
@@ -51,12 +57,6 @@ test("usage bars get a faint tick at every hour or day of the window", () => {
     }
 });
 
-test("keys follow agent-eta's session_key", () => {
-    assert.equal(logic.sessionKey(session({})), "claude:100");
-    assert.equal(logic.sessionKey(session({agent: "codex", pid: null, id: "t-1"})), "codex:t-1");
-    assert.equal(logic.sessionKey(session({agent: "local", pid: null, id: null, tasks: ["run-1"]})), "task:run-1");
-});
-
 test("rows say what is left, what ran over and where the session stands", () => {
     assert.equal(logic.etaText({due: NOW + 600, remaining: 600}), "10m left");
     assert.equal(logic.etaText({due: NOW - 180, remaining: -180}), "3m over");
@@ -68,16 +68,6 @@ test("rows say what is left, what ran over and where the session stands", () => 
                             waiting_for: "turn failed (TIMEOUT)"});
     assert.equal(logic.detailLine(failed, NOW), "dsh · qwen3-coder · shop · waiting (turn failed (TIMEOUT)) for 2m (03:10)");
     assert.equal(logic.title(session({turn_label: "tests"})), "shop · tests");
-});
-
-test("each state gets a traffic-light colour and an overdue working session turns yellow", () => {
-    for (const [state, light] of [["waiting", "red"], ["idle", "yellow"], ["working", "green"], ["stopped", "grey"],
-                                  ["-", "grey"]]) {
-        assert.equal(logic.stateLight(session({state})), light);
-    }
-    assert.equal(logic.stateLight(session({state: "working", overdue: true})), "yellow");
-    assert.equal(logic.stateLight(session({state: "idle", section: 1, tasks: ["wait"]})), "green");
-    assert.equal(logic.stateLight(session({state: "idle", section: 1, tasks: ["wait"], overdue: true})), "yellow");
 });
 
 test("countdowns read like `12h 13m` and follow the clock time of a reset", () => {
@@ -93,148 +83,12 @@ test("countdowns read like `12h 13m` and follow the clock time of a reset", () =
     assert.equal(logic.sinceText(NOW - 3900, NOW), "1h 5m (02:07)");
 });
 
-test("the tray orb is a traffic light over the sessions that are not dormant", () => {
-    const orb = sessions => {
-        const summary = logic.summary(listing(sessions));
-        return [summary.light, summary.orbCount, summary.status];
-    };
-    assert.deepEqual(orb([]), ["none", 0, "passive"]);
-    assert.deepEqual(orb([session({state: "idle", dormant: true, section: 3})]), ["none", 0, "passive"]);
-    assert.deepEqual(orb([session({state: "working"})]), ["green", 0, "active"]);
-    assert.deepEqual(orb([session({state: "stopped"})]), ["green", 0, "active"]);
-    assert.deepEqual(orb([session({state: "idle", section: 1, tasks: ["wait"]})]), ["green", 0, "active"]);
-    assert.deepEqual(orb([session({state: "working", pid: 1}), session({state: "idle", pid: 2})]),
-                     ["yellow", 1, "active"]);
-    assert.deepEqual(orb([session({state: "working", overdue: true, pid: 1}), session({state: "idle", pid: 2})]),
-                     ["yellow", 2, "active"]);
-    assert.deepEqual(orb([session({state: "waiting", pid: 1}), session({state: "idle", pid: 2}),
-                          session({state: "waiting", pid: 3})]), ["red", 2, "attention"]);
-});
-
-test("the summary counts what needs you and picks the soonest working ETA", () => {
-    const data = listing([
-        session({state: "waiting", pid: 1}),
-        session({state: "working", pid: 2, due: NOW + 600, remaining: 600, progress: 0.5}),
-        session({state: "working", pid: 3, due: NOW + 60, remaining: 60, progress: 0.9}),
-        session({state: "working", pid: 4, tasks: ["late"]}),
-        session({state: "idle", pid: 5, dormant: true, section: 3}),
-    ], [{id: "late", overdue: true}]);
-    const summary = logic.summary(data);
-    assert.deepEqual([summary.waiting, summary.working, summary.overdue, summary.dormant, summary.attention],
-                     [1, 3, 1, 1, 2]);
-    assert.equal(summary.status, "attention");
-    assert.equal(summary.next.pid, 3);
-    assert.equal(summary.headline, "1 waiting · 1 overdue · 3 working");
-    assert.equal(summary.light, "red");
-    assert.equal(logic.summary(listing([session({state: "idle"})])).status, "active");
-    assert.equal(logic.summary(null).status, "passive");
-    assert.equal(logic.summary(null).headline, "No active agent sessions");
-});
-
-test("sessions group by their section and dormant ones only count unless shown", () => {
-    const data = listing([
-        session({state: "waiting", pid: 1, section: 0}),
-        session({state: "working", pid: 2, section: 1, tasks: ["t"]}),
-        session({state: "idle", pid: 3, section: 3, dormant: true}),
-    ], [{id: "t", label: "tests"}]);
-    const groups = logic.groupSessions(data, false);
-    assert.deepEqual(groups.map(g => [g.title, g.count, g.sessions.length]),
-                     [["Needs you", 1, 1], ["Working", 1, 1], ["Dormant", 1, 0]]);
-    assert.equal(groups[1].sessions[0].taskItems[0].label, "tests");
-    assert.equal(logic.groupSessions(data, true)[2].sessions.length, 1);
-});
-
-test("stopped and dormant sections retain counts and open independently", () => {
-    const data = listing([
-        session({pid: 1, section: 0, state: "waiting"}),
-        session({pid: 2, section: 1, state: "working"}),
-        session({pid: 3, section: 2, state: "stopped", tasks: ["blocked-task"]}),
-        session({pid: 4, section: 3, dormant: true}),
-    ], [{id: "blocked-task", label: "tests"}]);
-    for (const [dormant, stopped, lengths] of [[false, false, [1, 1, 0, 0]], [true, false, [1, 1, 0, 1]],
-                                             [false, true, [1, 1, 1, 0]], [true, true, [1, 1, 1, 1]]]) {
-        const groups = logic.groupSessions(data, dormant, stopped);
-        assert.deepEqual(groups.map(g => g.count), [1, 1, 1, 1]);
-        assert.deepEqual(groups.map(g => g.sessions.length), lengths);
-    }
-    assert.equal(logic.groupSessions(data, false, true)[2].sessions[0].taskItems[0].label, "tests");
-    data.sessions[2].section = 0;
-    data.sessions[2].state = "idle";
-    assert.deepEqual(logic.groupSessions(data, false).map(g => [g.section, g.sessions.length]), [[0, 2], [1, 1], [3, 0]]);
-});
-
-test("accounts without readings remain visible and authentication has its own status", () => {
-    const accounts = [{id: "codex", agent: "codex", auth_state: "logged_out", usage_status: "unavailable"},
-                      {id: "claude:work", agent: "claude/work", auth_state: "unknown", usage_status: "unavailable"}];
-    const groups = logic.usageGroups([], accounts);
-    assert.deepEqual(groups.map(g => [g.account.id, g.windows.length]), [["codex", 0], ["claude:work", 0]]);
-    assert.equal(logic.usageHeadline(groups[0], NOW), "?");
-    assert.equal(logic.accountStatus(accounts[0], NOW), "Not logged in");
-    assert.equal(logic.accountStatus(accounts[1], NOW), "Authentication unknown · Usage unavailable");
-    assert.match(logic.accountStatus({auth_state: "authenticated", usage_status: "stale", seen_at: NOW - 600}, NOW), /Stale reading · read 10m ago/);
-});
-
 test("the folder picker decodes local paths and rejects other URL types", () => {
     assert.equal(logic.folderPath("file:///home/me/a%20folder%20%24%28echo%20no%29"), "/home/me/a folder $(echo no)");
     assert.equal(logic.folderPath("file:///home/me/quote%27"), "/home/me/quote'");
     for (const url of ["https://example.org", "file://remote/home/me", "file:///bad%", ""]) {
         assert.equal(logic.folderPath(url), null);
     }
-});
-
-test("a recorded window ending with no new reading never promises unused quota", () => {
-    const before = listing([], [], [{agent: "codex", minutes: 300, used: 100, reached: true, resets_at: NOW}]);
-    const after = listing([], [], [{agent: "codex", minutes: 300, used: null, reached: false, resets_at: NOW}]);
-    assert.equal(logic.transitions(before, after)[0].text,
-                 "The recorded 5h window ended. A fresh usage reading is pending.");
-});
-
-test("usage groups put reached limits last and order windows by reset", () => {
-    const groups = logic.usageGroups([
-        {agent: "codex", minutes: 300, used: null, remaining: null, reached: false},
-        {agent: "codex", minutes: 10080, used: 100, remaining: 259783, reached: true, ahead: true},
-        {agent: "claude", minutes: 10080, used: 39, remaining: 380832, reached: false},
-        {agent: "claude", minutes: 300, used: 39, remaining: 14232, reached: false, ahead: true},
-    ]);
-    assert.deepEqual(groups.map(g => [g.agent, g.reached, g.used]), [["claude", false, 39], ["codex", true, 100]]);
-    assert.deepEqual(groups[0].windows.map(w => w.minutes), [300, 10080]);
-    assert.equal(groups[0].resetBy.minutes, 300);
-    assert.equal(groups[1].resetBy.minutes, 10080);
-    assert.equal(groups[0].ahead, true);
-});
-
-test("usage groups sort open agents by the 7-day reset and blocked ones by the end of the block", () => {
-    const groups = logic.usageGroups([
-        {agent: "week-late", minutes: 300, used: 10, remaining: 100, reached: false},
-        {agent: "week-late", minutes: 10080, used: 10, remaining: 9000, reached: false},
-        {agent: "tie-late", minutes: 300, used: 10, remaining: 800, reached: false},
-        {agent: "tie-late", minutes: 10080, used: 10, remaining: 5000, reached: false},
-        {agent: "tie-soon", minutes: 300, used: 10, remaining: 700, reached: false},
-        {agent: "tie-soon", minutes: 10080, used: 10, remaining: 5000, reached: false},
-        {agent: "no-week", minutes: 300, used: 10, remaining: 50, reached: false},
-        {agent: "week-blocked", minutes: 300, used: 100, remaining: 100, reached: true},
-        {agent: "week-blocked", minutes: 10080, used: 100, remaining: 9000, reached: true},
-        {agent: "unblocks-late", minutes: 300, used: 100, remaining: 3000, reached: true},
-        {agent: "unblocks-late", minutes: 10080, used: 50, remaining: 4000, reached: false},
-        {agent: "unblocks-soon", minutes: 300, used: 100, remaining: 100, reached: true},
-        {agent: "unblocks-soon", minutes: 10080, used: 50, remaining: 8000, reached: false},
-    ]);
-    assert.deepEqual(groups.map(g => g.agent),
-        ["tie-soon", "tie-late", "week-late", "no-week", "unblocks-soon", "unblocks-late", "week-blocked"]);
-});
-
-test("an agent's usage line names its highest share and its soonest reset", () => {
-    const reset = NOW + 2940;
-    const [open, blocked] = logic.usageGroups([
-        {agent: "claude", minutes: 10080, used: 56, remaining: 380832, resets_at: NOW + 380832, reached: false},
-        {agent: "claude", minutes: 300, used: 20, remaining: 2940, resets_at: reset, reached: false},
-        {agent: "codex", minutes: 300, used: 100, remaining: 44_000, resets_at: NOW + 44_000, reached: true},
-    ]);
-    assert.equal(logic.usageHeadline(open, NOW), `56% · resets ${logic.resetText(reset, NOW)}`);
-    assert.match(logic.usageHeadline(open, NOW), /^56% · resets in 49m \(/);
-    assert.match(logic.usageHeadline(blocked, NOW), /^blocked · resets in 12h 13m \(/);
-    const [stale] = logic.usageGroups([{agent: "codex", minutes: 300, used: null, remaining: null, reached: false}]);
-    assert.equal(logic.usageHeadline(stale, NOW), "?");
 });
 
 function bands(window, fade, yellow = 1 / 3) {
@@ -351,61 +205,105 @@ test("copy gives a resume command for Claude Code and a thread link for Codex", 
     assert.equal(logic.resumeCommand(session({agent: "dsh", id: "session-1"})), "");
 });
 
-test("the tooltip escapes names and cuts off after the limit", () => {
-    const data = listing([
-        session({name: "<b>x</b>", state: "waiting", waiting_for: "permission"}),
-        session({pid: 2, name: "two", state: "working", due: NOW + 600, remaining: 600}),
-        session({pid: 3, name: "three"}),
-        session({pid: 4, name: "old", dormant: true}),
+test("only a listing of contract 1 passes, and an older CLI is told to update", () => {
+    const mixed = fixture("mixed");
+    assert.equal(logic.validateListing(JSON.stringify(mixed)).listing.now, mixed.now);
+    assert.equal(logic.validateListing(mixed).error, "");
+    const {schema_version: _, ...old} = mixed;
+    assert.equal(logic.validateListing(JSON.stringify(old)).error, "agent-eta CLI too old, update it");
+    assert.match(logic.validateListing(Object.assign({}, mixed, {schema_version: 2})).error, /reads 1\. Update the widget/);
+    assert.equal(logic.validateListing("{oops").error, "agent-eta printed no valid JSON");
+    assert.equal(logic.validateListing("[]").error, "agent-eta printed no listing");
+    assert.equal(logic.validateListing(Object.assign({}, mixed, {sections: null})).error, "agent-eta listing lacks sections");
+    assert.match(logic.validateListing(Object.assign({}, mixed, {summary: []})).error, /lacks now, summary or labels/);
+});
+
+test("rows show agent-eta's activity labels and lights", () => {
+    const mixed = fixture("mixed");
+    const question = find(mixed, "codex:s-t-1");
+    assert.equal(logic.stateLabel(question), "working, question open");
+    assert.equal(logic.stateLight(question), "red");
+    assert.match(logic.detailLine(question, mixed.now), /working, question open \(question\)/);
+    const owner = find(mixed, "claude:1");
+    assert.deepEqual([owner.state, logic.stateLabel(owner), logic.stateLight(owner)], ["idle", "working", "green"]);
+    assert.equal(logic.etaText(owner), "8m left");
+    assert.equal(logic.stateLight(find(mixed, "claude:2")), "yellow");
+    assert.equal(logic.stateLight(find(mixed, "task:reminder")), "grey");
+    assert.equal(logic.stateLight({}), "grey");
+});
+
+test("the tray summary is agent-eta's, with the orb colour and the progress session", () => {
+    const summary = logic.summary(fixture("mixed"));
+    assert.deepEqual([summary.waiting, summary.working, summary.overdue, summary.dormant, summary.attention],
+                     [2, 2, 1, 1, 3]);
+    assert.deepEqual([summary.light, summary.orbCount, summary.status], ["red", 2, "attention"]);
+    assert.equal(summary.next.key, "claude:2");
+    assert.equal(summary.headline, "2 waiting · 1 overdue · 2 working · 1 idle · 1 stopped");
+    const empty = logic.summary(fixture("empty"));
+    assert.deepEqual([empty.light, empty.orbCount, empty.status, empty.next], ["none", 0, "passive", null]);
+    assert.equal(logic.summary(null).headline, "No active agent sessions");
+});
+
+test("sections come in agent-eta's order, and stopped and dormant ones open independently", () => {
+    const mixed = fixture("mixed");
+    for (const [dormant, stopped, lengths] of [[false, false, [4, 2, 0, 0]], [true, false, [4, 2, 0, 1]],
+                                             [false, true, [4, 2, 1, 0]], [true, true, [4, 2, 1, 1]]]) {
+        const groups = logic.groupSessions(mixed, dormant, stopped);
+        assert.deepEqual(groups.map(g => [g.title, g.count]),
+                         [["Needs you", 4], ["Working", 2], ["Stopped until a limit resets", 1], ["Dormant", 1]]);
+        assert.deepEqual(groups.map(g => g.sessions.length), lengths);
+    }
+    const [needs, working] = logic.groupSessions(mixed, false);
+    assert.deepEqual(needs.sessions.map(s => s.key), ["codex:s-t-1", "claude:3", "task:reminder", "claude:4"]);
+    assert.equal(working.sessions[1].taskItems[0].id, "build");
+    assert.deepEqual(logic.groupSessions(fixture("empty"), true, true), []);
+});
+
+test("usage groups resolve agent-eta's window and account keys", () => {
+    const mixed = fixture("mixed");
+    const groups = logic.usageGroups(mixed);
+    assert.deepEqual(groups.map(g => [g.agent, g.reached, g.windows.map(w => w.minutes), g.resetBy.minutes]),
+                     [["claude", false, [300, 10080], 300], ["claude/work", false, [300], 300],
+                      ["codex", true, [300, 10080], 300]]);
+    assert.equal(groups[1].account.id, "claude:work");
+    assert.equal(logic.accountStatus(groups[1].account, mixed.now), "Authentication unknown · Stale reading · read 2h 0m ago");
+    assert.match(logic.usageHeadline(groups[0], mixed.now), /^55% · resets in 50m \(/);
+    assert.match(logic.usageHeadline(groups[2], mixed.now), /^blocked · resets in 20m \(/);
+    assert.equal(logic.usageHeadline({reached: false, used: null, resetBy: null, windows: []}, mixed.now), "?");
+    assert.equal(logic.accountStatus({auth_state: "logged_out"}, NOW), "Not logged in");
+});
+
+test("signals notify a new wait, an ETA that ran over and a reset limit, once each", () => {
+    const before = fixture("signals-before");
+    const after = fixture("signals-after");
+    const events = logic.signalEvents(before, after);
+    assert.deepEqual(events.map(e => [e.kind, e.key]), [
+        ["waiting", "waiting:claude:3:1760000115"], ["waiting", "waiting:claude:6:1760000117"],
+        ["overdue", "overdue:claude:2:1760000030"], ["overdue", "overdue:task:ci:1760000100"],
+        ["reset", "reset:window:codex:300:1760000060"],
     ]);
-    assert.deepEqual(logic.tooltipLines(data, 2), [
-        "<b>&lt;b&gt;x&lt;/b&gt;</b> · waiting (permission)",
-        "<b>two</b> · working, 10m left",
-        "… 1 more",
+    assert.equal(events[0].title, "asks soon is waiting");
+    assert.equal(events[0].text, "claude needs you: question");
+    assert.match(events[2].text, /^It was due /);
+    assert.match(events[3].text, /^ci expected it at /);
+    assert.equal(events[4].text, "The recorded 5h window ended. A fresh usage reading is pending.");
+    assert.deepEqual(logic.signalEvents(after, after), []);
+    assert.deepEqual(logic.signalEvents(null, after), []);
+});
+
+test("the tooltip escapes names, uses the activity label and cuts off after the limit", () => {
+    const mixed = fixture("mixed");
+    mixed.sessions[0].name = "<b>x</b>";
+    const lines = logic.tooltipLines(mixed, 2);
+    assert.deepEqual(lines, [
+        "<b>&lt;b&gt;x&lt;/b&gt;</b> · working, question open (question)",
+        "<b>permission</b> · waiting (permission)",
+        "… 5 more",
     ]);
 });
 
-test("transitions notify a new wait, an ETA that runs over and a reset limit, once each", () => {
-    const before = listing(
-        [session({state: "working", pid: 1}),
-         session({state: "working", pid: 2, eta_source: "turn", due: NOW + 5, remaining: 5}),
-         session({state: "working", pid: 3, eta_source: "tasks", due: NOW + 5, remaining: 5, tasks: ["t"]})],
-        [{id: "t", label: "tests", overdue: false, due: NOW + 5}],
-        [{agent: "codex", minutes: 10080, reached: true, resets_at: NOW}]);
-    const after = listing(
-        [session({state: "waiting", pid: 1, waiting_for: "permission"}),
-         session({state: "working", pid: 2, eta_source: "turn", due: NOW + 5, remaining: -1, overdue: true}),
-         session({state: "working", pid: 3, eta_source: "tasks", due: NOW + 5, remaining: -1, overdue: true,
-                  tasks: ["t"]})],
-        [{id: "t", label: "tests", overdue: true, due: NOW + 5, session_name: "shop"}],
-        [{agent: "codex", minutes: 10080, reached: false, resets_at: NOW}]);
-    const events = logic.transitions(before, after);
-    assert.deepEqual(events.map(e => e.kind), ["waiting", "overdue", "overdue", "reset"]);
-    assert.deepEqual(events.map(e => e.key), [
-        `waiting:claude:1:${NOW - 120}`, `overdue:claude:2:${NOW + 5}`, `overdue:task:t:${NOW + 5}`,
-        `reset:codex:10080:${NOW}`,
-    ]);
-    assert.equal(events[0].text, "claude needs you: permission");
-    assert.deepEqual(logic.transitions(after, after), []);
-    assert.deepEqual(logic.transitions(null, after), []);
-});
-
-
-test("unowned manual reminders have no working count, orb or progress activity", () => {
-    const reminder = session({state: "unknown", section: 0, tasks: ["sec-check"],
-                              overdue: true, progress: 1, remaining: -600});
-    const result = logic.summary(listing([reminder], [{id: "sec-check", overdue: true}]));
-    assert.equal(logic.stateLight(reminder), "grey");
-    assert.equal(result.working, 0);
-    assert.equal(result.attention, 0);
-    assert.equal(result.dormant, 0);
-    assert.equal(result.next, null);
-    assert.equal(result.light, "none");
-    assert.equal(result.status, "passive");
-    assert.equal(logic.groupSessions(listing([reminder]), false)[0].sessions.length, 1);
-});
-
-test("idle owners are promoted only for verified background work", () => {
-    assert.equal(logic.shownState(session({state: "idle", section: 0, tasks: ["manual"]})), "idle");
-    assert.equal(logic.shownState(session({state: "idle", section: 1, tasks: ["running"]})), "working");
+test("the dormant threshold reads in whole hours", () => {
+    assert.equal(logic.formatDuration(fixture("mixed").labels.dormant_after), "2 hours");
+    assert.equal(logic.formatDuration(3600), "1 hour");
+    assert.equal(logic.formatDuration(5400), "1h 30m");
 });

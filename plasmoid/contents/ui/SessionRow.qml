@@ -57,7 +57,7 @@ PlasmaComponents3.ItemDelegate {
             Layout.alignment: Qt.AlignTop
             Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
             Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-            Accessible.name: row.session.state
+            Accessible.name: Logic.stateLabel(row.session)
 
             StateDot {
                 anchors.centerIn: parent
@@ -78,7 +78,7 @@ PlasmaComponents3.ItemDelegate {
                     text: Logic.title(row.session)
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
-                    font.bold: row.session.state === "waiting"
+                    font.bold: row.session.activity_state === "waiting"
                 }
                 PlasmaComponents3.Label {
                     text: Logic.etaText(row.session)

@@ -78,6 +78,10 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import agent_eta_accounts as accounts_api
 import agent_eta_konsole as konsole_api
+import agent_eta_model as model
+from agent_eta_model import (DORMANT_AFTER, DORMANT_SECTION, OVERDUE_MIN, UNKNOWN_TTL, account_note,
+                             agent_label, at_rest, dormant, expired, has_running_task, progress, section,
+                             session_key, session_sort_key, stopped_before, usage_sections)
 from agent_eta_providers import AccountError
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -85,23 +89,11 @@ LABEL_MAX = 80
 # Codex hands a command back to the model after a 10 second yield by default. Anything
 # younger is an ordinary foreground command, and listing it would only make the list flicker.
 CODEX_MIN_AGE = 10
-# An entry without a live holder expires once it is overdue by its own length, but never
-# sooner than this. One without any ETA expires after UNKNOWN_TTL.
-OVERDUE_MIN = 3600
-UNKNOWN_TTL = 2 * 3600
 HOOK_LOG_MAX = 256 * 1024
 # A Codex thread whose hooks stayed silent this long is dropped. One that claims to work or
 # wait but stayed silent for SESSION_STALE most likely lost its Stop, and counts as idle.
 SESSION_IDLE_TTL = 12 * 3600
 SESSION_STALE = 6 * 3600
-# An idle session without a running task counts as dormant after this long. Neither agent says
-# whether anyone still looks at a session, and a process that lives on for days in a terminal
-# tab, the Claude Code daemon or the Codex app's one app-server for all threads looks just like
-# one in use, so time is the signal. Twelve hours kept a night's worth of finished threads under
-# "Needs you" on 2026-10-15.
-DORMANT_AFTER = 2 * 3600
-# The JSON section of a dormant session, after the three of section().
-DORMANT_SECTION = 3
 # Where PhpStorm projects live. A session below it belongs to the project at its first level.
 PROJECTS_ROOT = "~/PhpstormProjects"
 # How many processes up from a session's own one --json lists, for the tray to find its window.
@@ -127,8 +119,6 @@ CODEX_QUESTION_TOOLS = ("request_user_input",)
 ROLLOUT_TAIL = 256 * 1024
 # How long each Claude Code usage window lasts in minutes, by its name in usage-state.json.
 CLAUDE_WINDOWS = {"five_hour": 300, "seven_day": 10080}
-# The window lengths in minutes that order the agents of a usage section, the first deciding first.
-USAGE_SORT_WINDOWS = (10080, 300)
 # How many of the most recently written Codex rollouts with a usage reading are searched for the
 # latest one, and how many rollouts are opened at most to find them. Codex writes batches of
 # short threads whose readings are all null, and those must not hide the last real one.
@@ -519,14 +509,6 @@ def make_entry(entry_id, agent, label, eta, holder, source, session=None, cwd=No
     }
 
 
-def expired(entry, now):
-    started = entry.get("started") or now
-    due = entry.get("due")
-    if due:
-        return now > due + max(OVERDUE_MIN, due - started)
-    return now > started + UNKNOWN_TTL
-
-
 def alive(entry, path, now):
     holder = entry.get("holder") or {}
     kind = holder.get("type")
@@ -583,10 +565,6 @@ def claude_accounts():
     if len(accounts) == 1:
         return [(None, os.path.expanduser(accounts[0]["dir"]))]
     return [(a["name"], os.path.expanduser(a["dir"])) for a in accounts]
-
-
-def agent_label(agent, account):
-    return "%s/%s" % (agent, account) if account else agent
 
 
 def codex_home():
@@ -1018,7 +996,7 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
                 remove(path)
             continue
         state, since = record.get("state") or "unknown", record.get("since")
-        waiting_for = record.get("waiting_for")
+        reported, waiting_for, turn_running = state, record.get("waiting_for"), False
         if threads is None:
             threads = codex_threads()
         if (threads.get(record["id"]) or {}).get("archived"):
@@ -1041,6 +1019,8 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
         # Synchronous questions count inside a turn; async questions also survive Stop.
         # A plan only counts once its turn has ended.
         if pending and pending[0] == "async question":
+            # The turn may go on while the question waits. It still needs you, under its own label.
+            turn_running = state == "working" and now - updated <= SESSION_STALE
             state, since, waiting_for = "waiting", pending[1] or since, "question"
         elif pending and pending[2] and pending[2] <= now:
             # The usage limit has reset, so the thread only waits for its next prompt. It has rested
@@ -1058,6 +1038,8 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
             "pid": None,
             "name": names.get(record["id"]) or os.path.basename(record.get("cwd") or "") or "-",
             "state": state,
+            "reported_state": reported,
+            "turn_running": turn_running,
             "waiting_for": waiting_for if state in ("waiting", "stopped") else None,
             "since": since,
             "cwd": record.get("cwd"),
@@ -1341,66 +1323,8 @@ def usage_window(agent, minutes, used, resets_at, seen_at):
 
 
 def usage_view(now, windows=None):
-    """Every usage window with the share of it that has passed, both in percent, how far the
-    usage runs ahead of the time in percentage points, the time left until its reset and
-    whether its limit is reached. A window whose reset lies in the past has started over since
-    its reading, so none of that is known then."""
-    windows = claude_usage() + codex_usage() if windows is None else windows
-    for window in windows:
-        resets_at, length = window["resets_at"], window["minutes"] * 60
-        if resets_at and resets_at > now:
-            window["elapsed"] = max(0.0, min(100.0, 100.0 * (1 - (resets_at - now) / length)))
-            window["pace"] = window["used"] - window["elapsed"]
-            window["remaining"] = int(resets_at - now)
-        else:
-            window["used"] = window["elapsed"] = window["pace"] = window["remaining"] = None
-        window["ahead"] = window["pace"] is not None and window["pace"] > 0
-        window["reached"] = window["used"] is not None and window["used"] >= 100
-    return windows
-
-
-def usage_sections(windows):
-    """The agents whose usage limits all have room left and the agents with a reached limit, with
-    their windows ordered by reset. Each entry is (agent, summary, windows). The summary of an open
-    agent is its window that resets first, and that of a blocked one the reached window that resets
-    last, since that reset ends the block. Open agents are ordered by the reset of the 7-day window
-    and then by that of the 5-hour window, blocked ones by the end of their block, the soonest
-    first in both."""
-    def until_reset(window):
-        return (window is None or window["remaining"] is None, (window or {}).get("remaining") or 0)
-
-    def agent_order(entry):
-        windows = {window["minutes"]: window for window in entry[2]}
-        return tuple(until_reset(windows.get(minutes)) for minutes in USAGE_SORT_WINDOWS)
-    by_agent = {}
-    for window in windows:
-        by_agent.setdefault(window["agent"], []).append(window)
-    open_, blocked = [], []
-    for agent, group in by_agent.items():
-        group.sort(key=until_reset)
-        reached = [window for window in group if window["reached"]]
-        if reached:
-            blocked.append((agent, max(reached, key=lambda window: window["remaining"]), group))
-        else:
-            open_.append((agent, group[0], group))
-    open_.sort(key=agent_order)
-    blocked.sort(key=lambda entry: (until_reset(entry[1]), agent_order(entry)))
-    return open_, blocked
-
-
-def account_note(account):
-    """What the usage table says about an account whose login or reading is not in order, the
-    same wording as the tray, or "" for an authenticated account with a current reading."""
-    if account["auth_state"] == "logged_out":
-        return "Not logged in"
-    if account["auth_state"] == "mismatch":
-        return "Different account logged in"
-    parts = []
-    if account["auth_state"] == "unknown":
-        parts.append("Authentication unknown")
-    if account["usage_status"] != "current":
-        parts.append("Stale reading" if account["usage_status"] == "stale" else "Usage unavailable")
-    return " · ".join(parts)
+    """Every usage window as model.usage_view() describes it, read from both agents unless given."""
+    return model.usage_view(now, claude_usage() + codex_usage() if windows is None else windows)
 
 
 def render_usage(windows, now, notes=None):
@@ -1479,15 +1403,6 @@ def percent(value):
     return "?" if value is None else "%d%%" % round(value)
 
 
-def session_key(agent, session):
-    """Claude Code sessions are matched by pid, which survives a /clear, Codex threads by id."""
-    if agent == "claude" and session.get("pid"):
-        return ("claude", int(session["pid"]))
-    if session.get("id"):
-        return (agent, session["id"])
-    return None
-
-
 def turn_path(directory, agent, session):
     key = session_key(agent, session)
     return os.path.join(sub_dir(directory, "turns"), "%s-%s.json" % (key[0], safe_id(key[1])))
@@ -1502,10 +1417,7 @@ def load_turns(directory, now, sessions, prune=True):
         record = read_json(path)
         key = session_key(record.get("agent"), record.get("session") or {}) if record else None
         owner = by_key.get(key)
-        ended = (owner is None or expired(record, now)
-                 or (owner["state"] in ("idle", "stopped")
-                     and (owner["since"] or 0) >= (record.get("started") or 0)))
-        if ended:
+        if model.turn_ended(record, owner, now):
             if prune:
                 remove(path)
             continue
@@ -1515,43 +1427,23 @@ def load_turns(directory, now, sessions, prune=True):
 
 # --- list -----------------------------------------------------------------------------
 
-def progress(started, due, now):
-    """The share of the time from started to due that has passed, from 0 to 1, or None without a
-    due time. An overdue ETA stays at 1, and `overdue` says that it ran over."""
-    if not due:
-        return None
-    if not started or due <= started:
-        return 1.0 if now >= due else 0.0
-    return max(0.0, min(1.0, (now - started) / (due - started)))
-
-
 def visible(entry, now):
     if entry.get("agent") == "codex" and entry.get("source") == "hook":
         return now - (entry.get("started") or now) >= CODEX_MIN_AGE
     return True
 
 
-def rows(directory, now):
+def collect_tasks(directory, now):
+    """Every task entry with a live holder that the list shows, named after its session."""
     entries = [entry for entry, _ in load_entries(directory, now) if visible(entry, now)]
     names = codex_thread_names() if any(e.get("agent") == "codex" for e in entries) else {}
-    result = []
-    for entry in entries:
-        due = entry.get("due")
-        remaining = int(due - now) if due else None
-        row = dict(entry)
-        row["remaining"] = remaining
-        row["overdue"] = remaining is not None and remaining < 0
-        row["progress"] = progress(entry.get("started"), due, now)
-        row["session_name"] = session_name(entry, names)
-        result.append(row)
-    return sorted(result, key=sort_key)
+    return [dict(entry, session_name=session_name(entry, names)) for entry in entries]
 
 
-def sort_key(row):
-    remaining = row["remaining"]
-    if remaining is None:
-        return (2, row.get("started") or 0)
-    return (0 if remaining < 0 else 1, remaining)
+def rows(directory, now):
+    """The task list in its display order, as the snapshot holds it."""
+    return sorted((model.task_view(entry, now) for entry in collect_tasks(directory, now)),
+                  key=model.task_sort_key)
 
 
 def render(table, now):
@@ -1568,128 +1460,36 @@ def render(table, now):
     return "\n".join(out) + "\n"
 
 
-def sessions_view(directory, now, tasks=None, usage=None):
-    """Every running session with its state, its ETA and its tasks, in display order.
-
-    The ETA of a session is the turn ETA its agent set with `agent-eta turn`, or else the
-    latest due time among its tasks. A task whose session is not known, such as a local run,
-    stands as a session of its own. A Codex command left without PostToolUse when its turn
-    ends is deleted here. A session that does not work while its
-    account has a reached usage limit counts as stopped until that limit resets.
-    """
-    tasks = rows(directory, now) if tasks is None else tasks
+def collect_sessions(directory, now):
+    """Every running session with the state its agent reports, the dsh bash calls as tasks and the
+    turn ETAs by session key."""
     threads = codex_threads()
     names = codex_thread_names(threads)
     dsh, dsh_tasks = dsh_sessions(directory, now)
     sessions = claude_sessions() + codex_sessions(directory, now, names, threads=threads) + dsh
-    turns = load_turns(directory, now, sessions)
-    by_key = {}
-    for session in sessions:
-        session["tasks"] = []
-        by_key[session_key(session["agent"], session)] = session
-    kept = []
-    for task in list(tasks) + dsh_tasks:
-        key = session_key(task.get("agent"), task.get("session") or {}) or ("task", task["id"])
-        owner = by_key.get(key)
-        if owner and stopped_before(owner, task):
-            remove(entry_path(directory, task["id"]))
-            continue
-        kept.append(task)
-        if owner is None:
-            session = task.get("session") or {}
-            owner = by_key[key] = {
-                "agent": task.get("agent"), "id": session.get("id"), "pid": session.get("pid"),
-                "name": task["session_name"], "state": "unknown",
-                "waiting_for": None, "since": task.get("started"), "cwd": task.get("cwd"), "tasks": []}
-            sessions.append(owner)
-        owner["tasks"].append(task)
-    for session in sessions:
-        if session["state"] == "unknown" and has_running_task(session):
-            session["state"] = "working"
-    limit_stops(sessions, usage_view(now) if usage is None else usage, now)
-    for session in sessions:
-        turn = turns.get(session_key(session["agent"], session))
-        timed = [t for t in session["tasks"] if t.get("due")]
-        if session.get("resume_at"):
-            session.update(due=session["resume_at"], eta_source="limit", turn_label=None,
-                           eta_started=session.get("since"))
-        elif turn and turn.get("due"):
-            session.update(due=turn["due"], eta_source="turn", turn_label=turn.get("label") or None,
-                           eta_started=turn.get("started"))
-        elif timed:
-            last = max(timed, key=lambda task: task["due"])
-            session.update(due=last["due"], eta_source="tasks", turn_label=None, eta_started=last.get("started"))
-        else:
-            session.update(due=None, eta_source=None, turn_label=turn.get("label") if turn else None,
-                           eta_started=None)
-        session["remaining"] = int(session["due"] - now) if session["due"] else None
-        session["overdue"] = session["remaining"] is not None and session["remaining"] < 0
-        session["progress"] = progress(session["eta_started"], session["due"], now)
-    tasks[:] = sorted(kept, key=sort_key)
-    return sorted(sessions, key=lambda session: (dormant(session, now), session_sort_key(session)))
+    return sessions, dsh_tasks, load_turns(directory, now, sessions)
 
 
-def limit_stops(sessions, usage, now):
-    """Mark every session that does not work while its account has a reached usage limit as
-    stopped until that limit resets, as Codex marks a thread whose turn hit one. A working
-    session stays as it is, since it may run on extra usage or the reading may lag behind a
-    reset. A dormant one stays dormant, and one already stopped with a reset of its own keeps
-    that one."""
-    blocked = {agent: summary["resets_at"] for agent, summary, _ in usage_sections(usage)[1]}
-    for session in sessions:
-        resets_at = blocked.get(agent_label(session["agent"], session.get("account")))
-        if (resets_at and session["state"] not in ("working", "unknown") and not session.get("resume_at")
-                and not dormant(session, now)):
-            session.update(state="stopped", waiting_for="usage limit", resume_at=resets_at)
+def snapshot(directory, now, tasks=None, usage=None, accounts=()):
+    """The model snapshot of everything running. A Codex command left without PostToolUse when its
+    turn ended is deleted here."""
+    tasks = collect_tasks(directory, now) if tasks is None else tasks
+    sessions, dsh_tasks, turns = collect_sessions(directory, now)
+    result = model.build_snapshot(now=now, sessions=sessions, tasks=list(tasks) + dsh_tasks,
+                                  usage=usage_view(now) if usage is None else usage, accounts=accounts,
+                                  turns=turns)
+    for task_id in result.prune_tasks:
+        remove(entry_path(directory, task_id))
+    return result
 
 
-def stopped_before(session, task):
-    """Whether an unpaired Codex command predates a completed or failed turn.
-
-    A denied command can miss PostToolUse even though Stop arrives. The shared app-server
-    staying alive does not prove that command still runs. PID and lock holders are unaffected.
-    """
-    return (session["state"] in ("idle", "stopped") and (task.get("holder") or {}).get("type") == "pair"
-            and (task.get("started") or 0) <= (session.get("since") or 0))
-
-
-def has_running_task(session):
-    """Rows have already checked these holders; a manual deadline alone proves no work."""
-    return any((task.get("holder") or {}).get("type") in ("pid", "lock", "pair")
-               for task in session["tasks"])
-
-
-def session_sort_key(session):
-    """By how soon a session needs you. Waiting for an answer first, then at rest with the most
-    recently active first, then working by its ETA like the tasks, then stopped until a usage
-    limit resets."""
-    if session["state"] == "waiting":
-        rank = 0
-    elif session["state"] == "unknown" or (at_rest(session) and not has_running_task(session)):
-        rank = 1
-    elif session["state"] == "stopped":
-        rank = 3
-    else:
-        rank = 2
-    remaining = session["remaining"]
-    if remaining is None:
-        return (rank, 2, -(session.get("since") or 0) if rank == 1 else session.get("since") or 0)
-    return (rank, 0 if remaining < 0 else 1, remaining)
-
-
-def at_rest(session):
-    """Idle, or stopped by an error with no reset left to wait for. Nothing runs either way."""
-    return session["state"] == "idle" or (session["state"] == "stopped" and not session.get("due"))
-
-
-def dormant(session, now):
-    """Whether a session has rested so long that nobody looks at it any more. A dsh turn that
-    failed waits for the next prompt, and after DORMANT_AFTER it rests like an idle session. A
-    session that never ran a turn is dormant from the start."""
-    if session.get("unused") and not session["tasks"]:
-        return True
-    return ((at_rest(session) or bool(session.get("failed"))) and not session["tasks"]
-            and now - (session.get("since") or now) > DORMANT_AFTER)
+def sessions_view(directory, now, tasks=None, usage=None):
+    """Every running session with its state, its ETA and its tasks, in display order. A given
+    `tasks` list is left holding the tasks that were not deleted."""
+    result = snapshot(directory, now, tasks, usage)
+    if tasks is not None:
+        tasks[:] = list(result.tasks)
+    return list(result.sessions)
 
 
 def render_sessions(sessions, now, show_dormant=False):
@@ -1722,12 +1522,6 @@ def render_sessions(sessions, now, show_dormant=False):
     return "\n".join(text) + "\n"
 
 
-def section(session):
-    """0 for a session that needs you, 1 for a working one, 2 for one stopped by a usage limit,
-    its own or its account's."""
-    return max(session_sort_key(session)[0] - 1, 0)
-
-
 def session_lines(sessions, now):
     lines = [("STATE", "FOR", "REMAINING", "DUE", "AGENT", "SESSION")]
     for session in sessions:
@@ -1746,7 +1540,7 @@ def session_lines(sessions, now):
             remaining = "?"
         else:
             remaining = "-"
-        lines.append((state, held, remaining, due_cell(remaining, session["due"], now),
+        lines.append((session.get("activity_label") or state, held, remaining, due_cell(remaining, session["due"], now),
                       agent_label(session["agent"], session.get("account")) or "-", text))
         for task in session["tasks"]:
             left = format_span(task["remaining"])
@@ -1790,48 +1584,37 @@ def project_name(root):
     return name or os.path.basename(root.rstrip(os.sep))
 
 
-def session_json(session, now):
-    """A session as --json prints it. Its tasks are named by id, and besides the session view it
-    carries what the tray widget needs: whether it is dormant, its section in the order of the
-    session table, the process lineage to find its window by and the project it works in. A Codex
-    thread has no process of its own, since the tray opens it by its id."""
+def session_json(session):
+    """What --json adds to a session of the snapshot, which only a collector can read: the process
+    lineage the tray widget finds its window by and the project it works in. A Codex thread has no
+    process of its own, since the tray opens it by its id."""
     pid = None
     if session["agent"] != "codex":
         holders = [(t.get("holder") or {}) for t in session["tasks"]]
         pid = session.get("pid") or next((h.get("pid") for h in holders if h.get("type") == "pid"), None)
     root = project_root(session.get("cwd"))
-    session["dormant"] = dormant(session, now)
-    session["section"] = DORMANT_SECTION if session["dormant"] else section(session)
-    session["pids"] = lineage(int(pid)) if pid else []
-    session["project_root"] = root
-    session["project_name"] = project_name(root)
-    session["tasks"] = [task["id"] for task in session["tasks"]]
-    return session
+    return {"pids": lineage(int(pid)) if pid else [], "project_root": root, "project_name": project_name(root)}
 
 
 def cmd_list(args):
     now = time.time()
     directory = state_dir()
-    table = rows(directory, now)
     store = accounts_api.AccountStore()
     account_data = store.snapshot(claude_usage() + codex_usage(), now)
     store.maybe_refresh(os.path.realpath(__file__), now)
-    usage = usage_view(now, account_data["usage"])
-    # The session view also deletes tasks that ended unseen, so --tasks runs it as well.
-    sessions = sessions_view(directory, now, table, usage)
+    # The snapshot also deletes tasks that ended unseen, so --tasks builds it as well.
+    result = snapshot(directory, now, usage=account_data["usage"], accounts=account_data["accounts"])
+    tasks = list(result.tasks)
     if args.json:
-        sessions = [session_json(session, now) for session in sessions]
-        json.dump({"now": int(now), "sessions": sessions, "tasks": table, "usage": usage,
-                   "accounts": account_data["accounts"]}, sys.stdout,
-                  indent=2, sort_keys=True)
+        json.dump(model.listing(result, session_json), sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
     elif args.tasks:
-        sys.stdout.write(render(table, now))
+        sys.stdout.write(render(tasks, now))
     else:
         # A blank line sets the usage table apart, since `---` only splits sections inside a table.
         notes = {account["agent"]: account_note(account) for account in account_data["accounts"]}
-        sys.stdout.write(render_sessions(sessions, now, args.all) + "\n"
-                         + render_usage(usage, now, {agent: note for agent, note in notes.items() if note}))
+        sys.stdout.write(render_sessions(list(result.sessions), now, args.all) + "\n"
+                         + render_usage(list(result.usage), now, {agent: note for agent, note in notes.items() if note}))
     return 0
 
 

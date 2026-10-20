@@ -166,7 +166,7 @@ class Sessions(StateTest):
                          (child.pid, "http://127.0.0.1:3999/", "qwen3-coder", "/work/shop"))
         self.assertEqual([(t["id"], t["label"], t["due"]) for t in session["tasks"]],
                          [("dsh-c-old", "run the tests", None)])
-        listed = eta.session_json(session, now)
+        listed = dict(session, **eta.session_json(session))
         self.assertEqual(listed["pids"][0], child.pid)
         self.assertEqual(listed["section"], 1)
 

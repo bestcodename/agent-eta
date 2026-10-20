@@ -1,22 +1,60 @@
-// What the agent-eta tray widget shows, computed from `agent-eta list --json --all`.
+// What the agent-eta tray widget shows, from `agent-eta list --json --all`, contract schema 1.
 //
-// Pure functions without QML, so `node --test` covers them (test_plasmoid.mjs).
-// The order of the sessions and their section come from agent-eta itself, so nothing here sorts
-// sessions. See docs/agent-eta.md, section "Tray widget".
+// agent-eta decides activity, order, sections, counts, usage grouping and what may notify, and
+// this file only checks and formats its listing. Pure functions without QML, so `node --test`
+// covers them (test_plasmoid.mjs). See docs/agent-eta.md, section "Tray widget".
 
-export const SECTION_TITLES = ["Needs you", "Working", "Stopped until a limit resets", "Dormant"];
+// The contract version this widget reads.
+export const SCHEMA_VERSION = 1;
 export const DORMANT_SECTION = 3;
 export const STOPPED_SECTION = 2;
 
-// The traffic-light colour of a session state. A coloured dot rather than a media icon, because a
-// play or pause symbol reads as a button that starts or stops the session. StateDot.qml maps the
-// names to theme colours.
-const STATE_LIGHTS = {
-    waiting: "red",
-    idle: "yellow",
-    working: "green",
-    stopped: "grey",
+// The traffic-light colour of a semantic light. A coloured dot rather than a media icon, because a
+// play or pause symbol reads as a button that starts or stops the session. Lights.qml maps the
+// colour names to theme colours.
+const LIGHT_COLOURS = {
+    attention: "red",
+    caution: "yellow",
+    active: "green",
+    off: "grey",
 };
+
+const LISTS = ["sessions", "tasks", "usage", "accounts", "sections", "usage_groups", "notification_signals"];
+
+// The listing in `text`, or why it cannot be shown. A CLI older than the contract prints no
+// `schema_version`, and a newer contract needs a newer widget.
+export function validateListing(text) {
+    let data = null;
+    try {
+        data = typeof text === "string" ? JSON.parse(text) : text;
+    } catch (error) {
+        return {listing: null, error: "agent-eta printed no valid JSON"};
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+        return {listing: null, error: "agent-eta printed no listing"};
+    }
+    if (data.schema_version === undefined) {
+        return {listing: null, error: "agent-eta CLI too old, update it"};
+    }
+    if (data.schema_version !== SCHEMA_VERSION) {
+        return {listing: null,
+                error: `agent-eta reports contract ${data.schema_version}, this widget reads ${SCHEMA_VERSION}. Update the widget`};
+    }
+    const missing = LISTS.filter(key => !Array.isArray(data[key]));
+    if (typeof data.now !== "number" || !isObject(data.summary) || !isObject(data.labels)) {
+        missing.unshift("now, summary or labels");
+    }
+    return missing.length ? {listing: null, error: `agent-eta listing lacks ${missing.join(", ")}`}
+        : {listing: data, error: ""};
+}
+
+function isObject(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+export function lightColour(light) {
+    return LIGHT_COLOURS[light] || "grey";
+}
 
 function pad(number) {
     return String(number).padStart(2, "0");
@@ -116,35 +154,17 @@ export function percent(value) {
     return value === null || value === undefined ? "?" : `${Math.round(value)}%`;
 }
 
-// A key that stays the same across polls. Claude Code sessions keep their pid through a /clear,
-// as in agent-eta's session_key(), Codex threads their id, and a lone task its id.
-export function sessionKey(session) {
-    if (session.agent === "claude" && session.pid) {
-        return `claude:${session.pid}`;
-    }
-    if (session.id) {
-        return `${session.agent}:${session.id}`;
-    }
-    return `task:${(session.tasks || [])[0]}`;
-}
-
 export function agentLabel(session) {
     return session.account ? `${session.agent}/${session.account}` : session.agent || "-";
 }
 
-// Only the backend Working section establishes background activity for an idle session.
-// A manual deadline without a live holder leaves its owner idle.
-export function shownState(session) {
-    return session.state === "idle" && session.section === 1 ? "working" : session.state;
+// The words for what a session does, from agent-eta's label table.
+export function stateLabel(session) {
+    return session.activity_label || session.activity_state || session.state || "-";
 }
 
-// A working session past its ETA turns yellow, like the tray orb counts it.
 export function stateLight(session) {
-    const state = shownState(session);
-    if (session.overdue && state === "working") {
-        return "yellow";
-    }
-    return STATE_LIGHTS[state] || "grey";
+    return lightColour(session.light);
 }
 
 export function title(session) {
@@ -156,7 +176,7 @@ export function etaText(item) {
     if (item.due) {
         return item.remaining < 0 ? `${formatSpan(-item.remaining)} over` : `${formatSpan(item.remaining)} left`;
     }
-    return item.state === "working" ? "no ETA" : "";
+    return (item.activity_state || item.state) === "working" ? "no ETA" : "";
 }
 
 // The second line of a session row.
@@ -168,7 +188,7 @@ export function detailLine(session, now) {
     if (session.project_name) {
         parts.push(session.project_name);
     }
-    let state = session.state;
+    let state = stateLabel(session);
     if (session.waiting_for) {
         state += ` (${session.waiting_for})`;
     }
@@ -186,8 +206,12 @@ function sessionsOf(listing) {
     return (listing && listing.sessions) || [];
 }
 
-function late(session, tasksById) {
-    return session.overdue || (session.tasks || []).some(id => tasksById[id] && tasksById[id].overdue);
+function byKey(items) {
+    const found = {};
+    for (const item of items || []) {
+        found[item.key] = item;
+    }
+    return found;
 }
 
 function tasksById(listing) {
@@ -198,43 +222,33 @@ function tasksById(listing) {
     return found;
 }
 
-// Counts, the tray state and the session whose progress the tray icon shows. `attention` counts the
-// sessions that need you now, which are the waiting ones and the working ones that ran over.
-//
-// `light` is the tray orb, a traffic light over the sessions that are not dormant. Red with the
-// number of waiting sessions as soon as one waits, yellow with the number of idle and overdue ones,
-// green without a number while everything else works or waits for a limit, and "none" without any
-// such session. Only red marks the widget as needing attention, which makes the tray pulse.
+// A span of whole hours as `2 hours`, any other as formatIn() does.
+export function formatDuration(seconds) {
+    if (seconds > 0 && seconds % 3600 === 0) {
+        return seconds === 3600 ? "1 hour" : `${seconds / 3600} hours`;
+    }
+    return formatIn(seconds);
+}
+
+// The tray state from agent-eta's summary, with the colour of the orb and the session whose
+// progress the tray icon shows. Only red marks the widget as needing attention, which makes the
+// tray pulse. Without any session that is not dormant the orb is "none".
 export function summary(listing) {
-    const byId = tasksById(listing);
-    const live = sessionsOf(listing).filter(session => !session.dormant && session.state !== "unknown");
-    const count = state => live.filter(session => shownState(session) === state).length;
-    const overdue = live.filter(session => shownState(session) === "working" && late(session, byId)).length;
-    const waiting = count("waiting");
-    const timed = live.filter(session => shownState(session) === "working" && session.progress !== null
-                              && session.progress !== undefined);
-    timed.sort((a, b) => a.remaining - b.remaining);
+    const found = (listing && listing.summary) || {};
+    const count = name => found[name] || 0;
     const result = {
-        waiting,
+        waiting: count("waiting"),
         working: count("working"),
         idle: count("idle"),
         stopped: count("stopped"),
-        overdue,
-        dormant: sessionsOf(listing).filter(session => session.dormant).length,
-        attention: waiting + overdue,
-        next: timed.length ? timed[0] : null,
+        overdue: count("overdue"),
+        dormant: count("dormant"),
+        attention: count("attention"),
+        next: (found.progress_session_key && byKey(sessionsOf(listing))[found.progress_session_key]) || null,
+        light: !found.light || found.light === "off" ? "none" : lightColour(found.light),
+        orbCount: count("badge_count"),
+        status: found.status || "passive",
     };
-    if (waiting) {
-        result.light = "red";
-        result.orbCount = waiting;
-    } else if (result.idle || overdue) {
-        result.light = "yellow";
-        result.orbCount = result.idle + overdue;
-    } else {
-        result.light = live.length ? "green" : "none";
-        result.orbCount = 0;
-    }
-    result.status = result.light === "red" ? "attention" : live.length ? "active" : "passive";
     const parts = [];
     for (const name of ["waiting", "overdue", "working", "idle", "stopped"]) {
         if (result[name]) {
@@ -245,78 +259,44 @@ export function summary(listing) {
     return result;
 }
 
-// The sessions by section, each with its task objects as `taskItems`. Stopped and dormant
-// sections retain their counts, and list their sessions only when independently opened.
+// The sections agent-eta ordered, each with its sessions and their task objects as `taskItems`.
+// Stopped and dormant sections retain their counts, and list their sessions only when independently
+// opened. Empty sections are left out.
 export function groupSessions(listing, showDormant, showStopped = false) {
-    const byId = tasksById(listing);
-    const groups = SECTION_TITLES.map((name, section) => ({section, title: name, count: 0, sessions: []}));
-    for (const session of sessionsOf(listing)) {
-        const group = groups[session.section] || groups[session.dormant ? DORMANT_SECTION : 0];
-        group.count += 1;
-        if ((group.section !== DORMANT_SECTION || showDormant)
-                && (group.section !== STOPPED_SECTION || showStopped)) {
-            group.sessions.push(Object.assign({}, session, {
-                taskItems: (session.tasks || []).map(id => byId[id]).filter(Boolean),
-            }));
-        }
-    }
+    const sessions = byKey(sessionsOf(listing));
+    const tasks = tasksById(listing);
+    const groups = ((listing && listing.sections) || []).map(section => {
+        const keys = section.session_keys || [];
+        const shown = (section.index !== DORMANT_SECTION || showDormant)
+            && (section.index !== STOPPED_SECTION || showStopped);
+        return {
+            section: section.index, title: section.title, count: keys.length,
+            sessions: shown ? keys.map(key => sessions[key]).filter(Boolean).map(session => Object.assign({}, session, {
+                taskItems: (session.tasks || []).map(id => tasks[id]).filter(Boolean),
+            })) : [],
+        };
+    });
     return groups.filter(group => group.count > 0);
 }
 
-// The window lengths in minutes that order the agents, the 7-day window deciding before the 5-hour one.
-const USAGE_SORT_WINDOWS = [10080, 300];
-
-function untilReset(window) {
-    return !window || window.remaining === null || window.remaining === undefined ? Infinity : window.remaining;
+// The usage groups agent-eta ordered, with their window and account objects. `resetBy` is the window
+// that resets first for an agent with room left and the one that ends the block for a blocked one.
+export function usageGroups(listing) {
+    const windows = byKey(listing && listing.usage);
+    const accounts = byKey(listing && listing.accounts);
+    return ((listing && listing.usage_groups) || []).map(group => ({
+        agent: group.agent,
+        account: accounts[group.account_key] || null,
+        windows: (group.window_keys || []).map(key => windows[key]).filter(Boolean),
+        reached: !!group.reached,
+        ahead: !!group.ahead,
+        used: group.used === undefined ? null : group.used,
+        resetBy: windows[group.reset_window_key] || null,
+    }));
 }
 
-function compareAgents(a, b) {
-    for (const minutes of USAGE_SORT_WINDOWS) {
-        const left = untilReset(a.windows.find(window => window.minutes === minutes));
-        const right = untilReset(b.windows.find(window => window.minutes === minutes));
-        if (left !== right) {
-            return left < right ? -1 : 1;
-        }
-    }
-    return 0;
-}
-
-// The usage windows per agent, as agent-eta's usage table orders them. Agents with room left come
-// first, by the reset of the 7-day window and then by that of the 5-hour window, and those with a
-// reached limit last, by the reset that ends their block, the soonest first in both.
-export function usageGroups(usage, accounts = []) {
-    const byAgent = new Map();
-    for (const account of accounts || []) {
-        byAgent.set(account.agent, []);
-    }
-    for (const window of usage || []) {
-        if (!byAgent.has(window.agent)) {
-            byAgent.set(window.agent, []);
-        }
-        byAgent.get(window.agent).push(window);
-    }
-    const groups = [];
-    for (const [agent, windows] of byAgent) {
-        windows.sort((a, b) => untilReset(a) - untilReset(b));
-        const reached = windows.filter(window => window.reached);
-        const known = windows.filter(window => window.used !== null && window.used !== undefined);
-        const resetBy = reached.length
-            ? reached.reduce((last, window) => (untilReset(window) > untilReset(last) ? window : last))
-            : windows[0];
-        groups.push({
-            agent,
-            account: (accounts || []).find(account => account.agent === agent) || null,
-            windows,
-            reached: reached.length > 0,
-            ahead: windows.some(window => window.ahead),
-            used: known.length ? Math.max(...known.map(window => window.used)) : null,
-            resetBy,
-        });
-    }
-    groups.sort((a, b) => (a.reached - b.reached)
-        || (a.reached ? untilReset(a.resetBy) - untilReset(b.resetBy) : 0)
-        || compareAgents(a, b));
-    return groups;
+function known(window) {
+    return !!window && window.remaining !== null && window.remaining !== undefined;
 }
 
 // Authentication and missing readings describe accounts, not inferred session states.
@@ -388,11 +368,11 @@ export function usageBands(window, fade = 0, yellow = 0.66) {
 // used share and the reset that comes first, as in `56% · resets in 49m (18:30)`, and a blocked one
 // the reset that ends the block. Without a known reset the share stands alone.
 export function usageHeadline(group, now) {
-    if (group.reached) {
+    if (group.reached && group.resetBy) {
         return `blocked · resets ${resetText(group.resetBy.resets_at, now)}`;
     }
     const next = group.resetBy;
-    return next && untilReset(next) !== Infinity
+    return known(next)
         ? `${percent(group.used)} · resets ${resetText(next.resets_at, now)}`
         : percent(group.used);
 }
@@ -468,7 +448,7 @@ export function escapeHtml(text) {
 export function tooltipLines(listing, max) {
     const live = sessionsOf(listing).filter(session => !session.dormant);
     const lines = live.slice(0, max).map(session => {
-        const detail = [session.state + (session.waiting_for ? ` (${session.waiting_for})` : "")];
+        const detail = [stateLabel(session) + (session.waiting_for ? ` (${session.waiting_for})` : "")];
         const eta = etaText(session);
         if (eta && eta !== "no ETA") {
             detail.push(eta);
@@ -481,60 +461,47 @@ export function tooltipLines(listing, max) {
     return lines;
 }
 
-// The events worth a notification between two polls, each with a key that is the same for every
-// widget instance, so two trays notify once. The first poll has nothing to compare with.
-export function transitions(previous, next) {
+// The notification texts of a signal, from the parameters agent-eta gives it.
+function message(signal, now) {
+    const params = signal.message_params || {};
+    if (signal.kind === "waiting") {
+        return {title: `${params.name} is waiting`, text: `${params.agent} needs you: ${params.waiting_for}`};
+    }
+    if (signal.kind === "overdue" && String(signal.entity_key).startsWith("task:")) {
+        return {title: `${params.label || "A task"} is overdue`,
+                text: `${params.session_name} expected it at ${formatClock(params.due, now)}`};
+    }
+    if (signal.kind === "overdue") {
+        return {title: `${params.name} is overdue`,
+                text: params.turn_label ? `${params.turn_label} was due ${formatClock(params.due, now)}`
+                    : `It was due ${formatClock(params.due, now)}`};
+    }
+    return {title: `${params.agent} usage limit reset`,
+            text: params.reading_pending
+                ? `The recorded ${formatWindow(params.minutes)} window ended. A fresh usage reading is pending.`
+                : `The ${formatWindow(params.minutes)} window has room again`};
+}
+
+// The events worth a notification between two valid listings, by agent-eta's signals. A rising
+// signal notifies when it turns active, or when it shows up active with `notify_on_new`. A falling
+// one notifies when it turns inactive, under the dedupe key it had while active. The key is the same
+// for every widget instance, so two trays notify once. The first poll has nothing to compare with.
+export function signalEvents(previous, next) {
     if (!previous || !next) {
         return [];
     }
+    const before = new Map((previous.notification_signals || []).map(signal => [signal.key, signal]));
     const events = [];
-    const before = new Map(sessionsOf(previous).map(session => [sessionKey(session), session]));
-    for (const session of sessionsOf(next)) {
-        if (session.dormant) {
-            continue;
+    for (const signal of next.notification_signals || []) {
+        const old = before.get(signal.key);
+        let key = null;
+        if (signal.edge === "rising" && signal.active && (old ? !old.active : signal.notify_on_new)) {
+            key = signal.dedupe_key;
+        } else if (signal.edge === "falling" && old && old.active && !signal.active) {
+            key = old.dedupe_key;
         }
-        const key = sessionKey(session);
-        const old = before.get(key);
-        if (session.state === "waiting" && (!old || old.state !== "waiting")) {
-            events.push({
-                kind: "waiting", key: `waiting:${key}:${session.since}`,
-                title: `${session.name} is waiting`,
-                text: `${agentLabel(session)} needs you: ${session.waiting_for || "input"}`,
-            });
-        }
-        // A session whose ETA comes from its tasks runs over with them, and the task says which.
-        if (session.overdue && old && !old.overdue && session.eta_source !== "tasks"
-                && session.state === "working") {
-            events.push({
-                kind: "overdue", key: `overdue:${key}:${session.due}`,
-                title: `${session.name} is overdue`,
-                text: session.turn_label ? `${session.turn_label} was due ${formatClock(session.due, next.now)}`
-                    : `It was due ${formatClock(session.due, next.now)}`,
-            });
-        }
-    }
-    const oldTasks = tasksById(previous);
-    for (const task of (next.tasks || [])) {
-        const old = oldTasks[task.id];
-        if (task.overdue && old && !old.overdue) {
-            events.push({
-                kind: "overdue", key: `overdue:task:${task.id}:${task.due}`,
-                title: `${task.label || "A task"} is overdue`,
-                text: `${task.session_name || task.agent} expected it at ${formatClock(task.due, next.now)}`,
-            });
-        }
-    }
-    const oldWindows = new Map((previous.usage || []).map(window => [`${window.agent}:${window.minutes}`, window]));
-    for (const window of (next.usage || [])) {
-        const old = oldWindows.get(`${window.agent}:${window.minutes}`);
-        if (old && old.reached && !window.reached) {
-            events.push({
-                kind: "reset", key: `reset:${window.agent}:${window.minutes}:${old.resets_at}`,
-                title: `${window.agent} usage limit reset`,
-                text: window.used === null || window.used === undefined
-                    ? `The recorded ${formatWindow(window.minutes)} window ended. A fresh usage reading is pending.`
-                    : `The ${formatWindow(window.minutes)} window has room again`,
-            });
+        if (key) {
+            events.push(Object.assign({kind: signal.kind, key}, message(signal, next.now)));
         }
     }
     return events;

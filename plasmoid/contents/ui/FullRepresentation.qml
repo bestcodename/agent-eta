@@ -16,7 +16,8 @@ PlasmaExtras.Representation {
     id: full
 
     readonly property var groups: Logic.groupSessions(root.listing, root.showDormant, root.showStopped)
-    readonly property var usage: Logic.usageGroups(root.listing ? root.listing.usage : [], root.listing ? root.listing.accounts : [])
+    readonly property var usage: Logic.usageGroups(root.listing)
+    readonly property string dormantAfter: Logic.formatDuration(root.listing ? root.listing.labels.dormant_after : 0)
     readonly property real now: root.listing ? root.listing.now : Date.now() / 1000
 
     Layout.minimumWidth: Kirigami.Units.gridUnit * 24
@@ -63,7 +64,9 @@ PlasmaExtras.Representation {
 
         PlasmaComponents3.Label {
             anchors.fill: parent
-            text: root.actionFailure ? root.actionFailure : root.failure ? root.failure
+            text: root.actionFailure ? root.actionFailure
+                : root.failure && root.updatedAt ? i18n("%1 · showing %2", root.failure, Qt.formatTime(new Date(root.updatedAt), "HH:mm:ss"))
+                : root.failure ? root.failure
                 : root.updatedAt ? i18n("Updated %1", Qt.formatTime(new Date(root.updatedAt), "HH:mm:ss"))
                 : i18n("Loading…")
             elide: Text.ElideRight
@@ -101,7 +104,7 @@ PlasmaExtras.Representation {
                     PlasmaComponents3.ToolButton {
                         visible: modelData.section === Logic.DORMANT_SECTION
                         Layout.leftMargin: Kirigami.Units.largeSpacing
-                        text: root.showDormant ? i18n("Hide dormant sessions") : i18n("Show sessions idle for more than 12 hours")
+                        text: root.showDormant ? i18n("Hide dormant sessions") : i18n("Show sessions idle for more than %1", full.dormantAfter)
                         icon.name: root.showDormant ? "go-up" : "go-down"
                         onClicked: root.showDormant = !root.showDormant
                     }

@@ -74,7 +74,7 @@ class Plasmoid(unittest.TestCase):
         # runner, which some sandboxed Node builds report as one file without its tests.
         result = subprocess.run(["node", str(_HERE / "test_plasmoid.mjs")], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("stopped and dormant sections retain counts", result.stdout)
+        self.assertIn("stopped and dormant ones open independently", result.stdout)
 
 
 if __name__ == "__main__":
