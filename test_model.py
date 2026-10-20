@@ -273,6 +273,13 @@ class Contract(unittest.TestCase):
                          (views["codex:t1"]["available"], views["codex:t1"]["reason"], views["codex:t1"]["targets"]))
         self.assertFalse(views["task:x"]["available"])
 
+    def test_the_owner_of_tasks_without_a_live_session_offers_no_handoff(self):
+        result = model.build_snapshot(now=NOW, sessions=[], tasks=[
+            {"id": "x", "agent": "claude", "label": "run", "eta": NOW + 60, "started": NOW, "holder": {},
+             "session": {"id": "s9"}}])
+        (view,) = [s["handoff"] for s in result.sessions]
+        self.assertEqual((False, "it has no running session"), (view["available"], view["reason"]))
+
     def test_the_listing_carries_schema_1(self):
         data = model.listing(mixed(), lambda s: {"pids": []})
         self.assertEqual(data["schema_version"], 1)

@@ -111,7 +111,10 @@ class Base(unittest.TestCase):
         subprocess.run(git + ["add", "a.txt"], check=True)
         subprocess.run(git + ["commit", "-q", "-m", "init"], check=True)
         self.plan = write(os.path.join(self.tmp, "plan.md"), PLAN)
-        patcher = mock.patch.dict(os.environ, {"CLAUDE_PLAN_PROGRESS_DIR": os.path.join(self.tmp, "progress")})
+        self.codex = write(os.path.join(self.tmp, "bin", "codex"), "#!/bin/sh\nexit 1\n")
+        os.chmod(self.codex, 0o755)
+        patcher = mock.patch.dict(os.environ, {"CLAUDE_PLAN_PROGRESS_DIR": os.path.join(self.tmp, "progress"),
+                                               "AGENT_ETA_CODEX_BIN": self.codex})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -167,12 +170,12 @@ class Plans(Base):
         self.assertIsNone(handoff.codex_plan(os.path.join(self.tmp, "missing.jsonl")))
 
     def test_a_missing_plan_comes_from_a_forked_one_shot_or_needs_preparation(self):
-        env = StubEnv({"codex:t1": self.session(self.process())}, {("codex", "exec", "fork"): (0, "# Forked\n\n## Steps\n\n1. Go\n")})
-        record, _, text = handoff.prepare(("codex", "t1"), "claude", "work", None, env, self.root, dry_run=True)
+        env = StubEnv({"codex:t1": self.session(self.process())}, {(self.codex, "exec", "fork"): (0, "# Forked\n\n## Steps\n\n1. Go\n")})
+        record, _, _, text = handoff.prepare(("codex", "t1"), "claude", "work", None, env, self.root, dry_run=True)
         self.assertEqual(("fork", "planning"), (record["plan_origin"], record["phase"]))
         self.assertIn("--permission-mode", record["command"])
         self.assertIn("# Forked", text)
-        env = StubEnv({"codex:t1": self.session(self.process())}, {("codex", "exec", "fork"): (1, "")})
+        env = StubEnv({"codex:t1": self.session(self.process())}, {(self.codex, "exec", "fork"): (1, "")})
         with self.assertRaisesRegex(handoff.HandoffError, "preparation needed"):
             handoff.prepare(("codex", "t1"), "claude", "work", None, env, self.root, dry_run=True)
 
@@ -183,8 +186,8 @@ class Commands(Base):
                          handoff.destination_command("claude", "work", "/d", "u", True, "go"))
         self.assertEqual(["claude", "--session-id", "u", "--permission-mode", "plan", "go"],
                          handoff.destination_command("claude", None, "/d", "u", False, "go"))
-        self.assertEqual(["codex", "-C", "/d", "go"], handoff.destination_command("codex", None, "/d", None, True, "go"))
-        self.assertEqual(["codex", "-C", "/d", "-s", "read-only", "-a", "on-request", "go"],
+        self.assertEqual([self.codex, "-C", "/d", "go"], handoff.destination_command("codex", None, "/d", None, True, "go"))
+        self.assertEqual([self.codex, "-C", "/d", "-s", "read-only", "-a", "on-request", "go"],
                          handoff.destination_command("codex", None, "/d", None, False, "go"))
 
     def test_the_launcher_quotes_paths_drops_session_markers_and_runs_once(self):
@@ -202,7 +205,7 @@ class Commands(Base):
         write(os.path.join(self.tmp, "progress", "s1.json"),
               json.dumps({"approval": "toolu_1", "done": 1, "total": 3, "plan": self.plan}))
         env = StubEnv({"claude:s1": self.session(self.process(), transcript=transcript)})
-        record, _, _ = handoff.prepare(("claude", "s1"), "codex", None, None, env, self.root)
+        record, _, _, _ = handoff.prepare(("claude", "s1"), "codex", None, None, env, self.root)
         folder = os.path.join(self.root, record["id"])
         self.assertEqual(0o700, os.stat(folder).st_mode & 0o777)
         with open(os.path.join(folder, "plan.md")) as handle:
@@ -212,7 +215,37 @@ class Commands(Base):
         self.assertIn("feature/x at", text)
         self.assertIn("dirty file.txt", text)
         self.assertIn("plan's `## Verification` section", text)
-        self.assertEqual(["codex", "-C", self.repo], record["command"][:3])
+        self.assertEqual([self.codex, "-C", self.repo], record["command"][:3])
+
+    def test_codex_resolves_off_path_and_a_missing_one_refuses_before_anything_changes(self):
+        with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):
+            self.assertEqual(self.codex, handoff.destination_command("codex", None, "/d", None, True, "go")[0])
+        proc = self.process()
+        env = StubEnv({"claude:s1": self.session(proc)})
+        with mock.patch.dict(os.environ, {"AGENT_ETA_CODEX_BIN": os.path.join(self.tmp, "missing")}):
+            code = handoff.run(["claude:s1"], "codex", plan_path=self.plan, env=env, root=self.root)
+        self.assertEqual((1, "refused"), (code, env.printed[-1]["state"]))
+        self.assertIn("codex executable is unavailable", env.printed[-1]["error"])
+        self.assertEqual([], env.events)
+
+    def test_a_codex_destination_registers_by_its_first_user_message(self):
+        def message(role, text):
+            return {"type": "response_item", "payload": {"type": "message", "role": role,
+                                                         "content": [{"type": "input_text", "text": text}]}}
+        preamble = [message("developer", "x" * 1000) for _ in range(70)]
+        rollout = jsonl(os.path.join(self.tmp, "codex", "sessions", "2026", "10", "20", "rollout-x.jsonl"),
+                        preamble + [message("user", "agent-eta handoff h-1: you take over")])
+        self.assertGreater(os.path.getsize(rollout), 70 * 1024)
+        self.assertTrue(handoff.prompted(rollout, "h-1"))
+        self.assertFalse(handoff.prompted(rollout, "h-1", limit=64 * 1024))
+        quoted = jsonl(os.path.join(self.tmp, "quoted.jsonl"), [
+            message("developer", "h-1"), {"type": "response_item", "payload": {"type": "function_call_output",
+                                                                               "output": "h-1"}}, "h-1"])
+        self.assertFalse(handoff.prompted(quoted, "h-1"))
+        with mock.patch.dict(os.environ, {"CODEX_HOME": os.path.join(self.tmp, "codex")}):
+            env = handoff.Env(lambda source: None, lambda: [])
+            self.assertTrue(env.registered({"target": "codex", "id": "h-1", "launched": time.time() - 1}))
+            self.assertFalse(env.registered({"target": "codex", "id": "h-1", "launched": time.time() + 60}))
 
     def test_dry_run_writes_nothing(self):
         env = StubEnv({"claude:s1": self.session(self.process())})
@@ -346,6 +379,29 @@ class Transfer(Base):
         self.assertIn("replaced", result["error"])
         self.assertEqual([], env.events)
         self.assertIsNone(proc.poll())
+
+    def test_the_snapshot_is_refreshed_once_the_source_is_paused(self):
+        transcript = jsonl(os.path.join(self.tmp, "t.jsonl"), [Plans.approval(self, "toolu_1")])
+        progress = os.path.join(self.tmp, "progress", "s1.json")
+        write(progress, json.dumps({"approval": "toolu_1", "done": 1, "total": 3, "plan": self.plan}))
+        proc, calls = self.process(), []
+
+        def working(env):
+            calls.append(1)
+            if len(calls) == 2:
+                write(progress, json.dumps({"approval": "toolu_1", "done": 2, "total": 3, "plan": self.plan}))
+                write(os.path.join(self.repo, "late.txt"), "x")
+            return self.session(proc, transcript=transcript, state="working" if len(calls) == 2 else "idle")
+        env = StubEnv({"claude:s1": working})
+        code = handoff.run(["claude:s1"], "codex", env=env, root=self.root)
+        result = env.printed[-1]
+        self.assertEqual((0, "completed"), (code, result["state"]))
+        with open(os.path.join(self.root, result["id"], "plan.md")) as handle:
+            text = handle.read()
+        self.assertIn("- Progress: 2/3 steps done", text)
+        self.assertIn("- Next step: 3. Third", text)
+        self.assertIn("late.txt", text)
+        self.assertNotIn(".plan.md.tmp", os.listdir(os.path.join(self.root, result["id"])))
 
     def test_a_freezer_that_refuses_fails_the_move_before_anything_changes(self):
         proc = self.process()
