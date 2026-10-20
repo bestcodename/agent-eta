@@ -9,6 +9,7 @@ tests start a real process with fd 1 on a fake tasks/<id>.output, because findin
 process is the part a payload alone cannot prove.
 """
 
+import datetime
 import importlib.machinery
 import importlib.util
 import json
@@ -82,6 +83,32 @@ class Durations(unittest.TestCase):
                               (-720, "-12m"), (-30, "-0m"), (97200, "1d3h")):
             with self.subTest(seconds=seconds):
                 self.assertEqual(eta.format_span(seconds), text)
+
+    def test_a_countdown_is_the_difference_of_the_two_clock_times(self):
+        # Measured on 2026-10-20: the Codex 5-hour window reset at 06:55:06, and at 04:22:30 the modal
+        # read "resets in 2h 32m" while both clocks said 2h 33m.
+        resets_at, now = 1792472106, 1792462950
+        [window] = eta.usage_view(now, [eta.usage_window("codex", 300, 79.0, resets_at, now - 60)])
+        self.assertEqual(eta.usage_cells(window, now)[3:], ("2h33", "06:55"))
+        session = {"agent": "claude", "account": None, "name": "shop", "state": "working", "since": now - 3890,
+                   "due": resets_at, "remaining": int(resets_at - now),
+                   "tasks": [{"label": "ci", "due": resets_at, "remaining": int(resets_at - now)}]}
+        # FOR runs from 03:17:40, 65 minutes on the clock and 64 minutes 50 seconds in seconds.
+        lines = eta.session_lines([session], now)
+        self.assertEqual(lines[1][:4], ("working", "1h05", "2h33", "06:55"))
+        self.assertEqual(lines[2][2:4], ("2h33", "06:55"))
+        self.assertEqual(eta.render([dict(session["tasks"][0], id="ci", agent="claude", session_name="shop")], now)
+                         .splitlines()[1].split()[:2], ["2h33", "06:55"])
+
+    def test_countdowns_follow_the_clock_for_every_second(self):
+        resets_at = 1792472106
+        def minute(epoch):
+            return datetime.datetime.fromtimestamp(epoch, eta.BERLIN).replace(second=0, microsecond=0)
+        for now in range(resets_at - 7200, resets_at):
+            minutes = int((minute(resets_at) - minute(now)).total_seconds() // 60)
+            with self.subTest(now=now):
+                self.assertEqual(eta.format_span(eta.clock_span(resets_at, now)),
+                                 "<1m" if minutes < 1 else eta.format_span(minutes * 60))
 
 
 class StateTest(unittest.TestCase):
