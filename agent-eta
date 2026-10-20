@@ -77,6 +77,7 @@ from zoneinfo import ZoneInfo
 # The executable is installed through a symlink; its shared helpers live beside its real path.
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import agent_eta_accounts as accounts_api
+import agent_eta_handoff as handoff_api
 import agent_eta_konsole as konsole_api
 import agent_eta_model as model
 from agent_eta_model import (DORMANT_AFTER, DORMANT_SECTION, OVERDUE_MIN, UNKNOWN_TTL, account_note,
@@ -1044,6 +1045,7 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
             "since": since,
             "cwd": record.get("cwd"),
             "resume_at": resume_at,
+            "app": app,
         })
     return found
 
@@ -1475,9 +1477,11 @@ def snapshot(directory, now, tasks=None, usage=None, accounts=()):
     turn ended is deleted here."""
     tasks = collect_tasks(directory, now) if tasks is None else tasks
     sessions, dsh_tasks, turns = collect_sessions(directory, now)
+    for session in sessions:
+        session["gate_reason"] = handoff_gate(session, sessions)[2] if session["agent"] in ("claude", "codex") else None
     result = model.build_snapshot(now=now, sessions=sessions, tasks=list(tasks) + dsh_tasks,
                                   usage=usage_view(now) if usage is None else usage, accounts=accounts,
-                                  turns=turns)
+                                  turns=turns, handoffs=handoff_records())
     for task_id in result.prune_tasks:
         remove(entry_path(directory, task_id))
     return result
@@ -1860,6 +1864,54 @@ def cmd_turn(args):
 
 # --- main -----------------------------------------------------------------------------
 
+def handoff_gate(session, sessions):
+    """The process a handoff pauses for a session, as (pid, start, reason). A Claude Code session
+    has its own process. A Codex thread qualifies only when no other thread shares its process,
+    which rules out every chat of the desktop app and its single app-server."""
+    if session["agent"] == "claude":
+        return session.get("pid"), proc_start(session["pid"]) if session.get("pid") else None, None
+    app = session.get("app") or {}
+    if session["agent"] != "codex" or not app.get("pid"):
+        return None, None, "it has no process of its own"
+    shared = [s for s in sessions if s is not session and (s.get("app") or {}).get("pid") == app["pid"]]
+    try:
+        with open("/proc/%d/cmdline" % app["pid"], "rb") as handle:
+            server = b"app-server" in handle.read()
+    except OSError:
+        return None, None, "its process is gone"
+    if shared or server:
+        return None, None, "desktop chats cannot be gated"
+    return app["pid"], app.get("start"), None
+
+
+def handoff_records():
+    """The latest handoff record of each source, or none while the handoff folder does not exist."""
+    root = os.environ.get("AGENT_ETA_HANDOFF_DIR") or os.path.expanduser("~/.local/state/agent-eta/handoff")
+    return handoff_api.latest_by_source(root) if os.path.isdir(root) else {}
+
+
+def handoff_inspect(source):
+    """A live session for agent_eta_handoff, or None."""
+    result = snapshot(state_dir(), time.time())
+    for session in result.sessions:
+        if session["agent"] != source[0] or session.get("id") != source[1]:
+            continue
+        pid, start, reason = handoff_gate(session, result.sessions)
+        transcripts = claude_transcript_paths(source[1]) if source[0] == "claude" else []
+        return {"state": session["activity_state"], "waiting_for": session.get("waiting_for"),
+                "running": model.has_running_task(session), "gate": pid, "proc_start": start,
+                "gate_reason": reason, "pid": pid, "cwd": session.get("cwd") or os.getcwd(),
+                "account": session.get("account"), "transcript": transcripts[0] if transcripts else None,
+                "rollout": codex_rollout(source[1]) if source[0] == "codex" else None}
+    return None
+
+
+def cmd_handoff(args):
+    env = handoff_api.Env(handoff_inspect, claude_accounts)
+    return handoff_api.run(args.sources, args.to, account=args.account, plan_path=args.plan, wait=args.wait,
+                           dry_run=args.dry_run, env=env)
+
+
 def eta_type(text):
     try:
         return parse_eta_arg(text)
@@ -1892,6 +1944,7 @@ def build_parser():
     done = sub.add_parser("done", help="remove entries recorded with add")
     done.add_argument("ids", nargs="+")
     accounts_api.add_parser(sub)
+    handoff_api.add_parser(sub)
     konsole_api.add_parser(sub)
     return parser
 
@@ -1902,11 +1955,11 @@ def main(argv=None):
         argv.insert(0, "list")
     args = build_parser().parse_args(argv)
     handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done,
-                "turn": cmd_turn, "account": accounts_api.account_action,
+                "turn": cmd_turn, "handoff": cmd_handoff, "account": accounts_api.account_action,
                 "tab": konsole_api.tab_action}
     try:
         return handlers[args.cmd](args)
-    except (StateDirError, AccountError) as exc:
+    except (StateDirError, AccountError, handoff_api.HandoffError) as exc:
         print("agent-eta: %s" % exc, file=sys.stderr)
         return 1
 

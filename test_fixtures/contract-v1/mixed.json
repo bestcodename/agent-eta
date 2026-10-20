@@ -362,6 +362,14 @@
       "due": null,
       "eta_source": null,
       "eta_started": null,
+      "handoff": {
+        "available": true,
+        "reason": null,
+        "status": null,
+        "targets": [
+          "claude"
+        ]
+      },
       "id": "s-t-1",
       "key": "codex:s-t-1",
       "light": "attention",
@@ -388,6 +396,15 @@
       "due": null,
       "eta_source": null,
       "eta_started": null,
+      "handoff": {
+        "available": true,
+        "reason": null,
+        "status": null,
+        "targets": [
+          "codex",
+          "claude"
+        ]
+      },
       "id": "s-3",
       "key": "claude:3",
       "light": "attention",
@@ -413,6 +430,12 @@
       "due": 1760000300,
       "eta_source": "tasks",
       "eta_started": 1759999700,
+      "handoff": {
+        "available": false,
+        "reason": "only Claude Code and Codex sessions move",
+        "status": null,
+        "targets": []
+      },
       "id": null,
       "key": "task:reminder",
       "light": "off",
@@ -440,6 +463,15 @@
       "due": null,
       "eta_source": null,
       "eta_started": null,
+      "handoff": {
+        "available": true,
+        "reason": null,
+        "status": null,
+        "targets": [
+          "codex",
+          "claude"
+        ]
+      },
       "id": "s-4",
       "key": "claude:4",
       "light": "caution",
@@ -466,6 +498,15 @@
       "due": 1759999880,
       "eta_source": "turn",
       "eta_started": 1759998800,
+      "handoff": {
+        "available": true,
+        "reason": null,
+        "status": null,
+        "targets": [
+          "codex",
+          "claude"
+        ]
+      },
       "id": "s-2",
       "key": "claude:2",
       "light": "caution",
@@ -491,6 +532,15 @@
       "due": 1760000480,
       "eta_source": "tasks",
       "eta_started": 1759999880,
+      "handoff": {
+        "available": true,
+        "reason": null,
+        "status": null,
+        "targets": [
+          "codex",
+          "claude"
+        ]
+      },
       "id": "s-1",
       "key": "claude:1",
       "light": "active",
@@ -518,6 +568,14 @@
       "due": 1760001200,
       "eta_source": "limit",
       "eta_started": 1759999940,
+      "handoff": {
+        "available": true,
+        "reason": null,
+        "status": null,
+        "targets": [
+          "claude"
+        ]
+      },
       "id": "s-t-2",
       "key": "codex:s-t-2",
       "light": "off",
@@ -544,6 +602,15 @@
       "due": null,
       "eta_source": null,
       "eta_started": null,
+      "handoff": {
+        "available": true,
+        "reason": null,
+        "status": null,
+        "targets": [
+          "codex",
+          "claude"
+        ]
+      },
       "id": "s-5",
       "key": "claude:5",
       "light": "caution",

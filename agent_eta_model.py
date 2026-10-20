@@ -435,13 +435,27 @@ def signals(sessions, tasks, windows):
 
 # --- snapshot -----------------------------------------------------------------------------
 
-def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None):
+def handoff_view(session, handoffs):
+    """Whether `agent-eta handoff` can move a session, where to, and its latest move. A collector
+    that found no process to pause sets `gate_reason`."""
+    if session.get("agent") not in HANDOFF_TARGETS or not session.get("id"):
+        return {"available": False, "reason": "only Claude Code and Codex sessions move", "targets": [],
+                "status": None}
+    record = handoffs.get("%s:%s" % (session["agent"], session["id"]))
+    status = {key: record.get(key) for key in ("id", "state", "target", "error")} if record else None
+    reason = session.get("gate_reason")
+    return {"available": not reason, "reason": reason, "targets": list(HANDOFF_TARGETS[session["agent"]]),
+            "status": status}
+
+
+def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, handoffs=None):
     """One snapshot from the collected inputs, none of which it changes.
 
     A task whose session is not known, such as a local run, stands as a session of its own. A
     Codex command left without PostToolUse when its turn ended goes to `prune_tasks`. A session
     that does not work while its account has a reached usage limit counts as stopped until that
-    limit resets. `turns` maps a session_key() to the turn ETA record of that session.
+    limit resets. `turns` maps a session_key() to the turn ETA record of that session, and
+    `handoffs` a handoff source such as `codex:<thread>` to its latest handoff record.
     """
     sessions = copy.deepcopy(list(sessions))
     accounts = [dict(account, key="account:%s" % account["id"]) for account in copy.deepcopy(list(accounts))]
@@ -481,6 +495,7 @@ def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None):
         session["dormant"] = dormant(session, now)
         session["section"] = DORMANT_SECTION if session["dormant"] else section(session)
         session["activity_state"] = activity_state(session)
+        session["handoff"] = handoff_view(session, handoffs or {})
         session["activity_label"] = activity_label(session)
         session["light"] = session_light(session)
     sections = tuple({"index": index, "title": title,
@@ -497,6 +512,8 @@ def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None):
 # The version of the `list --json` contract. It grows only by additions, and anything else is a
 # new version the widget refuses until it is updated.
 SCHEMA_VERSION = 1
+# Where `agent-eta handoff` moves a session of each agent. Claude to Claude stays a resume.
+HANDOFF_TARGETS = {"claude": ("codex", "claude"), "codex": ("claude",)}
 
 
 def labels():

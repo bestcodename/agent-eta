@@ -140,6 +140,15 @@
       "due": 1760000030,
       "eta_source": "turn",
       "eta_started": 1759999400,
+      "handoff": {
+        "available": true,
+        "reason": null,
+        "status": null,
+        "targets": [
+          "codex",
+          "claude"
+        ]
+      },
       "id": "s-2",
       "key": "claude:2",
       "light": "active",
@@ -167,6 +176,15 @@
       "due": null,
       "eta_source": null,
       "eta_started": null,
+      "handoff": {
+        "available": true,
+        "reason": null,
+        "status": null,
+        "targets": [
+          "codex",
+          "claude"
+        ]
+      },
       "id": "s-3",
       "key": "claude:3",
       "light": "active",

@@ -21,6 +21,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `activity_label`, semantic `light`, `summary`, `sections`, `usage_groups`, `notification_signals` and `labels`
 - Contract fixtures in `test_fixtures/contract-v1/`, written by the model and read by the JavaScript and QML tests
 - QML tests for contract rendering and for `Runner.qml` timeouts and late answers
+- `agent-eta handoff SOURCE... --to claude|codex` hands Claude Code sessions and Codex CLI threads over to the
+  other provider with their plan, phase, progress, branch and dirty paths, gated by SIGSTOP and confirmed by the
+  destination's registration; Claude to Claude delegates to `claude-account handoff --only`
+- `agent_eta_handoff.py` with `test_handoff.py`, which drives the gate with real processes
+- Contract sessions carry `handoff` with `available`, `reason`, `targets` and the latest move's `status`
 
 ### Changed
 

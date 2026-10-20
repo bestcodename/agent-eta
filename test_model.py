@@ -258,6 +258,21 @@ SCENARIOS = {"empty": lambda: build(), "mixed": mixed, "signals-before": before,
 
 
 class Contract(unittest.TestCase):
+    def test_handoff_availability_comes_from_the_gate_and_the_latest_record(self):
+        sessions = [{"agent": "claude", "id": "s1", "pid": 1, "name": "a", "state": "idle", "since": NOW, "cwd": "/w"},
+                    {"agent": "codex", "id": "t1", "name": "b", "state": "idle", "since": NOW, "cwd": "/w",
+                     "gate_reason": "desktop chats cannot be gated"}]
+        result = model.build_snapshot(now=NOW, sessions=sessions, tasks=[{"id": "x", "agent": "other",
+                                      "label": "run", "eta": NOW + 60, "started": NOW, "holder": {}}],
+                                      handoffs={"claude:s1": {"id": "h1", "state": "failed", "target": "codex",
+                                                              "error": "did not register"}})
+        views = {s["key"]: s["handoff"] for s in result.sessions}
+        self.assertEqual((True, ["codex", "claude"], "failed"),
+                         (views["claude:1"]["available"], views["claude:1"]["targets"], views["claude:1"]["status"]["state"]))
+        self.assertEqual((False, "desktop chats cannot be gated", ["claude"]),
+                         (views["codex:t1"]["available"], views["codex:t1"]["reason"], views["codex:t1"]["targets"]))
+        self.assertFalse(views["task:x"]["available"])
+
     def test_the_listing_carries_schema_1(self):
         data = model.listing(mixed(), lambda s: {"pids": []})
         self.assertEqual(data["schema_version"], 1)
