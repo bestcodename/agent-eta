@@ -12,9 +12,11 @@ process is the part a payload alone cannot prove.
 import datetime
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import pathlib
+import pty
 import signal
 import subprocess
 import sys
@@ -541,6 +543,78 @@ class Sessions(StateTest):
         self.hook(self.codex_event("SessionEnd"))
         self.assertEqual(self.view(), [])
 
+    def codex_process(self, *arguments, terminal=True):
+        # A fresh process with the native client's comm, so hook ancestry and PID identity are real.
+        script = self.root / "codex-process.py"
+        script.write_text("\n".join([
+            "import ctypes, fcntl, os, subprocess, sys, termios",
+            "ctypes.CDLL(None).prctl(15, b'codex', 0, 0, 0)",
+            "if 'AGENT_ETA_TEST_TTY_FD' in os.environ:",
+            "    fcntl.ioctl(int(os.environ['AGENT_ETA_TEST_TTY_FD']), termios.TIOCSCTTY, 0)",
+            "print('ready', flush=True)",
+            "for line in sys.stdin:",
+            "    result = subprocess.run([sys.executable, %r, 'hook'], input=line, text=True)" % str(_SRC),
+            "    print(result.returncode, flush=True)",
+        ]) + "\n")
+        master, slave = pty.openpty() if terminal else (None, None)
+        env = dict(self.env, AGENT_ETA_TEST_TTY_FD=str(slave)) if terminal else self.env
+        child = subprocess.Popen([sys.executable, str(script), *arguments], env=env, text=True,
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, start_new_session=True,
+                                 pass_fds=(slave,) if terminal else ())
+        if slave is not None:
+            os.close(slave)
+        def stop():
+            child.stdin.close()
+            child.wait(timeout=5)
+            child.stdout.close()
+            if master is not None:
+                os.close(master)
+        self.addCleanup(stop)
+        self.assertEqual(child.stdout.readline().strip(), "ready")
+        return child
+
+    def test_codex_terminal_and_shared_server_registration_lineage_and_lifecycle(self):
+        for kind, arguments, terminal in (("window", ["--no-daemon", "-C", "/work/app-server"], True),
+                                          ("unavailable", ["app-server"], False)):
+            with self.subTest(kind=kind):
+                child = self.codex_process(*arguments, terminal=terminal)
+                for event, state, reason in (("UserPromptSubmit", "working", None),
+                                             ("PermissionRequest", "waiting", "permission"),
+                                             ("PreToolUse", "working", None), ("Stop", "idle", None)):
+                    payload = self.codex_event(event, tool_name="Bash", tool_use_id="call_9",
+                                               tool_input={"command": "true"})
+                    child.stdin.write(json.dumps(payload) + "\n")
+                    child.stdin.flush()
+                    self.assertEqual(child.stdout.readline().strip(), "0")
+                    data = json.loads(self.cli("list", "--json", "--all").stdout)
+                    [session] = data["sessions"]
+                    self.assertEqual((session["state"], session["waiting_for"], session["navigation"]["kind"]),
+                                     (state, reason, kind))
+                    self.assertEqual(session["activity_state"], state)
+                    self.assertEqual(session["app"], {"pid": child.pid, "start": eta.proc_start(child.pid)})
+                    self.assertEqual(session["pids"][:2], [child.pid, os.getpid()] if kind == "window" else [])
+                child.stdin.write(json.dumps(self.codex_event("SessionEnd")) + "\n")
+                child.stdin.flush()
+                self.assertEqual(child.stdout.readline().strip(), "0")
+                self.assertEqual(json.loads(self.cli("list", "--json", "--all").stdout)["sessions"], [])
+
+    def test_codex_cli_that_exits_without_session_end_is_removed(self):
+        child = self.codex_process("--no-daemon")
+        child.stdin.write(json.dumps(self.codex_event("UserPromptSubmit")) + "\n")
+        child.stdin.flush()
+        self.assertEqual(child.stdout.readline().strip(), "0")
+        self.assertEqual(len(self.view()), 1)
+        child.terminate()
+        child.wait(timeout=5)
+        self.assertEqual(json.loads(self.cli("list", "--json", "--all").stdout)["sessions"], [])
+
+    def test_codex_reused_host_pid_is_removed_before_it_can_supply_a_window(self):
+        child = self.codex_process("--no-daemon")
+        path = eta.codex_session_path(self.dir, "thread-1")
+        eta.write_atomic(path, {"id": "thread-1", "state": "working", "updated": int(time.time()),
+                                "app": {"pid": child.pid, "start": str(int(eta.proc_start(child.pid)) + 1)}})
+        self.assertEqual(json.loads(self.cli("list", "--json", "--all").stdout)["sessions"], [])
+
     def test_codex_open_question_in_the_transcript_means_waiting(self):
         folder = self.codex / "sessions" / "2026" / "10" / "03"
         folder.mkdir(parents=True)
@@ -1003,6 +1077,68 @@ class Sessions(StateTest):
         self.assertEqual(eta.project_name(str(root)), "shop")
         (root / ".idea" / ".name").write_text("Shop Live\n")
         self.assertEqual(eta.project_name(str(root)), "Shop Live")
+
+
+class CodexNavigation(unittest.TestCase):
+    def target(self, *, arguments=b"codex\0--no-daemon\0", terminal=1, desktop=False,
+               alive=(True, True), start="42", readable=True, nested=False, **fields):
+        session = dict(id="thread/a b", app={"pid": 101, "start": start}, **fields)
+        def open_proc(path, *args, **kwargs):
+            if not readable:
+                raise OSError("process is gone")
+            if path.endswith("/cmdline"):
+                return io.BytesIO(arguments)
+            if path.endswith("/stat"):
+                return io.StringIO("101 (codex) S 100 101 101 %d 0" % terminal)
+            raise AssertionError(path)
+        with unittest.mock.patch.object(eta, "pid_alive", side_effect=alive), \
+                unittest.mock.patch.object(eta, "comm_of", side_effect=lambda pid:
+                    "codex" if pid == 101 or nested and pid == 102 else "ChatGPT" if desktop else "konsole"), \
+                unittest.mock.patch.object(eta, "lineage", return_value=[101, 102, 100] if nested else [101, 100]), \
+                unittest.mock.patch.object(eta.os, "readlink", return_value=(
+                    "/usr/lib/chatgpt/ChatGPT (deleted)" if desktop else "/usr/bin/konsole")), \
+                unittest.mock.patch("builtins.open", side_effect=open_proc):
+            return eta.codex_navigation(session)
+
+    def test_a_terminal_owned_by_the_current_cli_supplies_its_window_lineage(self):
+        self.assertEqual(self.target(), ({"kind": "window"}, [101, 100]))
+
+    def test_a_gui_ancestor_identifies_desktop_even_for_a_thread_created_in_cli(self):
+        target, pids = self.target(arguments=b"codex\0app-server\0", terminal=0, desktop=True,
+                                    source="cli", originator="codex-tui")
+        self.assertEqual(target, {"kind": "url", "url": "codex://threads/thread%2Fa%20b"})
+        self.assertEqual(pids, [])
+
+    def test_a_desktop_remote_bridge_is_not_a_terminal_client(self):
+        target, pids = self.target(arguments=b"codex\0exec-server\0--remote\0https://host\0",
+                                    terminal=0, desktop=True)
+        self.assertEqual(target["kind"], "url")
+        self.assertEqual(pids, [])
+
+    def test_a_shared_server_is_not_the_terminal_displaying_its_threads(self):
+        for terminal in (0, 1):
+            with self.subTest(terminal=terminal):
+                target, pids = self.target(arguments=b"codex\0app-server\0", terminal=terminal)
+                self.assertEqual(target["kind"], "unavailable")
+                self.assertIn("server-hosted", target["reason"])
+                self.assertEqual(pids, [])
+
+    def test_a_headless_client_has_no_invented_window_or_desktop_link(self):
+        target, pids = self.target(terminal=0)
+        self.assertEqual(target["kind"], "unavailable")
+        self.assertEqual(pids, [])
+
+    def test_a_nested_runtime_does_not_borrow_the_outer_desktop_window(self):
+        target, pids = self.target(arguments=b"codex\0app-server\0", terminal=0, desktop=True, nested=True)
+        self.assertEqual(target["kind"], "unavailable")
+        self.assertEqual(pids, [])
+
+    def test_missing_or_stale_process_identity_never_supplies_a_target(self):
+        for fields in ({"start": None}, {"alive": (False,)}, {"alive": (True, False)}, {"readable": False}):
+            with self.subTest(fields=fields):
+                target, pids = self.target(**fields)
+                self.assertEqual(target["kind"], "unavailable")
+                self.assertEqual(pids, [])
 
 
 class Usage(StateTest):

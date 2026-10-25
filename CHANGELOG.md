@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-10-25
+
+### Fixed
+
+- Codex CLI rows focus their existing terminal window and Konsole tab instead of opening the desktop app;
+  desktop rows keep their thread links. The additive `navigation` field in `list --json` identifies the target
+  from verified current process ownership. Shared or remote hosts without a proven UI association explain why
+  navigation is unavailable, and older listings retain their existing behaviour
+- The QML CI job installs the Plasma5Support QML module and executable data engine required by the runner tests
+
 ## [1.3.1] - 2026-10-25
 
 ### Fixed

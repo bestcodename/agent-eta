@@ -82,3 +82,9 @@ the log database only.
   QML suite passed after sandbox access was changed. Laptop 1.1.2 red question status was confirmed
   live by the user; answering cleared the wait. Desktop native hook review and QML dependency installation remain
   pending. Confirm idle display after the current turn ends.
+- 2026-10-22, TODO #17 completed locally on `fix/codex-cli-navigation`: Codex navigation is inferred from verified
+  current process ownership. All 218 Python tests (including QML) and 27 JavaScript tests pass. After installation
+  and Plasma reload, the live row action switched from a temporary shell tab to the existing CLI's Konsole tab and
+  raised its window; the desktop thread URL was accepted and activated the desktop app. The temporary tab was closed.
+  No Agent ETA QML errors appeared in the reload journal. Shared/remote servers without a proven local UI association
+  explain that navigation is unavailable; the inspected native protocol exposes no terminal PID mapping.

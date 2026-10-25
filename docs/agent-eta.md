@@ -107,7 +107,12 @@ and the web app that TODO.md proposes. Since 0.67.0 it carries what the widget w
 - A session has `section`, which is 0 for the ones that need you, 1 for working, 2 for stopped by a usage limit and
   3 for dormant, in the order the text list prints them.
 - A session has `pids`, its own pid or its first task's holder followed by their ancestors, ending before pid 1 and
-  the user's `systemd`. Codex threads have none.
+  the user's `systemd`. Standalone Codex CLI sessions start with their hook host's pid; desktop threads have none.
+- A Codex session has `navigation`: `{"kind": "window"}` uses its existing `pids`, `{"kind": "url", "url": "…"}`
+  opens its desktop thread, and `{"kind": "unavailable", "reason": "…"}` explains why no reliable target exists.
+  Python decides from the current hook host's PID and start time, controlling terminal and desktop executable
+  ancestry, independently of the transcript's original client. An `app-server` alone proves no desktop or terminal
+  association. This is additive in contract schema 1; an older listing without the field keeps its thread links.
 - A session has `project_root` and `project_name`. The root is the first directory below `~/PhpstormProjects`, else the
   nearest repository root, else the working directory. The name is PhpStorm's `.idea/.name` when the project was
   renamed there, else the root's directory name.
@@ -154,7 +159,7 @@ matching `updated_at` in its `threads` row. The next `task_started` or `user_mes
 gets no `PostToolUse`, because Codex polls it no more, and its app-server lives on. The reader therefore deletes the
 entries of an idle or stopped thread that predate the end of its turn, so rejected commands missing PostToolUse
 cannot keep a completed chat in the working section. Manual reminders and live PID or lock jobs are retained. On
-2026-10-04 at 02:27 the one command of the failed turn had no process left. A thread appears with its first hook call, and it disappears with its Codex app-server, after
+2026-10-04 at 02:27 the one command of the failed turn had no process left. A thread appears with its first hook call, and it disappears with its Codex CLI or app-server, after
 `SessionEnd`, or after twelve hours without any hook call. One that claims to work or wait but has been silent for six
 hours most likely missed its `Stop`, and it counts as idle. A thread archived in the app, marked by `archived` in the
 `threads` table of `~/.codex/state_<n>.sqlite`, is left out while it stays archived, and it comes back once unarchived.
@@ -562,9 +567,14 @@ and what the hook did. The command text never goes there. The log rotates at 256
     over D-Bus (`qdbus6`, else `qdbus`, overridden by `AGENT_ETA_QDBUS_BIN`), makes it the current tab of its window and
     prints the caption titles before and after the switch, and the window with one of those captions wins. Without a
     Konsole tab the call exits 1 and the jump goes on as before. Every PhpStorm window belongs to the same process, so
-    among several it takes the one whose title starts with `project_name`. For a Codex thread
+    among several it takes the one whose title starts with `project_name`. A standalone Codex CLI session follows
+    the same terminal route; without a matching window its jump is disabled. For a desktop Codex thread
     it is *Open thread in Codex*, which opens `codex://threads/<id>` in the ChatGPT app. For a dsh session it is *Open
     dsh web UI*, which opens the `web_url` of its process, for example `http://127.0.0.1:3080/`.
+    A Codex shared server or remote execution host without a proven local UI association has an unavailable jump
+    with its reason in the menu. Clicking its row keeps the popup open and shows the reason in the footer.
+    There is no client selector or terminal picker. A server's own terminal is not assumed to display its threads,
+    and a nested runtime never borrows an outer Codex runtime's desktop window.
   - *Open in PhpStorm* runs `phpstorm <project_root>`, which is always the project root and never a subdirectory.
   - *Open folder* opens the working directory in the file manager.
   - *Copy resume command* puts `cd <cwd> && claude-account run <account> --resume <id>` on the clipboard, or
@@ -711,6 +721,9 @@ plasmawindowed com.github.bestcodename.agenteta    # the overview in a window, w
 - The tray widget's jump focuses the PhpStorm window of the project, but it cannot select the PhpStorm terminal tab the
   session runs in. Konsole tabs are selected. A session of the Claude Code daemon has no window, so its jump is
   disabled.
+- Shared and remote Codex servers do not establish which local terminal displays a thread. The protocol generated
+  by codex-cli 0.163.0-alpha.11.1 on 2026-10-22 exposes thread metadata but no terminal PID mapping. Without verified
+  desktop ancestry, those rows keep their state and show an unavailable navigation target instead of guessing.
 - plasmashell loads a changed widget only after a restart.
 - *Open dsh web UI* opens the root of the web UI in a new browser tab, not the session, because dsh has no link to a
   single session.
@@ -760,14 +773,29 @@ the current existing thread's deep link. Those are basic checks, not full valida
 folder picking or navigation. On 2026-10-18 *Jump to window* raised the right Konsole window for two sessions in
 one Konsole process on the notebook under Wayland, checked by hand.
 
+On 2026-10-22 the installed navigation components were checked through `plasmawindowed` against the real Wayland
+task model. Starting from a temporary shell tab, the production session row's click handler selected the existing
+Codex CLI's Konsole tab and activated its window. The desktop thread URL was accepted and the desktop app became
+active. The temporary tab was closed, the updated widget was installed and Plasma was reloaded, and the check passed
+again against the installed components. The reload journal contained no Agent ETA QML errors. Lifecycle states are
+covered by the process/pty fixtures described below; this check did not submit native model turns or approval prompts.
+
 `test_qml.py` runs the QML tests in `test_qml/` with Qt Quick Test, offscreen. `tst_windowjumper.qml` drives
 `WindowJumper.qml` against a stub `org.kde.taskmanager` from `test_qml/stubs` and a launcher that records its
 commands. It covers the `agent-eta tab` call and its titles picking the Konsole window, a failed call falling back,
-a session without a window, the PhpStorm project choice, and Codex and dsh running nothing. `tst_sessionrow.qml`
+a session without a window, the PhpStorm project choice, Codex CLI terminal navigation without a desktop link,
+desktop Codex and dsh opening their links without a tab command, older listings, and unavailable or unknown targets
+never falling back to desktop links. The Python lifecycle test runs hooks under fresh processes named `codex`,
+with a real controlling pty for the CLI fixture, checks CLI and shared-server JSON through working, permission waiting
+and idle, and checks removal on SessionEnd, process exit and PID reuse. Resolver tests cover desktop ancestry,
+remote bridges, a changed interface despite the transcript's original client, nested runtimes, shared servers
+with and without a controlling terminal, and missing or changing process identity. `tst_sessionrow.qml`
 clicks `SessionRow.qml` with the real Plasma components and covers the jump on a click, the hover, and the menu on a
 right click for the session, for a task row and for a session without an id. The test is skipped without the Qt 6
 `qmltestrunner` (Debian `qt6-declarative-dev-tools`, `qml6-module-qttest`). CI runs it in a `debian:trixie`
-container, because Ubuntu runners have no Plasma 6 modules.
+container, because Ubuntu runners have no Plasma 6 modules. It explicitly installs
+`qml6-module-org-kde-plasma-plasma5support` and `plasma-workspace`, which provide the command data source and
+executable engine used by `Runner.qml`.
 
 The suite covers duration parsing in both languages, the sort order, every holder alive and dead, `run` with exit codes
 and a forwarded SIGTERM, `add` and `done`, the Claude Code hook against a real process whose fd 1 points at a fake

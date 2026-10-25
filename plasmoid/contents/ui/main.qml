@@ -116,7 +116,11 @@ PlasmoidItem {
     // Runs one of the row actions on a session or task. See SessionRow.qml for the menu.
     function act(action, session, task) {
         if (action === "jump") {
-            jumper.jump(session);
+            if (!jumper.jump(session)) {
+                actionFailure = jumper.unavailableReason(session) || i18n("Could not open the session.");
+                return;
+            }
+            actionFailure = "";
         } else if (action === "ide") {
             runner.detach("phpstorm " + Logic.shellQuote(session.project_root));
         } else if (action === "folder") {
