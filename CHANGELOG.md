@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   desktop rows keep their thread links. The additive `navigation` field in `list --json` identifies the target
   from verified current process ownership. Shared or remote hosts without a proven UI association explain why
   navigation is unavailable, and older listings retain their existing behaviour
+- The QML CI job installs the Plasma5Support module required by the runner tests
 
 ## [1.3.0] - 2026-10-20
 

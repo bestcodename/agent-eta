@@ -780,7 +780,8 @@ with and without a controlling terminal, and missing or changing process identit
 clicks `SessionRow.qml` with the real Plasma components and covers the jump on a click, the hover, and the menu on a
 right click for the session, for a task row and for a session without an id. The test is skipped without the Qt 6
 `qmltestrunner` (Debian `qt6-declarative-dev-tools`, `qml6-module-qttest`). CI runs it in a `debian:trixie`
-container, because Ubuntu runners have no Plasma 6 modules.
+container, because Ubuntu runners have no Plasma 6 modules. It explicitly installs
+`qml6-module-org-kde-plasma-plasma5support`, which `Runner.qml` needs for its command data source.
 
 The suite covers duration parsing in both languages, the sort order, every holder alive and dead, `run` with exit codes
 and a forwarded SIGTERM, `add` and `done`, the Claude Code hook against a real process whose fd 1 points at a fake
