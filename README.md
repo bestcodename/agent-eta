@@ -38,6 +38,9 @@ agent-eta handoff claude:<session> --to codex   # continue a session's plan in C
 A handoff refuses a folder the destination client does not trust yet, and its message names the command that opens
 the client there once to accept the trust question.
 
+Codex CLI rows focus their existing terminal window and Konsole tab. Desktop threads open in the app; a row without
+a verified window or thread link explains why navigation is unavailable.
+
 The hooks for Claude Code and Codex, every command and the widget are described in
 [docs/agent-eta.md](docs/agent-eta.md).
 

@@ -246,7 +246,9 @@ PlasmaExtras.Representation {
         }
 
         PlasmaExtras.MenuItem {
-            text: actions.session && actions.session.agent === "codex" ? i18n("Open thread in Codex")
+            readonly property var navigation: Logic.codexNavigation(actions.session)
+            text: navigation && navigation.kind === "unavailable" ? i18n("Jump unavailable: %1", navigation.reason)
+                : navigation && navigation.kind === "url" ? i18n("Open thread in Codex")
                 : actions.session && actions.session.agent === "dsh" ? i18n("Open dsh web UI")
                 : i18n("Jump to window")
             icon: "window"

@@ -427,6 +427,20 @@ function titleProject(title) {
     return String(title || "").split(" – ")[0].trim();
 }
 
+// Python chooses Codex's UI target. Only older listings without that field keep thread links.
+export function codexNavigation(session) {
+    if (!session || session.agent !== "codex") return null;
+    if (session.navigation === undefined && session.id) {
+        return {kind: "url", url: "codex://threads/" + encodeURIComponent(session.id)};
+    }
+    const target = session.navigation;
+    if (target && (target.kind === "window" || target.kind === "url" && typeof target.url === "string" && target.url)) {
+        return target;
+    }
+    return {kind: "unavailable", reason: target && typeof target.reason === "string" && target.reason
+        || "No verified navigation target."};
+}
+
 // The window to raise for a session, as an index into `windows` ({index, pid, title}), or -1. The
 // nearest process in the session's lineage that owns a window wins. One process may own several
 // windows. Konsole runs all its windows in one process, so the caption titles `agent-eta tab` reports

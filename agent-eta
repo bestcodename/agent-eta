@@ -77,6 +77,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 # The executable is installed through a symlink; its shared helpers live beside its real path.
@@ -920,7 +921,7 @@ def fullest_reset(limits):
 
 
 def codex_sessions(directory, now, names, prune=True, threads=None):
-    """Every Codex thread its hooks have reported, while its app-server runs.
+    """Every Codex thread its hooks have reported, while its CLI or app-server runs.
 
     A thread whose hooks stayed silent for SESSION_IDLE_TTL is dropped, and one that has
     claimed to work or wait for SESSION_STALE without a word counts as idle. A thread that is
@@ -1314,16 +1315,67 @@ def project_name(root):
     return name or os.path.basename(root.rstrip(os.sep))
 
 
+def codex_navigation(session):
+    """The current UI target and its lineage, independently of the thread's execution host.
+
+    An app-server can belong to the desktop or to terminal clients. Only a standalone process
+    with a controlling terminal proves a terminal target; the desktop needs its GUI ancestor.
+    Historical transcript origins and project names cannot establish either association.
+    """
+    def unavailable(reason):
+        return {"kind": "unavailable", "reason": reason}, []
+
+    app = session.get("app") or {}
+    pid, start = app.get("pid"), app.get("start")
+    if not pid or not start or not pid_alive(pid, start) or comm_of(pid) != "codex":
+        return unavailable("No verified Codex process.")
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as handle:
+            arguments = handle.read().split(b"\0")
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
+            terminal = int(handle.read().rsplit(")", 1)[1].split()[4])
+    except (OSError, ValueError, IndexError):
+        return unavailable("Codex process changed or exited.")
+    pids = lineage(pid)
+    desktop = False
+    for parent in pids[1:]:
+        # A server launched by another Codex runtime does not display its threads in that
+        # outer runtime's GUI. This also bounds discovery when tools start nested clients.
+        if comm_of(parent) == "codex":
+            break
+        try:
+            executable = os.path.basename(os.readlink("/proc/%d/exe" % parent).removesuffix(" (deleted)"))
+        except OSError:
+            continue
+        if executable in ("ChatGPT", "Codex"):
+            desktop = True
+            break
+    if not pid_alive(pid, start):
+        return unavailable("Codex process changed or exited.")
+    if terminal and b"app-server" not in arguments and b"exec-server" not in arguments:
+        return {"kind": "window"}, pids
+    if desktop and session.get("id"):
+        return {"kind": "url", "url": "codex://threads/" + quote(str(session["id"]), safe="")}, []
+    if b"app-server" in arguments or b"exec-server" in arguments:
+        return unavailable("No terminal is linked to this server-hosted session.")
+    return unavailable("No terminal or desktop window could be identified.")
+
+
 def session_json(session):
     """What --json adds to a session of the snapshot, which only a collector can read: the process
-    lineage the tray widget finds its window by and the project it works in. A Codex thread has no
-    process of its own, since the tray opens it by its id."""
-    pid = None
-    if session["agent"] != "codex":
+    lineage the tray widget finds its window by and the project it works in. A standalone Codex
+    CLI uses its hook host's lineage; desktop threads open by id instead of sharing a window pid."""
+    if session["agent"] == "codex":
+        navigation, pids = codex_navigation(session)
+    else:
         holders = [(t.get("holder") or {}) for t in session["tasks"]]
         pid = session.get("pid") or next((h.get("pid") for h in holders if h.get("type") == "pid"), None)
+        pids = lineage(int(pid)) if pid else []
     root = project_root(session.get("cwd"))
-    return {"pids": lineage(int(pid)) if pid else [], "project_root": root, "project_name": project_name(root)}
+    found = {"pids": pids, "project_root": root, "project_name": project_name(root)}
+    if session["agent"] == "codex":
+        found["navigation"] = navigation
+    return found
 
 
 def cmd_list(args):
