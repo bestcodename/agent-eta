@@ -13,7 +13,8 @@ session that continues the source's plan:
 3. The source must reach a safe boundary: no turn running, nothing waiting for an answer and no verified
    background writer. The command waits up to --wait seconds and reports without forcing.
 4. The source process moves into a transient systemd user scope, is frozen there and checked again, the snapshot
-   is refreshed and the destination's trust checked again, the destination opens in a new Konsole window, and once it registered the source gets SIGHUP and is thawed.
+   is refreshed and the destination's trust checked again, the destination opens in a separate Konsole process
+   owned by its own systemd user service, and once it registered the source gets SIGHUP and is thawed.
    The cgroup freezer leaves job control alone, while SIGSTOP would hand the terminal back to the shell. A
    failure, a timeout, a cancel or any error thaws the source and keeps status.json with the commands for
    recovery. Every pause and signal checks the process start time first, so a reused pid is never hit.
@@ -44,6 +45,9 @@ import agent_eta_providers
 INHERITED = ("CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_ENTRYPOINT",
              "CLAUDE_CONFIG_DIR", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SANDBOX",
              "CODEX_SANDBOX_NETWORK_DISABLED")
+# These describe the controller's service, not the destination. Let the manager supply fresh values.
+SERVICE_CONTEXT = ("INVOCATION_ID", "JOURNAL_STREAM", "SYSTEMD_EXEC_PID", "NOTIFY_SOCKET", "LISTEN_PID",
+                   "LISTEN_FDS", "LISTEN_FDNAMES", "WATCHDOG_PID", "WATCHDOG_USEC")
 # Konsole keeps a tab's command in its profile, so a split or a new tab in the handoff window runs the
 # launcher again. The first run swaps the script for one that only starts the user's shell.
 ONE_SHOT = r"""printf '#!/bin/sh\nexec "${SHELL:-/bin/sh}"\n' > "$0.tmp" && mv "$0.tmp" "$0" """.rstrip()
@@ -470,10 +474,24 @@ class Env:
         return state not in ("frozen", "freezing")
 
     def open_terminal(self, tabs):
-        terminal = shlex.split(os.environ.get("AGENT_ETA_HANDOFF_TERMINAL") or "konsole --tabs-from-file")
-        env = {key: value for key, value in os.environ.items() if key not in INHERITED}
-        subprocess.Popen(terminal + [tabs], start_new_session=True, stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+        """Start the destination outside the controller's cgroup; setsid alone cannot do that.
+
+        Wait only for exec, not for the terminal to finish. Forward environment names so values never enter
+        the argument list, and clear source markers even if the user manager inherited them.
+        """
+        terminal = shlex.split(os.environ.get("AGENT_ETA_HANDOFF_TERMINAL")
+                               or "konsole --separate --tabs-from-file")
+        unit = "agent-eta-destination-%s.service" % os.path.basename(os.path.dirname(tabs))
+        variables = ["--setenv=" + name for name in sorted(os.environ)
+                     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+                     and name not in INHERITED + SERVICE_CONTEXT]
+        result = self.run(["systemd-run", "--user", "--collect", "--quiet", "--service-type=exec",
+                           "--expand-environment=no", "--same-dir", "--unit=" + unit,
+                           "--property=UnsetEnvironment=" + " ".join(INHERITED)] + variables + ["--"]
+                          + terminal + [tabs])
+        if result.returncode != 0:
+            raise OSError("%s: %s" % (unit, (result.stderr or result.stdout
+                                          or "exit %d" % result.returncode).strip()))
 
     def registered(self, handoff):
         """Whether the destination of a launched handoff has shown up."""
