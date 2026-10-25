@@ -23,6 +23,8 @@ The installer links `~/.local/bin/agent-eta` to the checkout, so a `git pull` up
 Requirements are Python 3.11 or later with the standard library only (CI runs 3.13), and Plasma 6 for the widget. The Claude Code
 account features use `claude-account` from [bestcodename/ai](https://github.com/bestcodename/ai) when it is on `PATH`
 or in `~/.local/bin`, and the usage windows come from that repository's `scripts/claude-usage/statusline.py`.
+Cross-provider handoffs require Konsole and a running systemd 254+ user manager. Each destination starts in its own
+transient service so it survives the source and handoff controller exiting.
 
 ## Usage
 

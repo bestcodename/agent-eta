@@ -141,6 +141,41 @@ class Base(unittest.TestCase):
                      "cwd": self.repo, "account": "work", "transcript": None, "rollout": None}, **extra)
 
 
+class TerminalLaunch(Base):
+    def test_default_terminal_has_an_independent_service_and_separate_process(self):
+        env = handoff.Env(None, None)
+        with mock.patch.dict(os.environ, {"PATH": "/usr/bin", "CLAUDECODE": "1", "CODEX_THREAD_ID": "old",
+                                          "INVOCATION_ID": "old-unit", "NOTIFY_SOCKET": "/old/socket"}, clear=True), \
+                mock.patch.object(env, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            env.open_terminal("/handoff/h-1/tabs.txt")
+        self.assertEqual(["systemd-run", "--user", "--collect", "--quiet", "--service-type=exec",
+                          "--expand-environment=no", "--same-dir", "--unit=agent-eta-destination-h-1.service",
+                          "--property=UnsetEnvironment=" + " ".join(handoff.INHERITED), "--setenv=PATH", "--",
+                          "konsole", "--separate", "--tabs-from-file", "/handoff/h-1/tabs.txt"], run.call_args.args[0])
+
+    def test_custom_terminal_and_environment_values_are_not_reinterpreted(self):
+        env = handoff.Env(None, None)
+        literal = 'spaces "quotes" $HOME %s\nsecond line'
+        with mock.patch.dict(os.environ, {"AGENT_ETA_HANDOFF_TERMINAL": "'/some terminal' --flag",
+                                          "LITERAL": literal, "bad-name": "invalid"}, clear=True), \
+                mock.patch.object(env, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            env.open_terminal("/handoff/$literal/tabs.txt")
+            self.assertEqual(literal, os.environ["LITERAL"])
+        argv = run.call_args.args[0]
+        self.assertIn("--setenv=LITERAL", argv)
+        self.assertNotIn("--setenv=bad-name", argv)
+        self.assertFalse(any(literal in arg for arg in argv))
+        self.assertEqual(["--", "/some terminal", "--flag", "/handoff/$literal/tabs.txt"], argv[-4:])
+
+    def test_a_failed_service_start_reports_its_unit_and_error(self):
+        env = handoff.Env(None, None)
+        for code, error in ((1, "manager unavailable"), (127, "systemd-run missing")):
+            with self.subTest(code=code), mock.patch.object(
+                    env, "run", return_value=subprocess.CompletedProcess([], code, "", error)):
+                with self.assertRaisesRegex(OSError, "agent-eta-destination-h-1.service: " + error):
+                    env.open_terminal("/handoff/h-1/tabs.txt")
+
+
 class Plans(Base):
     def test_steps_of_reads_top_level_items_under_steps_only(self):
         self.assertEqual(["First (ca. 1 hour)", "Second", "Third"], handoff.steps_of(PLAN))
@@ -378,6 +413,17 @@ class Transfer(Base):
             record = json.load(handle)
         self.assertEqual(("failed", "ValueError: collector broke"), (record["state"], record["error"]))
         self.assertEqual("systemctl --user thaw %s" % handoff.scope(record), record["resume_source"])
+
+    def test_a_failed_service_launch_thaws_the_source_without_sighup(self):
+        proc = self.process()
+        env = StubEnv({"claude:s1": self.session(proc)}, {("systemd-run",): (1, "")})
+        env.open_terminal = lambda tabs: handoff.Env.open_terminal(env, tabs)
+        code, result = self.run_one(env)
+        self.assertEqual((1, "failed"), (code, result["state"]))
+        self.assertIn("launch failed: agent-eta-destination-", result["error"])
+        self.assertIn("stub failed", result["error"])
+        self.assertEqual(["freeze", "thaw"], env.events)
+        self.assertIsNone(proc.poll())
 
     def test_a_source_that_stays_frozen_is_reported_with_its_recovery(self):
         env = StubEnv({"claude:s1": self.session(self.process())}, register_after=10 ** 6)

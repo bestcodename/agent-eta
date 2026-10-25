@@ -356,7 +356,7 @@ the command prints one JSON record per source.
    The command waits up to `--wait` seconds and then reports `waiting` without changing anything.
 4. **The move**: the source process moves into the transient user scope `agent-eta-handoff-<id>.scope`, is frozen
    there with the cgroup freezer and is checked again. The destination opens in a new Konsole window
-   (`AGENT_ETA_HANDOFF_TERMINAL`, default `konsole --tabs-from-file`) with the agent markers of the source removed, and
+   (`AGENT_ETA_HANDOFF_TERMINAL`, default `konsole --separate --tabs-from-file`) with the agent markers of the source removed, and
    once it registered within 300 seconds (`AGENT_ETA_HANDOFF_REGISTER_TIMEOUT`) the source gets SIGHUP and is thawed,
    so it ends without running in between. Claude Code registers through the session id the handoff gave it, and Codex
    through a rollout whose first user message carries the handoff id, searched in the first 4 MiB. A failure, a
@@ -365,6 +365,19 @@ the command prints one JSON record per source.
    process start time first, so a reused pid is never hit. The freezer replaces SIGSTOP because bash takes the
    terminal back from a stopped foreground job, which then stops again at its next read, measured on 2026-10-20.
    Polls run every 5 seconds (`AGENT_ETA_HANDOFF_POLL`).
+
+The destination terminal starts in its own transient systemd user service,
+`agent-eta-destination-<id>.service`, using `systemd-run --user --collect --service-type=exec`. A new process session
+alone does not leave the controller's cgroup, whose cleanup would terminate the destination when the controller
+exits. Konsole's `--separate` keeps the new window in its own process. Custom terminal commands are wrapped in the
+same service and must start their own foreground terminal rather than reuse an existing window.
+
+Handoffs require systemd 254+ and a running user manager. `--expand-environment=no` preserves literal dollar signs
+in command arguments, and environment variables are forwarded by name rather than putting their values into the
+argument list. Source agent markers are removed, and the manager supplies fresh service invocation metadata.
+The launch waits for execution to succeed, then returns without waiting for the terminal to close. A failed start
+records a launch error and thaws the source without sending SIGHUP. Closing the destination ends its service, which
+is collected automatically. Its logs can be inspected with `journalctl --user -u agent-eta-destination-<id>.service`.
 
 Claude Code starts as `claude-account run ACCOUNT --session-id UUID --permission-mode MODE PROMPT`. The mode is `plan`
 while the plan is unapproved and `manual` once it is approved, so a `plan` default in the account's settings does not

@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-25
+
+### Fixed
+
+- Handoff destinations start in their own transient systemd user service and a separate Konsole process, so
+  controller service cleanup does not terminate them after the source exits
+- Terminal execution failures fail the move and thaw the source without ending it
+
+### Changed
+
+- Cross-provider handoffs require systemd 254+; terminal overrides use the same independent service
+
 ## [1.3.0] - 2026-10-20
 
 ### Added

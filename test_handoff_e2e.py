@@ -1,6 +1,7 @@
-"""End-to-end tests of `agent-eta handoff`: a real interactive bash in a pty runs the source as its foreground
-job, the CLI runs as a subprocess with the real collectors and the real cgroup freezer, and only the terminal
-and the Codex binary are fakes that stand outside the move."""
+"""End-to-end tests with a real foreground source, collectors, freezer and service cleanup.
+
+Only the terminal and destination provider are fakes; the lifecycle case executes the generated launcher.
+"""
 
 import json
 import os
@@ -73,7 +74,7 @@ def frozen(pid):
 
 
 @unittest.skipIf(user_manager(), user_manager())
-class Handoff(unittest.TestCase):
+class HandoffFixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="agent-eta-e2e-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -190,6 +191,8 @@ class Handoff(unittest.TestCase):
         os.write(self.fd, b"line\n")
         self.assertIn("got", self.drain(1.0))
 
+
+class Handoff(HandoffFixture):
     def test_a_completed_move_ends_the_source_and_hands_the_terminal_back(self):
         self.source("busy", 1)
         proc = self.handoff()
@@ -237,6 +240,76 @@ class Handoff(unittest.TestCase):
         self.assertEqual((handoff.scope(record), True), paused)
         self.assertEqual("cancelled", record["state"])
         self.assert_usable()
+
+
+class DestinationLifetime(HandoffFixture):
+    def test_destination_survives_controller_service_exit(self):
+        """A detached process still dies with its controller's service unless the launcher moves it out."""
+        self.source("idle", 1)
+        terminal = self.write("bin/exec-terminal.py", '''
+import os, sys
+with open(sys.argv[-1]) as handle:
+    launch = handle.read().split("command: /bin/sh ", 1)[1].strip()
+os.execv("/bin/sh", ["/bin/sh", launch])
+''')
+        provider = self.write("bin/codex", "#!%s\n" % sys.executable + r'''
+import json, os, signal, sys
+pid = os.getpid()
+with open("/proc/%d/stat" % pid) as handle:
+    start = handle.read().rsplit(")", 1)[1].split()[19]
+with open("/proc/%d/cgroup" % pid) as handle:
+    group = next(line.strip()[3:] for line in handle if line.startswith("0::"))
+with open(os.environ["FAKE_TERMINAL_LOG"], "w") as handle:
+    json.dump({"pid": pid, "start": start, "cgroup": group,
+               "literal": os.environ.get("AGENT_ETA_LITERAL_TEST"),
+               "source_marker": os.environ.get("CLAUDECODE")}, handle)
+folder = os.path.join(os.environ["CODEX_HOME"], "sessions", "test")
+os.makedirs(folder, exist_ok=True)
+with open(os.path.join(folder, "rollout.jsonl"), "w") as handle:
+    handle.write(json.dumps({"type": "response_item", "payload": {
+        "type": "message", "role": "user", "content": [{"type": "input_text", "text": sys.argv[-1]}]}}) + "\n")
+while True:
+    signal.pause()
+''')
+        os.chmod(provider, 0o755)
+        self.env["AGENT_ETA_HANDOFF_TERMINAL"] = "%s %s" % (sys.executable, terminal)
+        self.env["AGENT_ETA_LITERAL_TEST"] = 'spaces "quotes" $HOME %s\nsecond line'
+        self.env["CLAUDECODE"] = "source-session"
+        controller = "agent-eta-test-controller-%s.service" % uuid.uuid4().hex
+
+        def cleanup():
+            units = [controller]
+            if os.path.isdir(self.root):
+                units += ["agent-eta-destination-%s.service" % record["id"]
+                          for record in handoff.records(self.root)]
+            for unit in units:
+                subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True, timeout=10)
+        self.addCleanup(cleanup)
+        # The service manager does not inherit the test process's environment by itself.
+        variables = ["--setenv=" + name for name in self.env
+                     if name.replace("_", "a").isalnum() and not name.startswith(("INVOCATION_", "JOURNAL_"))
+                     and name not in ("SYSTEMD_EXEC_PID", "NOTIFY_SOCKET", "LISTEN_PID", "LISTEN_FDS",
+                                      "LISTEN_FDNAMES", "WATCHDOG_PID", "WATCHDOG_USEC")]
+        proc = subprocess.Popen(["systemd-run", "--user", "--collect", "--quiet", "--wait", "--pipe",
+                                 "--service-type=exec", "--property=TimeoutStopSec=2s", "--unit=" + controller]
+                                + variables + [sys.executable, os.path.join(HERE, "agent-eta"), "handoff",
+                                               "claude:" + self.session_id, "--to", "codex", "--wait", "10"],
+                                env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        record = self.finish(proc)
+        self.assertEqual("completed", record["state"], record.get("error"))
+        self.assertEqual(0, proc.returncode)
+        self.assertNotEqual(0, subprocess.run(["systemctl", "--user", "is-active", "--quiet", controller],
+                                             capture_output=True).returncode)
+        with open(self.log) as handle:
+            destination = json.load(handle)
+        self.assertEqual(self.env["AGENT_ETA_LITERAL_TEST"], destination["literal"])
+        self.assertIsNone(destination["source_marker"])
+        pid = destination["pid"]
+        self.assertEqual(destination["start"], handoff.Env.proc_start(None, pid),
+                         "controller cleanup terminated the destination")
+        self.assertNotIn(stat(pid)[0], ("Z", "T"))
+        self.assertNotIn(controller, handoff.Env.cgroup(None, pid))
+        self.wait_for(lambda: not os.path.exists("/proc/%d" % self.job) or stat(self.job)[0] == "Z")
 
 
 if __name__ == "__main__":
