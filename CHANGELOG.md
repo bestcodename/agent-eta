@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Successful handoffs remove the source process and pane before reporting completion
 - Failed or cancelled destinations must be confirmed stopped before the source thaws; uncertain ownership keeps the source paused
 - Claude receives access to its private handoff folder so reading the plan needs no extra permission approval
+- Python test failures include their tracebacks in CI annotations
 
 ## [1.3.2] - 2026-10-25
 

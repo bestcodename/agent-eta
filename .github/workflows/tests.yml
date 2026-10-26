@@ -24,7 +24,16 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y tmux
 
       - name: Unit tests
-        run: python3 -m unittest discover -s . -v
+        run: |
+          python3 - <<'PY'
+          import sys
+          import unittest
+          result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.discover("."))
+          for test, failure in result.errors + result.failures:
+              message = f"{test.id()}\n{failure}"
+              print("::error::" + message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))
+          sys.exit(not result.wasSuccessful())
+          PY
 
       - name: Widget tests
         run: node --test --test-isolation=none test_plasmoid.mjs

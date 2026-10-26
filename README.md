@@ -62,6 +62,7 @@ node --test --test-isolation=none test_plasmoid.mjs
 
 The QML tests in `test_qml/` need Qt 6's `qmltestrunner` and the Plasma 6 QML modules, see
 [docs/agent-eta.md](docs/agent-eta.md#tests).
+CI reports Python test failures as GitHub annotations, including their tracebacks.
 
 ## Changelog and roadmap
 
