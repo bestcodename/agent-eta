@@ -141,7 +141,14 @@ class ManagedHandoff(unittest.TestCase):
             time.sleep(.05)
         process.terminate()
         out, err = process.communicate(timeout=20)
-        self.fail(f"destination did not start; controller exit {process.returncode}: {out}\n{err}")
+        pane = self.runtime.tmux("display-message", "-p", "-t", self.source_terminal["pane"],
+                                 "#{session_id}\t#{window_id}\t#{pane_id}\t#{pane_pid}", check=False)
+        diagnostic = {"record": self.source_terminal, "native_source": self.source,
+                      "current_start": tmux.proc_start(self.source["pid"]),
+                      "current_cgroup": tmux.cgroup(self.source["pid"]),
+                      "pane_output": pane.stdout, "pane_error": pane.stderr,
+                      "valid_pane": self.runtime.pane(self.source_terminal)}
+        self.fail(f"destination did not start; controller exit {process.returncode}: {out}\n{err}\n{diagnostic}")
 
     def assert_source_live_and_thawed(self):
         self.assertEqual(tmux.proc_start(self.source["pid"]), self.source["start"])
