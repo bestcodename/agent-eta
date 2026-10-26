@@ -229,6 +229,19 @@ class ManagedHandoff(unittest.TestCase):
         self.assertIsNone(tmux.proc_start(self.source["pid"]))
         self.assertIsNone(self.runtime.pane(self.source_terminal))
 
+    def test_tmux_moving_the_launcher_cannot_move_the_agent(self):
+        self.assertNotEqual(self.source["pid"], self.source_terminal["pane_pid"])
+        unit = "agent-eta-test-pane-" + uuid.uuid4().hex + ".scope"
+        env = handoff.Env(None, None)
+        try:
+            env.freeze(unit, self.source_terminal["pane_pid"])
+            self.assertTrue(tmux.cgroup(self.source["pid"]).endswith("/" + self.source_terminal["scope"]))
+            self.assertIsNotNone(self.runtime.find(self.source["pid"], self.source["start"]))
+        finally:
+            env.resume(unit)
+            self.runtime.stop(self.source_terminal["id"])
+            subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True)
+
 
 if __name__ == "__main__":
     unittest.main()

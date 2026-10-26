@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Failed or cancelled destinations must be confirmed stopped before the source thaws; uncertain ownership keeps the source paused
 - Claude receives access to its private handoff folder so reading the plan needs no extra permission approval
 - Python test failures include their tracebacks in CI annotations
+- tmux's automatic pane scopes cannot move agents out of their owned scopes
 
 ## [1.3.2] - 2026-10-25
 

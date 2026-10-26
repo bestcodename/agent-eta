@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -44,6 +45,16 @@ def cgroup(pid):
                     if line.startswith("0::"))
     except (OSError, ValueError, StopIteration, TypeError):
         return None
+
+
+def group_alive(pid):
+    try:
+        os.killpg(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
 
 
 def lineage(pid):
@@ -176,6 +187,9 @@ class Runtime:
         script.chmod(0o700)
         command = ["systemd-run", "--user", "--scope", "--collect", "--quiet", "--expand-environment=no", "--unit=" + scope,
                    "--", "/bin/sh", str(script)]
+        # tmux can asynchronously move its pane leader into a tmux-spawn scope.
+        # Keep that leader separate from the child entering our agent scope.
+        command = ["/bin/sh", "-c", '"$@"; exit $?', "agent-eta-pane", *command]
         record = {"id": identifier, "scope": scope, "cwd": str(cwd), "created": time.time()}
         with (self.root / "host.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
@@ -231,7 +245,7 @@ class Runtime:
         return None
 
     def stop(self, identifier):
-        """Cancel the pane's launcher first, then its complete scope; confirm both are gone."""
+        """Cancel the owned launcher group and agent scope; confirm both are gone."""
         try:
             record = self.read(identifier)
         except TmuxError:
@@ -240,15 +254,27 @@ class Runtime:
                 return True
             raise
         pane = self.pane(record)
-        if pane:
+        owner = pane or record
+        pid, start = owner.get("pane_pid"), owner.get("pane_start")
+        if pid and proc_start(pid) == start:
+            try:
+                if os.getpgid(pid) != pid:
+                    return False
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError as exc:
+                raise TmuxError(f"cannot cancel the managed launcher: {exc.strerror}") from None
+        if pane and proc_start(record.get("server_pid")) == record.get("server_start"):
             self.tmux("kill-pane", "-t", pane["pane"], check=False)
         # A frozen source must never run again after its replacement registers.
         # SIGKILL also works while frozen; stop alone can reject a frozen scope.
         self.run(["systemctl", "--user", "kill", "--signal=SIGKILL", "--kill-whom=all", record["scope"]], check=False)
         # Once the launcher has exited it cannot enqueue another scope creation.
         deadline = time.monotonic() + 5
-        owner = pane or record
-        while owner.get("pane_start") and proc_start(owner["pane_pid"]) == owner["pane_start"]:
+        if not pid or not start:
+            return False
+        while proc_start(pid) == start or (proc_start(pid) is None and group_alive(pid)):
             if time.monotonic() >= deadline:
                 return False
             time.sleep(.05)

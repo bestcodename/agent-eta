@@ -64,10 +64,27 @@ class RuntimeUnit(unittest.TestCase):
         self.runtime.write(record)
         with mock.patch.object(self.runtime, "pane", return_value=record), \
                 mock.patch.object(self.runtime, "tmux"), mock.patch.object(tmux, "proc_start", return_value="old"), \
+                mock.patch.object(tmux.os, "getpgid", return_value=123), mock.patch.object(tmux.os, "killpg"), \
                 mock.patch.object(tmux.time, "monotonic", side_effect=[0, 10]), \
                 mock.patch.object(self.runtime, "run") as run:
             self.assertFalse(self.runtime.stop(record["id"]))
         run.assert_called_once_with(["systemctl", "--user", "kill", "--signal=SIGKILL", "--kill-whom=all", record["scope"]], check=False)
+
+    def test_unidentified_launcher_intent_cannot_confirm_cancellation(self):
+        record = {"id": "b" * 32, "scope": "agent-eta-agent-b.scope", "target": "agents:pending"}
+        self.runtime.write(record)
+        with mock.patch.object(self.runtime, "pane", return_value=None), mock.patch.object(self.runtime, "run"):
+            self.assertFalse(self.runtime.stop(record["id"]))
+
+    def test_an_orphaned_launcher_group_keeps_cancellation_unconfirmed(self):
+        record = {"id": "c" * 32, "scope": "agent-eta-agent-c.scope", "pane_pid": 123, "pane_start": "old"}
+        self.runtime.write(record)
+        with mock.patch.object(self.runtime, "pane", return_value=None), \
+                mock.patch.object(tmux, "proc_start", return_value=None), \
+                mock.patch.object(tmux, "group_alive", return_value=True), \
+                mock.patch.object(tmux.time, "monotonic", side_effect=[0, 10]), \
+                mock.patch.object(self.runtime, "run"):
+            self.assertFalse(self.runtime.stop(record["id"]))
 
     def test_detached_navigation_opens_only_an_attachment(self):
         record = {"session": "$0"}

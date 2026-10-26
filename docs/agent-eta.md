@@ -388,8 +388,9 @@ A running systemd 254+ user manager and tmux are required. Service environment v
 so their values do not enter command arguments. Inspect the host journal with `journalctl --user -u UNIT` using
 the runtime's recorded service name.
 
-On failure, timeout, Ctrl-C, SIGTERM or SIGHUP, cancellation first closes the destination's owned pane launcher,
-then stops its complete scope. Only confirmed cancellation allows the source scope to thaw. If cancellation is
+The pane launcher waits for the agent in a separate process, so tmux's automatic `tmux-spawn` scope can move the
+launcher without moving the agent. On failure, timeout, Ctrl-C, SIGTERM or SIGHUP, cancellation kills the owned
+launcher process group and stops the complete agent scope. Only confirmed cancellation allows the source scope to thaw. If cancellation is
 unconfirmed, `status.json` records `source_paused`, the destination identity and `resume_source`. Inspect and stop
 the destination before using that recovery command. A repeated request refuses unresolved ownership. Never stop
 the shared server to cancel one handoff. SIGKILL of the controller still requires this manual recovery.
