@@ -244,11 +244,13 @@ def handoff_here(store, account):
     tool = executable("claude-account")
     for source in sources:
         command = [tool, "handoff", source["name"], account["name"], "--all", "--wait", "1800"]
+        from agent_eta_tmux import account_environment
         with open(log_dir / time.strftime("handoff-%Y%m%d-%H%M%S.log"), "a") as log:
-            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
+                             env=account_environment())
 
 
-def account_action(args, batch=None):
+def account_action(args, batch=None, inspect=None):
     """`batch(agent, target, account_name)` moves every available session of `agent` across providers,
     which only agent-eta itself can, since it collects the sessions."""
     store = AccountStore()
@@ -262,7 +264,11 @@ def account_action(args, batch=None):
         if action in ("launch", "login"):
             chosen = getattr(args, "directory", None)
             directory = valid_directory(account["default_directory"] if chosen is None else chosen)
-            launch(account, directory, login=action == "login")
+            resume = getattr(args, "resume", None)
+            if resume and inspect and inspect((account["provider"], resume)) is not None:
+                raise AccountError("This session still has a live writer. Attach to it or close it before resuming.")
+            options = {"cli": getattr(args, "cli", False), "resume": resume} if action == "launch" else {}
+            launch(account, directory, login=action == "login", **options)
         elif action == "default-directory":
             if args.directory is None:
                 print(account["default_directory"])
@@ -316,6 +322,8 @@ def add_parser(sub):
         parser.add_argument("id", help="codex, claude:NAME or claude:default")
         if action == "launch":
             parser.add_argument("--directory")
+            parser.add_argument("--cli", action="store_true", help="launch a managed CLI instead of the Codex desktop")
+            parser.add_argument("--resume", metavar="SESSION_ID", help="resume a session without a live writer")
         elif action == "handoff":
             parser.add_argument("--from", dest="source", choices=("claude", "codex"),
                                 help="the provider whose sessions move, Claude by default")

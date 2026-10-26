@@ -83,9 +83,24 @@ class StubEnv(handoff.Env):
         self.events.append(signal.Signals(signum).name)
         return super().signal(pid, start, signum)
 
-    def open_terminal(self, tabs):
-        with open(tabs, "r", encoding="utf-8") as handle:
-            self.opened.append(handle.read())
+    def managed(self, session):
+        return {"id": "a" * 32, "session": "$0", "scope": "agent-eta-test-source.scope"}
+
+    def open_destination(self, record):
+        self.opened.append(record["command"])
+        return {"id": record["destination_id"], "pane": "%1"}
+
+    def cancel_destination(self, record):
+        if record.get("destination_id"):
+            self.events.append("cancel")
+        return True
+
+    def select_destination(self, record):
+        self.events.append("select")
+
+    def retire_source(self, record, session):
+        self.frozen.discard(handoff.scope(record))
+        return self.signal(session["gate"], session["proc_start"], signal.SIGTERM)
 
     def registered(self, record):
         return len(self.opened) > 0 and self.clock >= record["launched"] + self.register_after
@@ -142,38 +157,23 @@ class Base(unittest.TestCase):
 
 
 class TerminalLaunch(Base):
-    def test_default_terminal_has_an_independent_service_and_separate_process(self):
-        env = handoff.Env(None, None)
-        with mock.patch.dict(os.environ, {"PATH": "/usr/bin", "CLAUDECODE": "1", "CODEX_THREAD_ID": "old",
-                                          "INVOCATION_ID": "old-unit", "NOTIFY_SOCKET": "/old/socket"}, clear=True), \
-                mock.patch.object(env, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
-            env.open_terminal("/handoff/h-1/tabs.txt")
-        self.assertEqual(["systemd-run", "--user", "--collect", "--quiet", "--service-type=exec",
-                          "--expand-environment=no", "--same-dir", "--unit=agent-eta-destination-h-1.service",
-                          "--property=UnsetEnvironment=" + " ".join(handoff.INHERITED), "--setenv=PATH", "--",
-                          "konsole", "--separate", "--tabs-from-file", "/handoff/h-1/tabs.txt"], run.call_args.args[0])
+    def test_destination_uses_the_source_session_and_explicit_account(self):
+        env = handoff.Env(None, lambda: [("work", "/account")])
+        record = {"target": "claude", "account": "work", "command": ["claude", "go"],
+                  "cwd": self.repo, "source_terminal": {"session": "$2"}, "destination_id": "a" * 32}
+        with mock.patch.object(handoff.agent_eta_tmux, "Runtime") as runtime, \
+                mock.patch.object(handoff.agent_eta_providers, "executable", return_value="/fake/claude"):
+            env.open_destination(record)
+            runtime.return_value.start.assert_called_once_with(["/fake/claude", "go"], self.repo,
+                session="$2", environment={"CLAUDE_CONFIG_DIR": "/account"}, identifier="a" * 32)
 
-    def test_custom_terminal_and_environment_values_are_not_reinterpreted(self):
-        env = handoff.Env(None, None)
-        literal = 'spaces "quotes" $HOME %s\nsecond line'
-        with mock.patch.dict(os.environ, {"AGENT_ETA_HANDOFF_TERMINAL": "'/some terminal' --flag",
-                                          "LITERAL": literal, "bad-name": "invalid"}, clear=True), \
-                mock.patch.object(env, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
-            env.open_terminal("/handoff/$literal/tabs.txt")
-            self.assertEqual(literal, os.environ["LITERAL"])
-        argv = run.call_args.args[0]
-        self.assertIn("--setenv=LITERAL", argv)
-        self.assertNotIn("--setenv=bad-name", argv)
-        self.assertFalse(any(literal in arg for arg in argv))
-        self.assertEqual(["--", "/some terminal", "--flag", "/handoff/$literal/tabs.txt"], argv[-4:])
-
-    def test_a_failed_service_start_reports_its_unit_and_error(self):
-        env = handoff.Env(None, None)
-        for code, error in ((1, "manager unavailable"), (127, "systemd-run missing")):
-            with self.subTest(code=code), mock.patch.object(
-                    env, "run", return_value=subprocess.CompletedProcess([], code, "", error)):
-                with self.assertRaisesRegex(OSError, "agent-eta-destination-h-1.service: " + error):
-                    env.open_terminal("/handoff/h-1/tabs.txt")
+    def test_a_missing_managed_source_is_refused_before_plan_extraction(self):
+        env = StubEnv({"claude:s1": self.session(self.process())})
+        env.managed = lambda session: None
+        code = handoff.run(["claude:s1"], "codex", env=env, root=self.root)
+        self.assertEqual(1, code)
+        self.assertIn("unmanaged CLI", env.printed[-1]["error"])
+        self.assertEqual([], env.events)
 
 
 class Plans(Base):
@@ -241,14 +241,14 @@ class Commands(Base):
         self.assertEqual([self.codex, "-C", "/d", "-s", "read-only", "-a", "on-request", "go"],
                          handoff.destination_command("codex", None, "/d", None, False, "go"))
 
-    def test_the_launcher_quotes_paths_drops_session_markers_and_runs_once(self):
+    def test_the_launcher_quotes_paths_drops_session_markers_and_is_reusable(self):
         script = write(os.path.join(self.repo, "launch.sh"),
                        handoff.launcher(["sh", "-c", 'printf "%s|" "$1" "${CLAUDECODE-unset}"', "x", self.repo]))
         env = dict(os.environ, CLAUDECODE="1")
         out = subprocess.run(["/bin/sh", script], capture_output=True, text=True, env=env, check=True).stdout
         self.assertEqual("%s|unset|" % self.repo, out)
         with open(script) as handle:
-            self.assertNotIn("printf \"%s|\"", handle.read())
+            self.assertEqual(handoff.launcher(["sh", "-c", 'printf "%s|" "$1" "${CLAUDECODE-unset}"', "x", self.repo]), handle.read())
 
     def test_the_snapshot_records_progress_next_step_and_a_dirty_tree(self):
         write(os.path.join(self.repo, "dirty file.txt"), "x")
@@ -294,7 +294,7 @@ class Commands(Base):
                                                          "content": [{"type": "input_text", "text": text}]}}
         preamble = [message("developer", "x" * 1000) for _ in range(70)]
         rollout = jsonl(os.path.join(self.tmp, "codex", "sessions", "2026", "10", "20", "rollout-x.jsonl"),
-                        preamble + [message("user", "agent-eta handoff h-1: you take over")])
+                        preamble + [{"type": "session_meta", "payload": {"id": "t1"}}, message("user", "agent-eta handoff h-1: you take over")])
         self.assertGreater(os.path.getsize(rollout), 70 * 1024)
         self.assertTrue(handoff.prompted(rollout, "h-1"))
         self.assertFalse(handoff.prompted(rollout, "h-1", limit=64 * 1024))
@@ -304,7 +304,8 @@ class Commands(Base):
         self.assertFalse(handoff.prompted(quoted, "h-1"))
         with mock.patch.dict(os.environ, {"CODEX_HOME": os.path.join(self.tmp, "codex")}):
             env = handoff.Env(lambda source: None, lambda: [])
-            self.assertTrue(env.registered({"target": "codex", "id": "h-1", "launched": time.time() - 1}))
+            with mock.patch.object(env, "registered_process", return_value=True):
+                self.assertTrue(env.registered({"target": "codex", "id": "h-1", "launched": time.time() - 1}))
             self.assertFalse(env.registered({"target": "codex", "id": "h-1", "launched": time.time() + 60}))
 
     def test_dry_run_writes_nothing(self):
@@ -325,10 +326,10 @@ class Commands(Base):
                                if part in result["error"]) for result in env.printed])
 
     def test_claude_to_claude_delegates_to_claude_account(self):
-        env = StubEnv({"claude:s1": self.session(self.process())}, {("claude-account", "handoff"): (0, "moved")})
+        env = StubEnv({"claude:s1": self.session(self.process())}, {("env",): (0, "moved")})
         code = handoff.run(["claude:s1"], "claude", account="private", wait=60, env=env, root=self.root)
         self.assertEqual(0, code)
-        self.assertEqual(["claude-account", "handoff", "work", "private", "--only", "s1", "--wait", "60"], env.ran[-1])
+        self.assertEqual(["claude-account", "handoff", "work", "private", "--only", "s1", "--wait", "60"], env.ran[-1][2:])
 
     def test_the_account_comes_from_claude_account_targets(self):
         env = StubEnv({}, {("claude-account", "targets"): (0, json.dumps(
@@ -348,9 +349,9 @@ class Transfer(Base):
         env = StubEnv({"claude:s1": self.session(proc)}, register_after=3)
         code, result = self.run_one(env)
         self.assertEqual((0, "completed"), (code, result["state"]))
-        self.assertEqual(-signal.SIGHUP, proc.wait(timeout=5))
-        self.assertEqual(["freeze", "SIGHUP", "thaw"], env.events)
-        self.assertIn("command: /bin/sh ", env.opened[0])
+        self.assertEqual(-signal.SIGTERM, proc.wait(timeout=5))
+        self.assertEqual(["freeze", "select", "SIGTERM"], env.events)
+        self.assertEqual(self.codex, env.opened[0][0])
         with open(os.path.join(self.root, result["id"], "status.json")) as handle:
             self.assertEqual("completed", json.load(handle)["state"])
 
@@ -360,7 +361,7 @@ class Transfer(Base):
         code, result = self.run_one(env)
         self.assertEqual((1, "failed"), (code, result["state"]))
         self.assertIn("did not register", result["error"])
-        self.assertEqual(["freeze", "thaw"], env.events)
+        self.assertEqual(["freeze", "cancel", "thaw"], env.events)
         self.assertIsNone(proc.poll())
 
     def test_a_busy_source_is_left_alone_until_the_wait_ends(self):
@@ -381,20 +382,19 @@ class Transfer(Base):
         code, result = self.run_one(env)
         self.assertEqual((0, "completed"), (code, result["state"]))
         self.assertGreaterEqual(len(calls), 5)
-        self.assertEqual(["freeze", "thaw", "freeze", "SIGHUP", "thaw"], env.events)
+        self.assertEqual(["freeze", "thaw", "freeze", "select", "SIGTERM"], env.events)
 
     def test_a_cancel_after_the_stop_resumes_the_source(self):
         proc = self.process()
         env = StubEnv({"claude:s1": self.session(proc)})
 
-        def cancel(tabs):
-            self.assertEqual({handoff.scope(json.load(open(os.path.join(os.path.dirname(tabs), "status.json"))))},
-                             env.frozen)
+        def cancel(record):
+            self.assertEqual({handoff.scope(record)}, env.frozen)
             raise KeyboardInterrupt
-        env.open_terminal = cancel
+        env.open_destination = cancel
         code, result = self.run_one(env)
         self.assertEqual((1, "cancelled"), (code, result["state"]))
-        self.assertEqual(["freeze", "thaw"], env.events)
+        self.assertEqual(["freeze", "cancel", "thaw"], env.events)
         self.assertIsNone(proc.poll())
 
     def test_any_error_after_the_pause_thaws_the_source_and_is_recorded(self):
@@ -403,10 +403,10 @@ class Transfer(Base):
 
         def broken(tabs):
             raise ValueError("collector broke")
-        env.open_terminal = broken
+        env.open_destination = broken
         with self.assertRaisesRegex(ValueError, "collector broke"):
             self.run_one(env)
-        self.assertEqual(["freeze", "thaw"], env.events)
+        self.assertEqual(["freeze", "cancel", "thaw"], env.events)
         self.assertIsNone(proc.poll())
         (folder,) = [name for name in os.listdir(self.root) if name != "locks"]
         with open(os.path.join(self.root, folder, "status.json")) as handle:
@@ -414,15 +414,44 @@ class Transfer(Base):
         self.assertEqual(("failed", "ValueError: collector broke"), (record["state"], record["error"]))
         self.assertEqual("systemctl --user thaw %s" % handoff.scope(record), record["resume_source"])
 
-    def test_a_failed_service_launch_thaws_the_source_without_sighup(self):
+    def test_a_failed_launch_cancels_before_thaw(self):
         proc = self.process()
-        env = StubEnv({"claude:s1": self.session(proc)}, {("systemd-run",): (1, "")})
-        env.open_terminal = lambda tabs: handoff.Env.open_terminal(env, tabs)
+        env = StubEnv({"claude:s1": self.session(proc)})
+        def failed(record):
+            raise handoff.agent_eta_tmux.TmuxError("start denied")
+        env.open_destination = failed
         code, result = self.run_one(env)
         self.assertEqual((1, "failed"), (code, result["state"]))
-        self.assertIn("launch failed: agent-eta-destination-", result["error"])
-        self.assertIn("stub failed", result["error"])
-        self.assertEqual(["freeze", "thaw"], env.events)
+        self.assertIn("start denied", result["error"])
+        self.assertEqual(["freeze", "cancel", "thaw"], env.events)
+        self.assertIsNone(proc.poll())
+
+    def test_unconfirmed_cancellation_keeps_the_source_paused(self):
+        env = StubEnv({"claude:s1": self.session(self.process())}, register_after=10 ** 6)
+        env.cancel_destination = lambda record: False
+        code, result = self.run_one(env)
+        self.assertEqual((1, "failed", True), (code, result["state"], result["source_paused"]))
+        self.assertIn("cancellation is unconfirmed", result["error"])
+        self.assertEqual(["freeze"], env.events)
+        self.assertEqual({handoff.scope(result)}, env.frozen)
+        opened = len(env.opened)
+        code, repeated = self.run_one(env)
+        self.assertEqual((1, "refused"), (code, repeated["state"]))
+        self.assertIn("unresolved ownership", repeated["error"])
+        self.assertEqual(len(env.opened), opened)
+
+    def test_source_identity_change_while_waiting_refuses_before_freezing(self):
+        proc = self.process()
+        calls = []
+        def changed(env):
+            calls.append(1)
+            return self.session(proc, proc_start="changed") if len(calls) > 1 else self.session(proc)
+        env = StubEnv({"claude:s1": changed})
+        code, record = self.run_one(env)
+        self.assertEqual((1, "failed"), (code, record["state"]))
+        self.assertIn("identity changed", record["error"])
+        self.assertEqual([], env.events)
+        self.assertEqual([], env.opened)
         self.assertIsNone(proc.poll())
 
     def test_a_source_that_stays_frozen_is_reported_with_its_recovery(self):
@@ -435,7 +464,7 @@ class Transfer(Base):
     def test_sighup_to_the_handoff_cancels_like_sigterm(self):
         proc = self.process()
         env = StubEnv({"claude:s1": self.session(proc)})
-        env.open_terminal = lambda tabs: os.kill(os.getpid(), signal.SIGHUP)
+        env.open_destination = lambda tabs: os.kill(os.getpid(), signal.SIGHUP)
         previous = signal.getsignal(signal.SIGHUP)
         code, result = self.run_one(env)
         self.assertEqual((1, "cancelled"), (code, result["state"]))

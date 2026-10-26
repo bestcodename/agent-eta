@@ -429,6 +429,7 @@ function titleProject(title) {
 
 // Python chooses Codex's UI target. Only older listings without that field keep thread links.
 export function codexNavigation(session) {
+    if (session && session.navigation && session.navigation.kind === "tmux") return session.navigation;
     if (!session || session.agent !== "codex") return null;
     if (session.navigation === undefined && session.id) {
         return {kind: "url", url: "codex://threads/" + encodeURIComponent(session.id)};
@@ -489,15 +490,16 @@ export function shellQuote(text) {
 // What "Copy" puts on the clipboard. A Claude Code session gets the command that resumes it in its
 // directory and account, a Codex thread its link in the Codex app, which has no CLI on the PATH.
 export function resumeCommand(session) {
-    if (session.agent === "codex" && session.id) {
+    const cli = session.navigation && (session.navigation.kind === "tmux" || session.navigation.kind === "window");
+    if (session.agent === "codex" && session.id && !cli) {
         return `codex://threads/${session.id}`;
     }
-    if (session.agent !== "claude" || !session.id) {
+    if (!["claude", "codex"].includes(session.agent) || !session.id) {
         return "";
     }
-    const claude = session.account ? `claude-account run ${shellQuote(session.account)}` : "claude";
-    const resume = `${claude} --resume ${shellQuote(session.id)}`;
-    return session.cwd ? `cd ${shellQuote(session.cwd)} && ${resume}` : resume;
+    const account = session.agent === "codex" ? "codex" : "claude:" + (session.account || "default");
+    return `agent-eta account launch ${shellQuote(account)} --cli --resume ${shellQuote(session.id)}`
+        + (session.cwd ? ` --directory ${shellQuote(session.cwd)}` : "");
 }
 
 export function escapeHtml(text) {

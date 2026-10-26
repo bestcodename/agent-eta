@@ -140,4 +140,26 @@ TestCase {
         compare(launcher.commands, []);
         compare(TaskFixture.activated, []);
     }
+    function test_tmux_navigation_selects_and_raises_an_attachment_for_both_providers() {
+        for (const agent of ["claude", "codex"]) {
+            init();
+            const managed = {agent: agent, id: "s1", navigation: {kind: "tmux"}, pids: []};
+            verify(jumper.canJump(managed));
+            verify(jumper.jump(managed));
+            compare(launcher.commands, ["agent-eta attach '" + agent + ":s1' --json"]);
+            launcher.answer(0, JSON.stringify({opened: false, pids: [58086]}));
+            compare(TaskFixture.activated, [0]);
+            compare(urls, []);
+        }
+    }
+
+    function test_detached_tmux_navigation_can_open_a_viewer_without_an_existing_window() {
+        TaskFixture.windows = [];
+        const managed = {agent: "claude", id: "s1", navigation: {kind: "tmux"}};
+        verify(jumper.canJump(managed));
+        verify(jumper.jump(managed));
+        launcher.answer(0, JSON.stringify({opened: true, pids: []}));
+        compare(TaskFixture.activated, []);
+    }
+
 }

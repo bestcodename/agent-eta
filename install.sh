@@ -14,6 +14,11 @@
 # The tests redirect it with BIN_DIR and PLASMOID_DIR, and AGENT_ETA_TRAY=0 leaves the trays alone.
 set -euo pipefail
 
+if ! command -v tmux >/dev/null 2>&1; then
+    echo "tmux is required for managed CLI sessions. Install it with your package manager first." >&2
+    exit 1
+fi
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bin_dir="${BIN_DIR:-$HOME/.local/bin}"
 target="$bin_dir/agent-eta"

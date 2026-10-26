@@ -108,7 +108,9 @@ and the web app that TODO.md proposes. Since 0.67.0 it carries what the widget w
   3 for dormant, in the order the text list prints them.
 - A session has `pids`, its own pid or its first task's holder followed by their ancestors, ending before pid 1 and
   the user's `systemd`. Standalone Codex CLI sessions start with their hook host's pid; desktop threads have none.
-- A Codex session has `navigation`: `{"kind": "window"}` uses its existing `pids`, `{"kind": "url", "url": "…"}`
+- A managed Claude/Codex CLI has `navigation: {"kind": "tmux"}`; widget navigation calls `agent-eta attach SOURCE --json`.
+  This selects the owned pane and reports an attached viewer's process lineage, or opens an attachment if detached.
+- An unmanaged Codex session has `navigation`: `{"kind": "window"}` uses its existing `pids`, `{"kind": "url", "url": "…"}`
   opens its desktop thread, and `{"kind": "unavailable", "reason": "…"}` explains why no reliable target exists.
   Python decides from the current hook host's PID and start time, controlling terminal and desktop executable
   ancestry, independently of the transcript's original client. An `app-server` alone proves no desktop or terminal
@@ -298,8 +300,12 @@ setting restores it. No action logs another account out.
 
 Each account has a saved default session directory, falling back to the home directory. `default-directory ID`
 prints it; supplying a path saves it. `launch --directory` chooses one folder without replacing that preference.
-Claude launches through its account wrapper in a separate Konsole window. Codex opens the new-thread composer through
-`codex://threads/new?path=...`, with the path encoded. Native commands receive argument arrays, not interpolated shell
+Claude launches through its account wrapper in a managed tmux window. Codex opens the new-thread composer through
+`codex://threads/new?path=...`, with the path encoded; `account launch codex --cli` starts its managed CLI instead.
+`account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` resumes a session after its existing writer has
+exited. The command refuses a live writer. `agent-eta attach claude:ID` or `codex:ID` shows its existing managed
+terminal, without starting a model session. In a terminal it attaches or switches; `--json` selects a pane and
+returns attachment window PIDs, opening the configured viewer when detached. Native commands receive argument arrays, not interpolated shell
 text. A missing executable, invalid directory or immediately failing launcher produces a safe action error.
 
 Preferences live at `${XDG_CONFIG_HOME:-~/.config}/agent-eta/config.json` and cached readings at
@@ -359,36 +365,46 @@ the command prints one JSON record per source.
    meanwhile replaces a forked summary, so `plan_origin` names the plan that was handed over.
 3. **The boundary**: the source must be idle or stopped, with no open question and no verified background writer.
    The command waits up to `--wait` seconds and then reports `waiting` without changing anything.
-4. **The move**: the source process moves into the transient user scope `agent-eta-handoff-<id>.scope`, is frozen
-   there with the cgroup freezer and is checked again. The destination opens in a new Konsole window
-   (`AGENT_ETA_HANDOFF_TERMINAL`, default `konsole --separate --tabs-from-file`) with the agent markers of the source removed, and
-   once it registered within 300 seconds (`AGENT_ETA_HANDOFF_REGISTER_TIMEOUT`) the source gets SIGHUP and is thawed,
-   so it ends without running in between. Claude Code registers through the session id the handoff gave it, and Codex
-   through a rollout whose first user message carries the handoff id, searched in the first 4 MiB. A failure, a
-   timeout, a cancel by Ctrl-C, SIGTERM or SIGHUP, and any other error thaw the source and keep `status.json`, whose
-   `resume_source` holds `systemctl --user thaw` for a source that stayed frozen. Every pause and signal checks the
-   process start time first, so a reused pid is never hit. The freezer replaces SIGSTOP because bash takes the
-   terminal back from a stopped foreground job, which then stops again at its next read, measured on 2026-10-20.
-   Polls run every 5 seconds (`AGENT_ETA_HANDOFF_POLL`).
+4. **The move**: managed CLI sessions have an owned `agent-eta-agent-<uuid>.scope`. The source scope is
+   frozen with the existing cgroup freezer and checked again. The destination starts in a detached window of
+   the same tmux session. Native registration must name a live process in its owned destination scope: Claude
+   uses its fresh session UUID and Codex uses the fresh rollout's handoff prompt and native hook registration.
+   Within 300 seconds (`AGENT_ETA_HANDOFF_REGISTER_TIMEOUT`) the destination must register. Then its window is
+   selected and the source scope and pane are removed before status becomes `completed`. Polls run every five
+   seconds (`AGENT_ETA_HANDOFF_POLL`). Source PID/start identity is checked before and after freezing.
 
-The destination terminal starts in its own transient systemd user service,
-`agent-eta-destination-<id>.service`, using `systemd-run --user --collect --service-type=exec`. A new process session
-alone does not leave the controller's cgroup, whose cleanup would terminate the destination when the controller
-exits. Konsole's `--separate` keeps the new window in its own process. Custom terminal commands are wrapped in the
-same service and must start their own foreground terminal rather than reuse an existing window.
+`agent_eta_tmux.py` owns the shared runtime under `${AGENT_ETA_DIR:-/tmp/agent-eta-UID}/tmux`, with mode 0700.
+One private socket connects to `agent-eta-tmux-<socket-hash>.service`. The transient user service uses
+`Type=forking`, `ExitType=cgroup` and `GuessMainPID=no`; individual agent scopes are independent of it and of the
+handoff controller. The server exits when its last session ends. Its service is collected automatically.
+Runtime records include stable session/window/pane IDs and server/pane PID/start identities, preventing stale
+records from targeting IDs reused after a server restart. Managed panes use `remain-on-exit off`.
 
-Handoffs require systemd 254+ and a running user manager. `--expand-environment=no` preserves literal dollar signs
-in command arguments, and environment variables are forwarded by name rather than putting their values into the
-argument list. Source agent markers are removed, and the manager supplies fresh service invocation metadata.
-The launch waits for execution to succeed, then returns without waiting for the terminal to close. A failed start
-records a launch error and thaws the source without sending SIGHUP. Closing the destination ends its service, which
-is collected automatically. Its logs can be inspected with `journalctl --user -u agent-eta-destination-<id>.service`.
+Konsole is the default viewer, launched only to attach a client. `AGENT_ETA_TERMINAL_BIN` selects another terminal
+supporting `-e`. A viewer's closure detaches it while agents continue. Handoffs never control Konsole tabs or their
+crash handling. Native tmux configuration is isolated with `-f /dev/null`; inherited provider and service markers
+are cleared before explicitly applying the selected account. The pane's native terminal environment is retained.
+A running systemd 254+ user manager and tmux are required. Service environment variables are forwarded by name,
+so their values do not enter command arguments. Inspect the host journal with `journalctl --user -u UNIT` using
+the runtime's recorded service name.
 
-Claude Code starts as `claude-account run ACCOUNT --session-id UUID --permission-mode MODE PROMPT`. The mode is `plan`
+On failure, timeout, Ctrl-C, SIGTERM or SIGHUP, cancellation first closes the destination's owned pane launcher,
+then stops its complete scope. Only confirmed cancellation allows the source scope to thaw. If cancellation is
+unconfirmed, `status.json` records `source_paused`, the destination identity and `resume_source`. Inspect and stop
+the destination before using that recovery command. A repeated request refuses unresolved ownership. Never stop
+the shared server to cancel one handoff. SIGKILL of the controller still requires this manual recovery.
+
+Local Claude-account moves keep the existing account/transcript migration code and use its
+`CLAUDE_HANDOFF_TERMINAL` extension to call the tmux adapter. Remote-host moves keep their existing behavior.
+`AGENT_ETA_HANDOFF_TERMINAL` is retired; unmanaged sessions remain listed but cross-provider handoff refuses them
+before pausing. Close an unmanaged writer and resume it through `account launch --cli --resume` to migrate.
+
+Claude Code starts as `claude-account run ACCOUNT --add-dir HANDOFF_DIR --session-id UUID --permission-mode MODE PROMPT`. The mode is `plan`
 while the plan is unapproved and `manual` once it is approved, so a `plan` default in the account's settings does not
 start the planning over, and the prompt tells it not to ask for approval again. Manual mode grants nothing beyond the
-permission rules, so an unattended destination stops at its first other action and shows `waiting (permission)`.
-The first such action is reading `plan.md`, which lies outside the working directory, see [TODO.md](../TODO.md) item 16.
+permission rules. The private handoff folder is an additional working directory, so reading its `plan.md` needs
+no extra approval; editing and other actions retain native permissions. Lifetime and unattended continuation are
+verified separately. Registration alone does not establish that the destination read its plan.
 Codex starts as `codex -C DIR PROMPT`, read-only with `-a on-request` while the plan is unapproved,
 because Codex has no flag that starts it in plan mode. `codex` is `AGENT_ETA_CODEX_BIN`, else the one on PATH, else the
 desktop package's `/usr/lib/chatgpt/resources/codex`, and without one the handoff is refused before the pause. The
@@ -417,9 +433,8 @@ The check runs again once the source is paused, since trust may have changed whi
 that point fails the move and thaws the source. Every refusal outside `--dry-run` sends a notification, because a
 trigger starts its handoff detached and only once per window. `--dry-run` shows a refusal without moving anything.
 
-Three limits stay open, the third being the plan read of item 16. A destination that starts after the registration timeout works beside the thawed source, see
-[TODO.md](../TODO.md) item 14. A Claude Code session that a handoff started holds no ExitPlanMode approval, so a later
-move of it to Codex forks a summary and plans again, see item 15.
+A Claude Code session that a handoff started holds no ExitPlanMode approval, so a later move of it to Codex
+without an explicit `--plan` can fork a summary and plan again; see [TODO.md](../TODO.md) item 15.
 
 Every chat of the Codex desktop app runs in one shared app-server, so pausing one would pause all of them. Such a
 thread is refused with "desktop chats cannot be gated", and only a Codex thread with a process of its own can move.
@@ -755,10 +770,12 @@ processes and a recording freezer it covers the gate, the thaw after a failed re
 other error, a refusing freezer, a source turning busy after the pause, a reused pid, duplicates, the lock, a
 partial batch, a refusal before anything runs, trust lost while waiting, and a native plan replacing a forked
 summary. Its `Trust` cases read fixture records of both clients under a temporary `HOME` and `CODEX_HOME`, without
-changing them, for each account, the walk, worktrees, the home directory and unreadable records. `test_handoff_e2e.py` runs `agent-eta handoff` as a subprocess against a real interactive bash in a pty,
-whose foreground job is the source, with the real collectors and the real freezer, and only a fake terminal and a fake
-Codex. It covers a completed move, a registration timeout, a cancel and a refusal for an untrusted folder, and checks that the job keeps the terminal. It
-is skipped without a systemd user manager.
+changing them, for each account, the walk, worktrees, the home directory and unreadable records. `test_handoff_e2e.py` runs the CLI with real tmux panes, user scopes, native-style fixture registries and the
+real freezer; only the providers are fakes. It covers controller exit, foreground-terminal retention, attachment
+reuse, viewer detachment, source-pane removal, unrelated-pane preservation, timeout/cancel cleanup and collection
+of the last server. It clearly skips without tmux or a systemd user manager. `test_tmux.py` covers private runtime
+ownership, stale identities, account environment isolation, launch quoting, attachment-only viewers and the native
+Claude-account terminal adapter.
 
 `test_accounts.py` uses isolated homes and stub native clients for authentication, logout, mismatches, cache
 persistence, identity changes, expired readings, refresh failures, the 50-empty-rollout regression, throttling and

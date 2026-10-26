@@ -12,12 +12,10 @@ session that continues the source's plan:
    "Handover" section of progress, next step, branch, HEAD and dirty paths, and status.json.
 3. The source must reach a safe boundary: no turn running, nothing waiting for an answer and no verified
    background writer. The command waits up to --wait seconds and reports without forcing.
-4. The source process moves into a transient systemd user scope, is frozen there and checked again, the snapshot
-   is refreshed and the destination's trust checked again, the destination opens in a separate Konsole process
-   owned by its own systemd user service, and once it registered the source gets SIGHUP and is thawed.
-   The cgroup freezer leaves job control alone, while SIGSTOP would hand the terminal back to the shell. A
-   failure, a timeout, a cancel or any error thaws the source and keeps status.json with the commands for
-   recovery. Every pause and signal checks the process start time first, so a reused pid is never hit.
+4. The managed source scope is frozen and checked again. A destination starts in another tmux window,
+   outside the source and controller cgroups. After native registration the source scope and pane retire.
+   On failure, the destination scope and pane must be confirmed gone before thawing the source; unresolved
+   cancellation leaves the source paused and records explicit recovery instructions in status.json.
 
 A Codex thread of the desktop app shares one app-server with every other thread, so it cannot be paused on
 its own and is refused as a source. Every collaborator that touches the system comes in through `Env`, which
@@ -38,25 +36,16 @@ import uuid
 from datetime import datetime
 
 import agent_eta_providers
+import agent_eta_tmux
+from agent_eta_store import safe_id
+from agent_eta_tmux import INHERITED, SERVICE_CONTEXT, launcher
 
-# Variables a session hands to the commands it runs. A claude started with the Claude ones believes it is a
-# child session and saves no transcript, measured on 2026-10-16, and the Codex ones would mark the new
-# session as running inside a Codex sandbox.
-INHERITED = ("CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_ENTRYPOINT",
-             "CLAUDE_CONFIG_DIR", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SANDBOX",
-             "CODEX_SANDBOX_NETWORK_DISABLED")
-# These describe the controller's service, not the destination. Let the manager supply fresh values.
-SERVICE_CONTEXT = ("INVOCATION_ID", "JOURNAL_STREAM", "SYSTEMD_EXEC_PID", "NOTIFY_SOCKET", "LISTEN_PID",
-                   "LISTEN_FDS", "LISTEN_FDNAMES", "WATCHDOG_PID", "WATCHDOG_USEC")
-# Konsole keeps a tab's command in its profile, so a split or a new tab in the handoff window runs the
-# launcher again. The first run swaps the script for one that only starts the user's shell.
-ONE_SHOT = r"""printf '#!/bin/sh\nexec "${SHELL:-/bin/sh}"\n' > "$0.tmp" && mv "$0.tmp" "$0" """.rstrip()
 # How long a destination may take to register, and how often the boundary and the registration are polled.
 # The variables exist for tests and for a forced timeout.
 REGISTER_TIMEOUT = float(os.environ.get("AGENT_ETA_HANDOFF_REGISTER_TIMEOUT") or 300)
 POLL = float(os.environ.get("AGENT_ETA_HANDOFF_POLL") or 5)
 # The states of a handoff record that a repeated request reports instead of starting over.
-SETTLED = ("launched", "completed")
+SETTLED = ("completed",)
 SOURCE = re.compile(r"^(claude|codex):([A-Za-z0-9._-]+)$")
 PLAN_REQUEST = ("Write a brief plan for the remaining work of this session as Markdown: a title, a "
                 "`## Steps` section with a numbered list and a `## Verification` section. Print only the plan.")
@@ -257,12 +246,13 @@ def handover_prompt(handoff, plan_path, approved):
     return prompt
 
 
-def destination_command(target, account, cwd, session_id, approved, prompt):
+def destination_command(target, account, cwd, session_id, approved, prompt, plan_directory=None):
     """The command that starts the destination. Each provider uses its own model and effort settings."""
     if target == "claude":
         # An approved plan starts in Manual mode, which overrides a `plan` default of the account's settings
         # and grants nothing beyond its permission rules.
         argv = (["claude-account", "run", account] if account else ["claude"]) \
+            + (["--add-dir", plan_directory] if plan_directory else []) \
             + ["--session-id", session_id, "--permission-mode", "manual" if approved else "plan"]
     else:
         # Codex has no flag that starts in plan mode, so an unapproved plan starts read-only and asks.
@@ -272,11 +262,6 @@ def destination_command(target, account, cwd, session_id, approved, prompt):
         argv = [binary] + (["--no-daemon"] if bundled else []) + ["-C", cwd] \
             + ([] if approved else ["-s", "read-only", "-a", "on-request"])
     return argv + [prompt]
-
-
-def launcher(argv):
-    unset = " ".join("-u %s" % name for name in INHERITED)
-    return "#!/bin/sh\n%s\nexec env %s %s\n" % (ONE_SHOT, unset, " ".join(shlex.quote(arg) for arg in argv))
 
 
 # --- trust -----------------------------------------------------------------------------------
@@ -473,25 +458,40 @@ class Env:
         state = self.run(["systemctl", "--user", "show", "-P", "FreezerState", unit]).stdout.strip()
         return state not in ("frozen", "freezing")
 
-    def open_terminal(self, tabs):
-        """Start the destination outside the controller's cgroup; setsid alone cannot do that.
+    def managed(self, session):
+        return agent_eta_tmux.Runtime().find(session.get("gate"), session.get("proc_start"))
 
-        Wait only for exec, not for the terminal to finish. Forward environment names so values never enter
-        the argument list, and clear source markers even if the user manager inherited them.
-        """
-        terminal = shlex.split(os.environ.get("AGENT_ETA_HANDOFF_TERMINAL")
-                               or "konsole --separate --tabs-from-file")
-        unit = "agent-eta-destination-%s.service" % os.path.basename(os.path.dirname(tabs))
-        variables = ["--setenv=" + name for name in sorted(os.environ)
-                     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
-                     and name not in INHERITED + SERVICE_CONTEXT]
-        result = self.run(["systemd-run", "--user", "--collect", "--quiet", "--service-type=exec",
-                           "--expand-environment=no", "--same-dir", "--unit=" + unit,
-                           "--property=UnsetEnvironment=" + " ".join(INHERITED)] + variables + ["--"]
-                          + terminal + [tabs])
-        if result.returncode != 0:
-            raise OSError("%s: %s" % (unit, (result.stderr or result.stdout
-                                          or "exit %d" % result.returncode).strip()))
+    def open_destination(self, handoff):
+        environment = {}
+        command = list(handoff["command"])
+        if handoff["target"] == "claude":
+            command[0] = agent_eta_providers.executable(command[0])
+            directories = dict(self.accounts())
+            directory = directories.get(handoff["account"]) or directories.get(None)
+            if directory:
+                environment["CLAUDE_CONFIG_DIR"] = directory
+        else:
+            environment["CODEX_HOME"] = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+        return agent_eta_tmux.Runtime().start(command, handoff["cwd"],
+                    session=handoff["source_terminal"]["session"], environment=environment,
+                    identifier=handoff["destination_id"])
+
+    def cancel_destination(self, handoff):
+        if not handoff.get("destination_id"):
+            return True
+        try:
+            return agent_eta_tmux.Runtime().stop(handoff["destination_id"])
+        except agent_eta_tmux.TmuxError:
+            return False
+
+    def retire_source(self, handoff, session):
+        managed = self.managed(session)
+        if not managed or managed["id"] != handoff["source_terminal"]["id"]:
+            return False
+        return agent_eta_tmux.Runtime().stop(handoff["source_terminal"]["id"])
+
+    def select_destination(self, handoff):
+        agent_eta_tmux.Runtime().select(handoff["destination_terminal"])
 
     def registered(self, handoff):
         """Whether the destination of a launched handoff has shown up."""
@@ -501,7 +501,12 @@ class Env:
                     continue
                 for entry in os.scandir(os.path.join(directory, "sessions")) if os.path.isdir(
                         os.path.join(directory, "sessions")) else []:
-                    if entry.name.endswith(".json") and handoff["session_id"] in (read_text(entry.path) or ""):
+                    if not entry.name.endswith(".json") or not entry.name[:-5].isdigit():
+                        continue
+                    data = read_config(entry.path, json.load) or {}
+                    pid = int(entry.name[:-5])
+                    if data.get("sessionId") == handoff["session_id"] and self.registered_process(
+                            handoff, pid, self.proc_start(pid), handoff["session_id"]):
                         return True
             return False
         root = os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "sessions")
@@ -511,11 +516,27 @@ class Env:
                 try:
                     if os.path.getmtime(path) < handoff["launched"] - 5:
                         continue
-                    if prompted(path, handoff["id"]):
+                    if not prompted(path, handoff["id"]):
+                        continue
+                    session_id = next((r.get("payload", {}).get("id") for r in jsonl(path)
+                                       if r.get("type") == "session_meta"), None)
+                    if not session_id:
+                        continue
+                    state = os.environ.get("AGENT_ETA_DIR") or "/tmp/agent-eta-%d" % os.getuid()
+                    native = read_config(os.path.join(state, "sessions", "codex-%s.json" % safe_id(session_id)), json.load) or {}
+                    app = native.get("app") or {}
+                    if self.registered_process(handoff, app.get("pid"), app.get("start"), session_id):
                         return True
                 except OSError:
                     continue
         return False
+
+    def registered_process(self, handoff, pid, start, session_id):
+        owned = agent_eta_tmux.Runtime().find(pid, start)
+        if not owned or owned["id"] != handoff.get("destination_id"):
+            return False
+        handoff.update(destination_pid=pid, destination_start=start, destination_session_id=session_id)
+        return True
 
     def trust(self, target, account, cwd):
         """Why the destination would stop at its client's trust question in cwd, or None. It only reads the
@@ -571,7 +592,7 @@ class Env:
 
 def scope(handoff):
     """The transient user scope that holds the paused source of a handoff."""
-    return "agent-eta-handoff-%s.scope" % handoff["id"]
+    return handoff.get("source_scope") or "agent-eta-handoff-%s.scope" % handoff["id"]
 
 
 def prompted(rollout, text, limit=4 << 20):
@@ -654,6 +675,11 @@ def prepare(source, target, account, plan_path, env, root, dry_run=False):
         raise HandoffError("%s:%s is no running session" % source)
     if session.get("gate") is None:
         raise HandoffError("%s:%s: %s" % (source + (session.get("gate_reason") or "it cannot be paused",)))
+    managed = env.managed(session)
+    if not managed:
+        raise HandoffError("unmanaged CLI session: close it, then resume with "
+                           "agent-eta account launch ACCOUNT --cli --resume %s --directory %s"
+                           % (source[1], shlex.quote(session["cwd"])))
     account = choose_account(target, account, env)
     # Trust is checked before a fork may spend minutes of the scarce quota on a plan.
     require_trust(env, target, account, session["cwd"])
@@ -663,6 +689,7 @@ def prepare(source, target, account, plan_path, env, root, dry_run=False):
                "source": "%s:%s" % source, "target": target, "account": account, "cwd": session["cwd"],
                "created": int(now), "state": "prepared",
                "session_id": str(uuid.uuid4()) if target == "claude" else None, "launched": None}
+    handoff.update(source_terminal=managed, source_scope=managed["scope"])
     handoff["resume_source"] = "systemctl --user thaw %s" % scope(handoff)
     folder = os.path.join(root, handoff["id"])
     text = snapshot(handoff, plan, env, folder)
@@ -686,7 +713,7 @@ def snapshot(handoff, plan, env, folder):
     handoff["plan_origin"], handoff["phase"] = plan["origin"], plan["phase"]
     prompt = handover_prompt(handoff, os.path.join(folder, "plan.md"), plan["approved"])
     handoff["command"] = destination_command(handoff["target"], handoff["account"], handoff["cwd"],
-                                             handoff["session_id"], plan["approved"], prompt)
+                                             handoff["session_id"], plan["approved"], prompt, folder)
     return plan["text"].rstrip("\n") + "\n\n" + handover_section(handoff, plan, git, env.now())
 
 
@@ -708,38 +735,35 @@ def refresh(handoff, session, plan, env, folder):
 
 
 def launch(handoff, env, root):
-    folder = os.path.join(root, handoff["id"])
-    script = os.path.join(folder, "launch.sh")
-    with open(script, "w", encoding="utf-8") as handle:
-        handle.write(launcher(handoff["command"]))
-    os.chmod(script, 0o700)
-    tabs = os.path.join(folder, "tabs.txt")
-    title = "Handoff %s %s" % (os.path.basename(handoff["cwd"].rstrip("/")) or "~", handoff["id"][-6:])
-    with open(tabs, "w", encoding="utf-8") as handle:
-        handle.write("title: %s;; workdir: %s;; command: /bin/sh %s\n" % (title, handoff["cwd"], script))
-    env.open_terminal(tabs)
+    handoff["destination_id"] = uuid.uuid4().hex
+    write_record(os.path.join(root, handoff["id"]), handoff)
+    handoff["destination_terminal"] = env.open_destination(handoff)
 
 
 def transfer(handoff, session, plan, env, root, wait):
-    """Wait for a safe boundary, pause the source, launch, confirm and end the source. Every way out thaws
-    the source: a cancel through Ctrl-C, SIGTERM or SIGHUP records the move as cancelled, any other error as
-    failed before it propagates, and a completed move has sent SIGHUP before the thaw."""
+    """Cancel and confirm the destination before returning ownership to the source."""
     folder = os.path.join(root, handoff["id"])
     try:
         return gated_transfer(handoff, session, plan, env, folder, root, wait)
     except KeyboardInterrupt:
-        handoff.update(state="cancelled", error="cancelled"
-                       + ("" if not handoff.get("launched") else "; the destination window stays open"))
-        write_record(folder, handoff)
+        handoff.update(state="cancelled", error="cancelled")
         return False
     except Exception as exc:
         handoff.update(state="failed", error="%s: %s" % (type(exc).__name__, exc))
-        write_record(folder, handoff)
         raise
     finally:
-        if not env.resume(scope(handoff)):
-            handoff.update(error="%s; the source is still frozen, run resume_source" % handoff.get("error"))
-            write_record(folder, handoff)
+        if handoff["state"] != "completed":
+            confirmed = env.cancel_destination(handoff)
+            handoff["destination_cancelled"] = confirmed
+            if confirmed:
+                if not env.resume(scope(handoff)):
+                    handoff["error"] = str(handoff.get("error") or "") + "; the source is still frozen, run resume_source"
+            else:
+                handoff["source_paused"] = True
+                handoff["error"] = str(handoff.get("error") or "") + (
+                    "; destination cancellation is unconfirmed; the source remains paused. "
+                    "Confirm the destination has stopped before running resume_source")
+        write_record(folder, handoff)
 
 
 def gated_transfer(handoff, session, plan, env, folder, root, wait):
@@ -752,6 +776,10 @@ def gated_transfer(handoff, session, plan, env, folder, root, wait):
             handoff.update(state="failed", error="the source ended before the move")
             write_record(folder, handoff)
             return False
+        if (current.get("gate"), current.get("proc_start")) != (pid, start):
+            handoff.update(state="failed", error="the source identity changed while waiting")
+            write_record(folder, handoff)
+            return False
         if safe(current):
             try:
                 env.pause(unit, pid, start)
@@ -760,7 +788,7 @@ def gated_transfer(handoff, session, plan, env, folder, root, wait):
                 write_record(folder, handoff)
                 return False
             again = env.inspect(source)
-            if again is not None and safe(again):
+            if again is not None and safe(again) and (again.get("gate"), again.get("proc_start")) == (pid, start):
                 break
             if not env.resume(unit):
                 raise HandoffError("the source cannot be thawed after it turned busy")
@@ -778,7 +806,7 @@ def gated_transfer(handoff, session, plan, env, folder, root, wait):
         return False
     try:
         launch(handoff, env, root)
-    except OSError as exc:
+    except (OSError, agent_eta_tmux.TmuxError) as exc:
         handoff.update(state="failed", error="launch failed: %s" % exc)
         write_record(folder, handoff)
         return False
@@ -791,7 +819,9 @@ def gated_transfer(handoff, session, plan, env, folder, root, wait):
             write_record(folder, handoff)
             return False
         env.sleep(min(1, POLL))
-    env.signal(pid, start, signal.SIGHUP)
+    env.select_destination(handoff)
+    if not env.retire_source(handoff, again):
+        raise HandoffError("the source process or pane could not be retired")
     handoff.update(state="completed", error=None)
     write_record(folder, handoff)
     return True
@@ -803,7 +833,9 @@ def delegate_claude(source, account, wait, env, session):
         raise HandoffError("name the destination account with --account")
     if session.get("account") is None:
         raise HandoffError("the source account has no registered name")
-    result = env.run(["claude-account", "handoff", session["account"], account, "--only", source[1],
+    adapter = agent_eta_tmux.account_environment()["CLAUDE_HANDOFF_TERMINAL"]
+    result = env.run(["env", "CLAUDE_HANDOFF_TERMINAL=" + adapter,
+                      "claude-account", "handoff", session["account"], account, "--only", source[1],
                       "--wait", str(int(wait))], timeout=wait + REGISTER_TIMEOUT + 60)
     if result.returncode != 0:
         raise HandoffError((result.stderr or result.stdout or "claude-account handoff failed").strip())
@@ -819,6 +851,9 @@ def handoff_one(text, target, account, plan_path, wait, dry_run, env, root):
         return dict(handoff, plan=text)
     with SourceLock(root, source):
         previous = latest_by_source(root).get(text)
+        if previous and (previous.get("source_paused") or previous.get("state") == "launched"):
+            raise HandoffError("the previous handoff has unresolved ownership; inspect %s and confirm the "
+                               "destination has stopped before running resume_source" % previous["id"])
         if previous and previous.get("state") in SETTLED:
             return dict(previous, note="already handed off")
         if source[0] == "claude" and target == "claude":

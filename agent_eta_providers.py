@@ -12,6 +12,7 @@ import selectors
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 
@@ -202,12 +203,34 @@ def spawn(command, env=None):
         raise AccountError("The account action could not be started") from None
 
 
-def launch(account, directory, login=False):
+def launch(account, directory, login=False, cli=False, resume=None):
     """Pass argv directly to processes; no directory or account name becomes shell code."""
-    if account["provider"] == "codex" and not login:
+    if account["provider"] == "codex" and not login and not cli and not resume:
         from urllib.parse import urlencode
         spawn([executable("opener"), "codex://threads/new?" + urlencode({"path": directory})])
         return
+    if not login:
+        import agent_eta_tmux
+        if account["provider"] == "claude":
+            command, _ = claude_command(account, ["--resume", resume] if resume else [])
+            environment = {"CLAUDE_CONFIG_DIR": account["directory"]}
+        else:
+            binary = executable("codex")
+            command = [binary] + (["--no-daemon"] if os.path.realpath(binary) == DESKTOP_CODEX else [])
+            command += ["-C", directory] + (["resume", resume] if resume else [])
+            environment = {"CODEX_HOME": account["directory"]}
+        runtime = agent_eta_tmux.Runtime()
+        identifier = uuid.uuid4().hex
+        try:
+            record = runtime.start(command, directory, environment=environment, identifier=identifier)
+        except agent_eta_tmux.TmuxError as exc:
+            try:
+                cancelled = runtime.stop(identifier)
+            except agent_eta_tmux.TmuxError:
+                cancelled = False
+            raise AccountError(str(exc) + ("" if cancelled else "; terminal cleanup is unconfirmed")) from None
+        runtime.attach(record)
+        return record
     if account["provider"] == "claude":
         command, env = claude_command(account, ["auth", "login"] if login else [])
     else:

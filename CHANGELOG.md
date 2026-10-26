@@ -7,6 +7,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-26
+
+### Added
+
+- Managed tmux launch, CLI resume and attachment navigation for Claude Code and Codex
+- A private tmux server service and individual agent scopes with verified process identities
+
+### Changed
+
+- Cross-provider handoffs require managed tmux sessions; unmanaged sessions remain visible and can be closed and resumed through the managed launcher
+- Konsole is the default attachment viewer and no longer controls handoff lifetime; Codex desktop launches remain available
+- The installer requires tmux, and local Claude-account migration reuses its native terminal extension
+
+### Fixed
+
+- Successful handoffs remove the source process and pane before reporting completion
+- Failed or cancelled destinations must be confirmed stopped before the source thaws; uncertain ownership keeps the source paused
+- Claude receives access to its private handoff folder so reading the plan needs no extra permission approval
+
 ## [1.3.2] - 2026-10-25
 
 ### Fixed

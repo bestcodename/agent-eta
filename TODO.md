@@ -54,20 +54,12 @@ priority.
 13. (low) Two handoff cases stay open. A handoff killed with SIGKILL while its source is frozen leaves it frozen;
     `status.json` names `systemctl --user thaw` in `resume_source`, but nothing runs it. An account row's batch to a
     Claude account without a registered name passes no `--account`, so `choose_account()` may pick another eligible
-    account than the clicked one. Proposal: thaw the scopes of dead handoffs on the next `agent-eta list`, and pass
-    the account directory to the batch (ca. 2 hours).
-14. (low) A destination that starts after the registration timeout works beside the thawed source. In handoff
-    `20261020-070216-0bff4b` the Codex destination started about 21 minutes after the launch. `~/.codex/logs_2.sqlite`
-    holds no Codex log line between the launch at 07:02:37 and 07:23:28, while a TUI logs at once when it starts, so
-    the process probably started late and no trust question held it. Proposal: mark `plan.md` as cancelled when a
-    move fails, so a late destination stops at its first read (ca. 1 hour).
+    account than the clicked one. Proposal: report dead handoffs with recovery instructions on the next
+    `agent-eta list`, requiring confirmed destination cancellation before any thaw, and pass the account directory
+    to the batch (ca. 2 hours).
 15. (low) A Claude Code session that a handoff started holds no ExitPlanMode approval, so moving it on to Codex forks
     a summary and plans again. Proposal: count such a session as approved from the completed handoff record that
     started it with an approved plan (ca. 2 hours).
-16. (next) An approved Claude Code destination in Manual mode asks permission to read its own `plan.md`, because the
-    handoff folder lies outside the working directory, so it stops at its first action. Measured in handoff
-    `20261020-145445-c74f97` on 2026-10-20. Proposal: start the destination with `--add-dir` for the handoff folder,
-    after checking that this grants no more than the folder (ca. 1 hour).
 
 Waiting: counter-test for the agent-eta Codex permission fix of 0.66.7 (ca. 15 Minuten). The Codex weekly limit is
 used up until 2026-10-08 03:22. In a Codex thread with the reviewer set to `user`, an escalated `sleep 60` must show

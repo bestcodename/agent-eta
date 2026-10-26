@@ -1,12 +1,8 @@
-"""End-to-end tests with a real foreground source, collectors, freezer and service cleanup.
-
-Only the terminal and destination provider are fakes; the lifecycle case executes the generated launcher.
-"""
-
+"""Real tmux, user scopes, freezer, CLI collectors and controller shutdown; fake providers only."""
 import json
 import os
+from pathlib import Path
 import pty
-import select
 import shutil
 import signal
 import subprocess
@@ -15,301 +11,203 @@ import tempfile
 import time
 import unittest
 import uuid
+from unittest import mock
 
 import agent_eta_handoff as handoff
+import agent_eta_tmux as tmux
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-PLAN = "# Plan\n\n## Steps\n\n1. First\n2. Second\n3. Third\n\n## Verification\n\n- run it\n"
-# The fake terminal checks the launcher, then writes a Codex rollout whose first user message carries the
-# handoff ID behind 70 KiB of preamble, as the Codex CLI does. FAKE_TERMINAL=silent writes no rollout.
-TERMINAL = r'''
-import json, os, shlex, sys
-tabs = sys.argv[-1]
-folder = os.path.dirname(tabs)
-with open(tabs) as handle:
-    launch = handle.read().split("command: /bin/sh ", 1)[1].strip()
-with open(launch) as handle:
-    script = handle.read()
-codex = os.environ["AGENT_ETA_CODEX_BIN"]
-usable = shlex.quote(codex) in script and os.access(codex, os.X_OK)
-with open(os.environ["FAKE_TERMINAL_LOG"], "a") as handle:
-    handle.write(json.dumps({"id": os.path.basename(folder), "codex": usable}) + "\n")
-if os.environ.get("FAKE_TERMINAL") == "silent" or not usable:
-    sys.exit(0)
-def message(role, text):
-    return json.dumps({"type": "response_item", "payload": {"type": "message", "role": role,
-                       "content": [{"type": "input_text", "text": text}]}}) + "\n"
-day = os.path.join(os.environ["CODEX_HOME"], "sessions", "2026", "10", "20")
-os.makedirs(day, exist_ok=True)
-with open(os.path.join(day, "rollout-2026-10-20T04-22-30-x.jsonl"), "w") as handle:
-    handle.write("".join(message("developer", "x" * 1000) for _ in range(70)))
-    handle.write(message("user", "agent-eta handoff %s: you take over" % os.path.basename(folder)))
+HERE = Path(__file__).resolve().parent
+PROVIDER = '''#!/usr/bin/python3
+import json,os,signal,sys,time,uuid
+from pathlib import Path
+pid=os.getpid()
+root=Path(os.environ['FAKE_RECORDS'])
+fields=Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split()
+record={'pid':pid,'start':fields[19],'tty':fields[4],'pgrp':fields[2],'tpgid':fields[5],
+        'cgroup':Path(f'/proc/{pid}/cgroup').read_text(),'source_marker':os.getenv('CLAUDECODE'),
+        'literal':os.getenv('AGENT_ETA_LITERAL_TEST')}
+if sys.argv[1:] == ['source']:
+    account=Path(os.environ['CLAUDE_CONFIG_DIR'])/'sessions'
+    account.mkdir(parents=True,exist_ok=True)
+    (account/f'{pid}.json').write_text(json.dumps({'pid':pid,'sessionId':os.environ['FAKE_SOURCE_ID'],
+        'cwd':os.getcwd(),'status':'idle','startedAt':int(time.time()*1000)}))
+    (root/'source.json').write_text(json.dumps(record))
+else:
+    (root/'destination.json').write_text(json.dumps(record))
+    if os.environ.get('FAKE_REGISTER','yes') == 'yes':
+        folder=Path(os.environ['CODEX_HOME'])/'sessions'/'test'
+        folder.mkdir(parents=True,exist_ok=True)
+        session_id=str(uuid.uuid4())
+        state=Path(os.environ['AGENT_ETA_DIR'])/'sessions'
+        state.mkdir(parents=True,exist_ok=True)
+        (state/('codex-'+session_id+'.json')).write_text(json.dumps({'app':{'pid':pid,'start':fields[19]}}))
+        (folder/'rollout.jsonl').write_text(json.dumps({'type':'session_meta','payload':{'id':session_id}})+'\\n'+json.dumps({'type':'response_item','payload':{
+            'type':'message','role':'user','content':[{'type':'input_text','text':sys.argv[-1]}]}})+'\\n')
+while True: signal.pause()
 '''
 
 
-def user_manager():
-    """Why the freezer cases cannot run here, or None when they can."""
-    if not shutil.which("bash"):
-        return "bash is missing"
-    if not shutil.which("busctl") or not shutil.which("systemctl"):
-        return "systemd is missing"
-    probe = subprocess.run(["systemctl", "--user", "show", "-P", "Version"], capture_output=True, text=True)
-    if probe.returncode != 0 or not probe.stdout.strip():
-        return "no systemd user manager"
-    return None
+def unavailable():
+    if not shutil.which("tmux"):
+        return "tmux is not installed"
+    result = subprocess.run(["systemctl", "--user", "show", "-P", "Version"], capture_output=True, text=True)
+    return None if result.returncode == 0 and result.stdout.strip() else "no systemd user manager"
 
 
-def stat(pid):
-    """State, process group and the terminal's foreground process group of pid."""
-    with open("/proc/%d/stat" % pid) as handle:
-        rest = handle.read().rsplit(")", 1)[1].split()
-    return rest[0], int(rest[2]), int(rest[5])
-
-
-def frozen(pid):
-    """The scope that holds pid and whether the cgroup freezer holds it."""
-    group = handoff.Env.cgroup(None, pid)
-    with open("/sys/fs/cgroup%s/cgroup.events" % group) as handle:
-        return os.path.basename(group), "frozen 1" in handle.read().splitlines()
-
-
-@unittest.skipIf(user_manager(), user_manager())
-class HandoffFixture(unittest.TestCase):
+@unittest.skipIf(unavailable(), unavailable())
+class ManagedHandoff(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="agent-eta-e2e-")
-        self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.repo = os.path.join(self.tmp, "repo")
-        os.makedirs(self.repo)
-        for args in (["init", "-q", "-b", "feature/x"], ["commit", "-q", "--allow-empty", "-m", "init"]):
-            subprocess.run(["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@example.org"] + args,
-                           check=True)
-        self.account = os.path.join(self.tmp, "account")
-        self.session_id = str(uuid.uuid4())
-        self.progress = os.path.join(self.tmp, "progress", self.session_id + ".json")
-        self.log = os.path.join(self.tmp, "terminal.log")
-        self.root = os.path.join(self.tmp, "handoff")
-        codex = self.write("bin/codex", "#!/bin/sh\nexit 0\n")
-        os.chmod(codex, 0o755)
-        self.trusted = self.write("codex/config.toml", "[projects.%s]\ntrust_level = \"trusted\"\n" % json.dumps(self.repo))
-        terminal = self.write("bin/terminal.py", TERMINAL)
-        self.env = dict(os.environ, AGENT_ETA_DIR=self.path("state"), AGENT_ETA_HANDOFF_DIR=self.root,
-                        CODEX_HOME=self.path("codex"), DSH_HOME=self.path("dsh"), CLAUDE_CONFIG_DIR=self.account,
-                        CLAUDE_ACCOUNTS_FILE=self.write("accounts.json", json.dumps(
-                            {"accounts": [{"name": "work", "dir": self.account}]})),
-                        CLAUDE_PLAN_PROGRESS_DIR=os.path.dirname(self.progress), AGENT_ETA_HANDOFF_NOTIFY="",
-                        AGENT_ETA_HANDOFF_POLL="0.2", AGENT_ETA_CODEX_BIN=codex, FAKE_TERMINAL_LOG=self.log,
-                        AGENT_ETA_HANDOFF_TERMINAL="%s %s" % (sys.executable, terminal))
-        for name in ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"):
-            self.env.pop(name, None)
-        self.bash, self.fd = pty.fork()
-        if self.bash == 0:
-            os.chdir(self.repo)
-            os.execvp("bash", ["bash", "--norc", "--noprofile", "-i"])
-        self.addCleanup(self.kill)
-        self.drain(1.0)
-        os.write(self.fd, b"python3 -c 'import sys; sys.stdin.readline(); print(\"got\")'\n")
-        self.job = self.wait_for(self.child)
-        self.output = self.drain(0.3)
+        self.tmp = tempfile.TemporaryDirectory(prefix="eta-e2e-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        self.account = self.root / "account"
+        self.account.mkdir()
+        self.codex = self.root / "codex"
+        self.codex.mkdir()
+        (self.codex / "config.toml").write_text('[projects.' + json.dumps(str(self.repo)) + ']\ntrust_level="trusted"\n')
+        self.provider = self.root / "provider"
+        self.provider.write_text(PROVIDER)
+        self.provider.chmod(0o700)
+        self.source_id = str(uuid.uuid4())
+        self.plan = self.root / "plan.md"
+        self.plan.write_text("# Wait\n\nRemain interactive and wait for the user. No reply is required.\n")
+        registry = self.root / "accounts.json"
+        registry.write_text(json.dumps({"accounts": [{"name": "work", "dir": str(self.account)}]}))
+        self.env = dict(os.environ, AGENT_ETA_DIR=str(self.root / "state"), CODEX_HOME=str(self.codex),
+                        CLAUDE_ACCOUNTS_FILE=str(registry), AGENT_ETA_CODEX_BIN=str(self.provider),
+                        AGENT_ETA_HANDOFF_DIR=str(self.root / "handoff"), AGENT_ETA_HANDOFF_NOTIFY="",
+                        AGENT_ETA_HANDOFF_POLL="0.05", AGENT_ETA_HANDOFF_REGISTER_TIMEOUT="1",
+                        FAKE_RECORDS=str(self.root), FAKE_SOURCE_ID=self.source_id, FAKE_REGISTER="yes",
+                        AGENT_ETA_LITERAL_TEST='spaces "quotes" $HOME %s\nsecond line', AGENT_ETA_NO_REFRESH="1")
+        self.patch = mock.patch.dict(os.environ, self.env)
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+        self.runtime = tmux.Runtime()
+        self.owned = []
+        self.addCleanup(self.cleanup)
+        source = self.runtime.start([str(self.provider), "source"], self.repo,
+                                    environment={"CLAUDE_CONFIG_DIR": str(self.account)})
+        self.owned.append(source["id"])
+        self.source_terminal = source
+        self.source = self.wait(lambda: self.read("source.json"))
+        self.assertEqual(self.source["pgrp"], self.source["tpgid"])
 
-    def path(self, rel):
-        return os.path.join(self.tmp, rel)
+    def read(self, filename):
+        try:
+            return json.loads((self.root / filename).read_text())
+        except (OSError, ValueError):
+            return None
 
-    def write(self, rel, text):
-        path = rel if os.path.isabs(rel) else self.path(rel)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write(text)
-        return path
+    def wait(self, function, seconds=10):
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            value = function()
+            if value:
+                return value
+            time.sleep(.05)
+        self.fail("timed out waiting for fixture")
 
-    def kill(self):
-        for pid in (getattr(self, "job", None), self.bash):
+    def cleanup(self):
+        for record in handoff.records(str(self.root / "handoff")) if (self.root / "handoff").exists() else []:
+            if record.get("destination_id"):
+                self.owned.append(record["destination_id"])
+        for identifier in self.owned:
             try:
-                os.kill(pid, signal.SIGKILL)
-            except (OSError, TypeError):
+                self.runtime.stop(identifier)
+            except tmux.TmuxError:
                 pass
-        os.waitpid(self.bash, 0)
-        os.close(self.fd)
 
-    def drain(self, wait):
-        out, end = b"", time.time() + wait
-        while time.time() < end:
-            if select.select([self.fd], [], [], 0.05)[0]:
-                try:
-                    data = os.read(self.fd, 4096)
-                except OSError:
-                    break
-                out += data
-        return out.decode(errors="replace")
+    def command(self):
+        return [sys.executable, str(HERE / "agent-eta"), "handoff", "claude:" + self.source_id,
+                "--to", "codex", "--plan", str(self.plan), "--wait", "2"]
 
-    def wait_for(self, probe, timeout=10):
-        end = time.time() + timeout
-        while time.time() < end:
-            found = probe()
-            if found:
-                return found
-            time.sleep(0.05)
-        self.fail("timed out waiting for %s" % probe.__name__)
+    def finish(self, process):
+        out, err = process.communicate(timeout=20)
+        self.assertTrue(out.strip(), err)
+        record = json.loads(out)
+        return record
 
-    def child(self):
-        with open("/proc/%d/task/%d/children" % (self.bash, self.bash)) as handle:
-            pids = handle.read().split()
-        return int(pids[0]) if pids else None
+    def assert_source_live_and_thawed(self):
+        self.assertEqual(tmux.proc_start(self.source["pid"]), self.source["start"])
+        state = subprocess.run(["systemctl", "--user", "show", "-P", "FreezerState", self.source_terminal["scope"]], text=True, capture_output=True)
+        self.assertNotEqual(state.stdout.strip(), "frozen")
 
-    def source(self, status, done):
-        """Register the job as a Claude Code session with an approved plan, `done` of 3 steps finished."""
-        plan = self.write("plan.md", PLAN)
-        self.write(os.path.join(self.account, "sessions", "%d.json" % self.job), json.dumps({
-            "pid": self.job, "sessionId": self.session_id, "status": status, "cwd": self.repo,
-            "statusUpdatedAt": int(time.time() * 1000), "procStart": handoff.Env.proc_start(None, self.job)}))
-        self.write(os.path.join(self.account, "projects", "x", self.session_id + ".jsonl"), json.dumps({
-            "type": "user", "toolUseResult": {"filePath": plan, "plan": PLAN, "isAgent": False},
-            "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_1",
-                                     "content": "User has approved your plan."}]}}) + "\n")
-        self.write(self.progress, json.dumps({"approval": "toolu_1", "plan": plan, "done": done, "total": 3}))
-
-    def handoff(self, **extra):
-        return subprocess.Popen([sys.executable, os.path.join(HERE, "agent-eta"), "handoff",
-                                 "claude:" + self.session_id, "--to", "codex", "--wait", "60"],
-                                env=dict(self.env, **extra), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True)
-
-    def record(self):
-        (folder,) = [name for name in os.listdir(self.root) if name not in ("locks",)]
-        with open(os.path.join(self.root, folder, "status.json")) as handle:
-            return json.load(handle)
-
-    def finish(self, proc):
-        out, err = proc.communicate(timeout=60)
-        self.assertNotIn("Traceback", err)
-        return self.record()
-
-    def assert_usable(self):
-        """The job runs in the terminal's foreground, was not stopped and reads the next line."""
-        state, group, foreground = stat(self.job)
-        self.assertEqual((group, False), (foreground, state == "T"))
-        self.assertNotIn("Stopped", self.output + self.drain(0.3))
-        os.write(self.fd, b"line\n")
-        self.assertIn("got", self.drain(1.0))
-
-
-class Handoff(HandoffFixture):
-    def test_a_completed_move_ends_the_source_and_hands_the_terminal_back(self):
-        self.source("busy", 1)
-        proc = self.handoff()
-        time.sleep(1.0)
-        self.source("idle", 2)
-        record = self.finish(proc)
-        self.assertEqual("completed", record["state"], record.get("error"))
-        with open(os.path.join(self.root, record["id"], "plan.md")) as handle:
-            text = handle.read()
-        self.assertIn("- Progress: 2/3 steps done", text)
-        self.assertIn("- Next step: 3. Third", text)
-        with open(self.log) as handle:
-            self.assertTrue(json.loads(handle.readline())["codex"])
-        self.wait_for(lambda: not os.path.exists("/proc/%d" % self.job) or stat(self.job)[0] == "Z")
-        self.assertIn("Hangup", self.drain(1.0))
-        self.assertEqual(self.bash, stat(self.bash)[2])
-
-    def test_a_registration_timeout_thaws_a_usable_source(self):
-        self.source("idle", 1)
-        record = self.finish(self.handoff(FAKE_TERMINAL="silent", AGENT_ETA_HANDOFF_REGISTER_TIMEOUT="2"))
-        self.assertEqual("failed", record["state"])
-        self.assertIn("did not register", record["error"])
-        self.assert_usable()
-
-    def test_an_untrusted_destination_is_refused_before_the_pause(self):
-        self.source("idle", 1)
-        os.remove(self.trusted)
-        proc = self.handoff()
-        out, err = proc.communicate(timeout=60)
-        self.assertNotIn("Traceback", err)
-        result = json.loads(out)
-        self.assertEqual("refused", result["state"])
-        self.assertIn("Codex does not trust %s yet" % self.repo, result["error"])
-        self.assertFalse(os.path.exists(self.log))
-        self.assertNotIn("agent-eta-handoff-", handoff.Env.cgroup(None, self.job))
-        self.assert_usable()
-
-    def test_a_cancel_thaws_a_usable_source(self):
-        self.source("idle", 1)
-        proc = self.handoff(FAKE_TERMINAL="silent")
-        self.wait_for(lambda: os.path.exists(self.log))
-        paused = frozen(self.job)
-        proc.send_signal(signal.SIGTERM)
-        record = self.finish(proc)
-        self.assertEqual((handoff.scope(record), True), paused)
-        self.assertEqual("cancelled", record["state"])
-        self.assert_usable()
-
-
-class DestinationLifetime(HandoffFixture):
-    def test_destination_survives_controller_service_exit(self):
-        """A detached process still dies with its controller's service unless the launcher moves it out."""
-        self.source("idle", 1)
-        terminal = self.write("bin/exec-terminal.py", '''
-import os, sys
-with open(sys.argv[-1]) as handle:
-    launch = handle.read().split("command: /bin/sh ", 1)[1].strip()
-os.execv("/bin/sh", ["/bin/sh", launch])
-''')
-        provider = self.write("bin/codex", "#!%s\n" % sys.executable + r'''
-import json, os, signal, sys
-pid = os.getpid()
-with open("/proc/%d/stat" % pid) as handle:
-    start = handle.read().rsplit(")", 1)[1].split()[19]
-with open("/proc/%d/cgroup" % pid) as handle:
-    group = next(line.strip()[3:] for line in handle if line.startswith("0::"))
-with open(os.environ["FAKE_TERMINAL_LOG"], "w") as handle:
-    json.dump({"pid": pid, "start": start, "cgroup": group,
-               "literal": os.environ.get("AGENT_ETA_LITERAL_TEST"),
-               "source_marker": os.environ.get("CLAUDECODE")}, handle)
-folder = os.path.join(os.environ["CODEX_HOME"], "sessions", "test")
-os.makedirs(folder, exist_ok=True)
-with open(os.path.join(folder, "rollout.jsonl"), "w") as handle:
-    handle.write(json.dumps({"type": "response_item", "payload": {
-        "type": "message", "role": "user", "content": [{"type": "input_text", "text": sys.argv[-1]}]}}) + "\n")
-while True:
-    signal.pause()
-''')
-        os.chmod(provider, 0o755)
-        self.env["AGENT_ETA_HANDOFF_TERMINAL"] = "%s %s" % (sys.executable, terminal)
-        self.env["AGENT_ETA_LITERAL_TEST"] = 'spaces "quotes" $HOME %s\nsecond line'
-        self.env["CLAUDECODE"] = "source-session"
-        controller = "agent-eta-test-controller-%s.service" % uuid.uuid4().hex
-
-        def cleanup():
-            units = [controller]
-            if os.path.isdir(self.root):
-                units += ["agent-eta-destination-%s.service" % record["id"]
-                          for record in handoff.records(self.root)]
-            for unit in units:
-                subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True, timeout=10)
-        self.addCleanup(cleanup)
-        # The service manager does not inherit the test process's environment by itself.
-        variables = ["--setenv=" + name for name in self.env
-                     if name.replace("_", "a").isalnum() and not name.startswith(("INVOCATION_", "JOURNAL_"))
-                     and name not in ("SYSTEMD_EXEC_PID", "NOTIFY_SOCKET", "LISTEN_PID", "LISTEN_FDS",
-                                      "LISTEN_FDNAMES", "WATCHDOG_PID", "WATCHDOG_USEC")]
-        proc = subprocess.Popen(["systemd-run", "--user", "--collect", "--quiet", "--wait", "--pipe",
-                                 "--service-type=exec", "--property=TimeoutStopSec=2s", "--unit=" + controller]
-                                + variables + [sys.executable, os.path.join(HERE, "agent-eta"), "handoff",
-                                               "claude:" + self.session_id, "--to", "codex", "--wait", "10"],
-                                env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        record = self.finish(proc)
-        self.assertEqual("completed", record["state"], record.get("error"))
-        self.assertEqual(0, proc.returncode)
-        self.assertNotEqual(0, subprocess.run(["systemctl", "--user", "is-active", "--quiet", controller],
-                                             capture_output=True).returncode)
-        with open(self.log) as handle:
-            destination = json.load(handle)
-        self.assertEqual(self.env["AGENT_ETA_LITERAL_TEST"], destination["literal"])
+    def test_completed_handoff_survives_controller_exit_and_viewer_detachment(self):
+        other = self.runtime.start(["sleep", "120"], self.repo)
+        self.owned.append(other["id"])
+        controller = "agent-eta-test-controller-" + uuid.uuid4().hex + ".service"
+        env_args = ["--setenv=" + name for name in self.env if name not in tmux.SERVICE_CONTEXT + tmux.INHERITED]
+        process = subprocess.Popen(["systemd-run", "--user", "--collect", "--wait", "--pipe", "--quiet", "--unit=" + controller,
+                                    *env_args, "--", *self.command()], env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        record = self.finish(process)
+        self.assertEqual((process.returncode, record["state"]), (0, "completed"), record)
+        self.assertIsNone(tmux.proc_start(self.source["pid"]))
+        self.assertIsNone(self.runtime.pane(self.source_terminal))
+        self.assertIsNotNone(self.runtime.pane(other))
+        destination = self.wait(lambda: self.read("destination.json"))
+        self.assertEqual(destination["literal"], self.env["AGENT_ETA_LITERAL_TEST"])
         self.assertIsNone(destination["source_marker"])
-        pid = destination["pid"]
-        self.assertEqual(destination["start"], handoff.Env.proc_start(None, pid),
-                         "controller cleanup terminated the destination")
-        self.assertNotIn(stat(pid)[0], ("Z", "T"))
-        self.assertNotIn(controller, handoff.Env.cgroup(None, pid))
-        self.wait_for(lambda: not os.path.exists("/proc/%d" % self.job) or stat(self.job)[0] == "Z")
+        self.assertNotEqual(destination["tty"], "0")
+        self.assertEqual(destination["pgrp"], destination["tpgid"])
+        self.assertNotIn(controller, destination["cgroup"])
+        self.assertNotIn(self.source_terminal["scope"], destination["cgroup"])
+        child, fd = pty.fork()
+        if child == 0:
+            os.environ["TERM"] = "xterm-256color"
+            os.execvp("tmux", ["tmux", "-S", self.runtime.socket, "attach-session", "-t", record["destination_terminal"]["session"]])
+        try:
+            self.wait(self.runtime.clients)
+            before = len(self.runtime.clients())
+            result = self.runtime.attach(record["destination_terminal"])
+            self.assertFalse(result["opened"])
+            self.assertEqual(len(self.runtime.clients()), before)
+        finally:
+            os.kill(child, signal.SIGTERM)
+            os.waitpid(child, 0)
+            os.close(fd)
+        self.assertEqual(tmux.proc_start(destination["pid"]), destination["start"])
+        self.assertIsNotNone(self.runtime.find(destination["pid"], destination["start"]))
+
+    def test_registration_timeout_cancels_destination_before_thawing_source(self):
+        self.env["FAKE_REGISTER"] = "no"
+        # The server retains the launch environment, so use an explicit fake that never registers.
+        silent = self.root / "silent"
+        silent.write_text(PROVIDER.replace("if os.environ.get('FAKE_REGISTER','yes') == 'yes':", "if False:"))
+        silent.chmod(0o700)
+        self.env["AGENT_ETA_CODEX_BIN"] = str(silent)
+        process = subprocess.Popen(self.command(), env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        record = self.finish(process)
+        self.assertEqual((process.returncode, record["state"], record["destination_cancelled"]), (1, "failed", True))
+        destination = self.wait(lambda: self.read("destination.json"))
+        self.assertIsNone(tmux.proc_start(destination["pid"]))
+        self.assert_source_live_and_thawed()
+
+    def test_cancel_confirms_destination_exit_and_thaws_source(self):
+        self.env["AGENT_ETA_HANDOFF_REGISTER_TIMEOUT"] = "30"
+        silent = self.root / "silent"
+        silent.write_text(PROVIDER.replace("if os.environ.get('FAKE_REGISTER','yes') == 'yes':", "if False:"))
+        silent.chmod(0o700)
+        self.env["AGENT_ETA_CODEX_BIN"] = str(silent)
+        process = subprocess.Popen(self.command(), env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.wait(lambda: self.read("destination.json"))
+        process.terminate()
+        record = self.finish(process)
+        self.assertEqual((process.returncode, record["state"], record["destination_cancelled"]), (1, "cancelled", True))
+        self.assertIsNone(tmux.proc_start(self.read("destination.json")["pid"]))
+        self.assert_source_live_and_thawed()
+
+    def test_last_pane_exit_collects_the_server_service(self):
+        self.assertTrue(self.runtime.stop(self.source_terminal["id"]))
+        self.wait(lambda: subprocess.run(["systemctl", "--user", "is-active", "--quiet", self.runtime.unit], capture_output=True).returncode != 0)
+
+    def test_frozen_source_is_retired_without_resuming_it(self):
+        subprocess.run(["systemctl", "--user", "freeze", self.source_terminal["scope"]], check=True, capture_output=True)
+        self.assertTrue(self.runtime.stop(self.source_terminal["id"]))
+        self.assertIsNone(tmux.proc_start(self.source["pid"]))
+        self.assertIsNone(self.runtime.pane(self.source_terminal))
 
 
 if __name__ == "__main__":

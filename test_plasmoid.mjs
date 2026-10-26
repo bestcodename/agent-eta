@@ -225,8 +225,8 @@ test("quoting survives a quote in a path", () => {
 
 test("copy gives a resume command for Claude Code and a thread link for Codex", () => {
     assert.equal(logic.resumeCommand(session({id: "abc", account: "ndcnet"})),
-                 "cd '/work/shop' && claude-account run 'ndcnet' --resume 'abc'");
-    assert.equal(logic.resumeCommand(session({id: "abc", cwd: null})), "claude --resume 'abc'");
+                 "agent-eta account launch 'claude:ndcnet' --cli --resume 'abc' --directory '/work/shop'");
+    assert.equal(logic.resumeCommand(session({id: "abc", cwd: null})), "agent-eta account launch 'claude:default' --cli --resume 'abc'");
     assert.equal(logic.resumeCommand(session({agent: "codex", id: "t-1"})), "codex://threads/t-1");
     assert.equal(logic.resumeCommand(session({agent: "local", id: null})), "");
     assert.equal(logic.resumeCommand(session({agent: "dsh", id: "session-1"})), "");
@@ -352,3 +352,12 @@ test("rows show a pending or failed handoff and forget a completed one", () => {
     assert.equal(logic.handoffText(at("completed")), "");
     assert.match(logic.detailLine(at("waiting"), 0), /handoff to Codex pending$/);
 });
+
+ test("managed sessions navigate through tmux and CLI resume retains account and directory", () => {
+    for (const agent of ["claude", "codex"]) {
+        const row = session({agent, id: "abc", navigation: {kind: "tmux"}});
+        assert.equal(logic.codexNavigation(row).kind, "tmux");
+        assert.match(logic.resumeCommand(row), /agent-eta account launch/);
+        assert.match(logic.resumeCommand(row), /--cli --resume 'abc' --directory '\/work\/shop'/);
+    }
+ });

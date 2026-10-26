@@ -56,6 +56,7 @@ Item {
         const target = Logic.codexNavigation(session);
         if (target && target.kind === "unavailable") return target.reason;
         if (target && target.kind === "url") return "";
+        if (target && target.kind === "tmux") return launcher && command ? "" : qsTr("The session launcher is unavailable.");
         if (session.agent === "dsh") return session.web_url ? "" : qsTr("No dsh web address is available.");
         return find(session) >= 0 ? "" : qsTr("The session's window is no longer available.");
     }
@@ -71,6 +72,17 @@ Item {
         const target = Logic.codexNavigation(session);
         if (target && target.kind === "url") {
             return openUrl(target.url);
+        }
+        if (target && target.kind === "tmux") {
+            const attach = command + " attach " + Logic.shellQuote(session.agent + ":" + session.id) + " --json";
+            launcher.run(attach, (code, stdout) => {
+                if (code !== 0) return;
+                try {
+                    const result = JSON.parse(stdout);
+                    if (Array.isArray(result.pids)) raise({pids: result.pids, project_name: session.project_name}, []);
+                } catch (_) {}
+            });
+            return true;
         }
         if (session.agent === "dsh") {
             return !!session.web_url && openUrl(session.web_url);

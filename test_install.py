@@ -26,6 +26,14 @@ class Install(unittest.TestCase):
     def install(self):
         return subprocess.run(["bash", str(_HERE / "install.sh")], env=self.env, capture_output=True, text=True)
 
+    def test_missing_tmux_is_reported_before_any_installation_changes(self):
+        env = dict(self.env, PATH=str(self.tmp / "empty-path"))
+        result = subprocess.run(["/bin/bash", str(_HERE / "install.sh")], env=env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("tmux is required", result.stderr)
+        self.assertFalse((self.tmp / "bin").exists())
+        self.assertFalse(self.package.exists())
+
     def test_links_the_tool_and_copies_the_widget_and_a_second_run_changes_nothing(self):
         for _ in range(2):
             result = self.install()

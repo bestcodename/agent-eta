@@ -272,17 +272,34 @@ class Actions(Isolated):
         accounts.account_action(args, lambda *call: moved.append(call))
         self.assertEqual(moved, [("claude", "codex", None), ("codex", "claude", "private")])
 
-    def test_claude_launch_uses_konsole_argv_without_shell_interpolation(self):
+    def test_claude_launch_uses_managed_tmux_and_native_login_stays_native(self):
         self.registered()
         account = self.store.find("claude:work")
         directory = str(self.root / "folder ' $(echo never)")
         with mock.patch.object(providers, "executable", side_effect=lambda kind: "/fake/" + kind), \
-                mock.patch.object(providers, "spawn") as spawn:
+                mock.patch.object(providers, "spawn") as spawn, \
+                mock.patch("agent_eta_tmux.Runtime") as runtime:
             providers.launch(account, directory)
-            self.assertEqual(spawn.call_args.args[0], ["/fake/terminal", "--separate", "--workdir", directory,
-                                                     "-e", "/fake/claude-account", "run", "work"])
+            call = runtime.return_value.start.call_args
+            self.assertEqual(call.args, (["/fake/claude-account", "run", "work"], directory))
+            self.assertEqual(call.kwargs["environment"], {"CLAUDE_CONFIG_DIR": account["directory"]})
+            runtime.return_value.attach.assert_called_once()
+            spawn.assert_not_called()
             providers.launch(account, directory, login=True)
             self.assertEqual(spawn.call_args.args[0][-2:], ["auth", "login"])
+
+    def test_codex_cli_resume_uses_the_bundled_standalone_mode(self):
+        with mock.patch.object(providers, "executable", return_value=providers.DESKTOP_CODEX), \
+                mock.patch("agent_eta_tmux.Runtime") as runtime:
+            providers.launch(self.store.find("codex"), str(self.root), cli=True, resume="thread")
+        self.assertEqual(runtime.return_value.start.call_args.args[0],
+                         [providers.DESKTOP_CODEX, "--no-daemon", "-C", str(self.root), "resume", "thread"])
+
+    def test_resume_refuses_a_live_writer_before_starting_anything(self):
+        args = self.args("launch", resume="thread", cli=True)
+        with mock.patch.object(accounts, "launch") as launch, self.assertRaisesRegex(providers.AccountError, "live writer"):
+            accounts.account_action(args, inspect=lambda source: {"pid": 123})
+        launch.assert_not_called()
 
     def test_codex_launch_encodes_the_directory_and_login_uses_the_native_cli(self):
         from urllib.parse import parse_qs, urlparse

@@ -1295,6 +1295,9 @@ class CodexLimitTrigger(unittest.TestCase):
         self.proc = subprocess.Popen(["sleep", "60"])
         self.addCleanup(lambda: (self.proc.kill(), self.proc.wait()))
         self.started = []
+        patcher = unittest.mock.patch.object(eta.tmux_api.Runtime, "find", return_value={"id": "managed"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.record({"pid": self.proc.pid})
 
     def record(self, app):

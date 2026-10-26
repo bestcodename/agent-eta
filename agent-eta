@@ -84,6 +84,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import agent_eta_accounts as accounts_api
 import agent_eta_handoff as handoff_api
+import agent_eta_tmux as tmux_api
 import agent_eta_konsole as konsole_api
 import agent_eta_model as model
 from agent_eta_dsh import DSH_LOCK, DSH_LOG, dsh_sessions, dsh_summary, dsh_web_url, is_dsh  # noqa: F401
@@ -1365,7 +1366,10 @@ def session_json(session):
     """What --json adds to a session of the snapshot, which only a collector can read: the process
     lineage the tray widget finds its window by and the project it works in. A standalone Codex
     CLI uses its hook host's lineage; desktop threads open by id instead of sharing a window pid."""
-    if session["agent"] == "codex":
+    managed = managed_terminal(session)
+    if managed:
+        navigation, pids = {"kind": "tmux"}, []
+    elif session["agent"] == "codex":
         navigation, pids = codex_navigation(session)
     else:
         holders = [(t.get("holder") or {}) for t in session["tasks"]]
@@ -1373,7 +1377,7 @@ def session_json(session):
         pids = lineage(int(pid)) if pid else []
     root = project_root(session.get("cwd"))
     found = {"pids": pids, "project_root": root, "project_name": project_name(root)}
-    if session["agent"] == "codex":
+    if session["agent"] == "codex" or managed:
         found["navigation"] = navigation
     return found
 
@@ -1557,6 +1561,8 @@ def codex_limit_trigger(directory, thread, now, usage=None, start=None):
                 return "handoff-ungated"
     except (KeyError, TypeError, OSError):
         return "handoff-ungated"
+    if not tmux_api.Runtime(directory).find(app.get("pid"), app.get("start")):
+        return "handoff-ungated"
     write_atomic(path, {"windows": tripped, "at": int(now)})
     command = [sys.executable, os.path.realpath(__file__), "handoff", "codex:%s" % thread, "--to", "claude",
                "--wait", str(HANDOFF_WAIT)]
@@ -1700,6 +1706,8 @@ def handoff_gate(session, sessions):
     has its own process. A Codex thread qualifies only when no other thread shares its process,
     which rules out every chat of the desktop app and its single app-server."""
     if session["agent"] == "claude":
+        if not managed_terminal(session):
+            return None, None, "unmanaged CLI; close and resume through agent-eta account launch --cli --resume"
         return session.get("pid"), proc_start(session["pid"]) if session.get("pid") else None, None
     app = session.get("app") or {}
     if session["agent"] != "codex" or not app.get("pid"):
@@ -1712,7 +1720,21 @@ def handoff_gate(session, sessions):
         return None, None, "its process is gone"
     if shared or server:
         return None, None, "desktop chats cannot be gated"
+    if not managed_terminal(session):
+        return None, None, "unmanaged CLI; close and resume through agent-eta account launch --cli --resume"
     return app["pid"], app.get("start"), None
+
+
+def managed_terminal(session):
+    app = session.get("app") or {}
+    pid = session.get("pid") if session["agent"] == "claude" else app.get("pid")
+    start = proc_start(pid) if session["agent"] == "claude" and pid else app.get("start")
+    if not pid:
+        return None
+    try:
+        return tmux_api.Runtime().find(pid, start)
+    except tmux_api.TmuxError:
+        return None
 
 
 def handoff_records():
@@ -1756,6 +1778,21 @@ def cmd_handoff(args):
                            dry_run=args.dry_run, env=env)
 
 
+def cmd_attach(args):
+    source = handoff_api.parse_source(args.source)
+    session = handoff_inspect(source)
+    if not session:
+        raise tmux_api.TmuxError("the session is no longer running")
+    runtime = tmux_api.Runtime()
+    record = runtime.find(session["pid"], session["proc_start"])
+    if not record:
+        raise tmux_api.TmuxError("the session is not in a managed tmux terminal")
+    result = runtime.attach(record, interactive=not args.json and sys.stdin.isatty())
+    if args.json:
+        print(json.dumps(result))
+    return 0
+
+
 def eta_type(text):
     try:
         return parse_eta_arg(text)
@@ -1790,6 +1827,9 @@ def build_parser():
     accounts_api.add_parser(sub)
     handoff_api.add_parser(sub)
     konsole_api.add_parser(sub)
+    attach = sub.add_parser("attach", help="show an existing managed CLI session")
+    attach.add_argument("source", metavar="SOURCE", help="claude:<session> or codex:<thread>")
+    attach.add_argument("--json", action="store_true", help="select or open a viewer and report window PIDs")
     return parser
 
 
@@ -1800,11 +1840,11 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done,
                 "turn": cmd_turn, "handoff": cmd_handoff,
-                "account": lambda args: accounts_api.account_action(args, handoff_batch),
-                "tab": konsole_api.tab_action}
+                "account": lambda args: accounts_api.account_action(args, handoff_batch, handoff_inspect),
+                "tab": konsole_api.tab_action, "attach": cmd_attach}
     try:
         return handlers[args.cmd](args)
-    except (StateDirError, AccountError, handoff_api.HandoffError) as exc:
+    except (StateDirError, AccountError, handoff_api.HandoffError, tmux_api.TmuxError) as exc:
         print("agent-eta: %s" % exc, file=sys.stderr)
         return 1
 
