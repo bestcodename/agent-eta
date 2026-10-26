@@ -381,8 +381,12 @@ Runtime records include stable session/window/pane IDs and server/pane PID/start
 records from targeting IDs reused after a server restart. Managed panes use `remain-on-exit off`.
 
 Konsole is the default viewer, launched only to attach a client. `AGENT_ETA_TERMINAL_BIN` selects another terminal
-supporting `-e`. A viewer's closure detaches it while agents continue. Handoffs never control Konsole tabs or their
-crash handling. Native tmux configuration is isolated with `-f /dev/null`; inherited provider and service markers
+supporting `-e`. Each viewer attaches through its own grouped session with `destroy-unattached on`, so it keeps its
+own current window and its session disappears when it closes; agents continue. Navigation focuses a viewer already
+showing the agent and otherwise opens a new one, and a status-line click switches agents inside a viewer. A handoff
+moves every session showing its source to the destination. Handoffs never control Konsole tabs or their crash
+handling. The server loads only the repository's `tmux.conf` (mouse, 50000 lines of scrollback, agent titles instead
+of record IDs in the status line), never the user's tmux configuration; inherited provider and service markers
 are cleared before explicitly applying the selected account. The pane's native terminal environment is retained.
 A running systemd 254+ user manager and tmux are required. Service environment variables are forwarded by name,
 so their values do not enter command arguments. Inspect the host journal with `journalctl --user -u UNIT` using

@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-26
+
+### Added
+
+- The private tmux server loads agent-eta's own `tmux.conf` with mouse support, 50000 lines of scrollback and agent titles in the status line
+- Each viewer gets its own grouped tmux session, so several agents can be shown in separate windows
+
+### Changed
+
+- Navigation focuses the window already showing an agent, or opens a new one instead of switching the existing window
+- A handoff moves every window showing its source to the destination
+
 ## [2.0.0] - 2026-10-26
 
 ### Added

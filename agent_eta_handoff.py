@@ -491,7 +491,7 @@ class Env:
         return agent_eta_tmux.Runtime().stop(handoff["source_terminal"]["id"])
 
     def select_destination(self, handoff):
-        agent_eta_tmux.Runtime().select(handoff["destination_terminal"])
+        agent_eta_tmux.Runtime().follow(handoff["source_terminal"], handoff["destination_terminal"])
 
     def registered(self, handoff):
         """Whether the destination of a launched handoff has shown up."""

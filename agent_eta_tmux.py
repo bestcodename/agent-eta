@@ -25,6 +25,8 @@ INHERITED = ("CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SSE_PORT", 
              "CODEX_SANDBOX_NETWORK_DISABLED")
 SERVICE_CONTEXT = ("INVOCATION_ID", "JOURNAL_STREAM", "SYSTEMD_EXEC_PID", "NOTIFY_SOCKET", "LISTEN_PID",
                    "LISTEN_FDS", "LISTEN_FDNAMES", "WATCHDOG_PID", "WATCHDOG_USEC")
+# The private server's only configuration; the user's own tmux configuration is never loaded.
+CONFIG = str(Path(__file__).resolve().with_name("tmux.conf"))
 
 
 class TmuxError(Exception):
@@ -116,7 +118,7 @@ class Runtime:
     def tmux(self, *args, check=True):
         if not shutil.which("tmux"):
             raise TmuxError("tmux is required for managed CLI sessions; install tmux first")
-        return self.run(["tmux", "-f", "/dev/null", "-S", self.socket, *args], check=check)
+        return self.run(["tmux", "-f", CONFIG, "-S", self.socket, *args], check=check)
 
     def write(self, record):
         path = self.root / (record["id"] + ".json")
@@ -215,7 +217,7 @@ class Runtime:
                           "--property=ExitType=cgroup", "--property=GuessMainPID=no", "--unit=" + self.unit,
                           "--expand-environment=no", "--property=UnsetEnvironment="
                           + " ".join(INHERITED + ("TMUX", "TMUX_PANE")), *variables, "--",
-                          "tmux", "-f", "/dev/null", "-S", self.socket, "new-session", "-d",
+                          "tmux", "-f", CONFIG, "-S", self.socket, "new-session", "-d",
                           "-s", "agents", "-n", identifier, "-c", str(cwd), "--", *command])
             host = self.host()
             if not host:
@@ -287,45 +289,65 @@ class Runtime:
                 return False
             time.sleep(.05)
 
-    def select(self, record):
-        pane = self.pane(record)
-        if not pane:
+    def follow(self, source, destination):
+        """Show the destination in every session showing the source, so a handoff keeps its viewers."""
+        new = self.pane(destination)
+        if not new:
             raise TmuxError("the managed terminal has ended")
-        self.tmux("select-window", "-t", pane["window"])
-        self.tmux("select-pane", "-t", pane["pane"])
+        old = self.pane(source)
+        if not old:
+            return
+        result = self.tmux("list-sessions", "-F", "#{session_id}\t#{window_id}", check=False)
+        for line in result.stdout.splitlines():
+            session, _, window = line.partition("\t")
+            if window == old["window"]:
+                self.tmux("select-window", "-t", session + ":" + new["window"], check=False)
 
     def clients(self):
-        result = self.tmux("list-clients", "-F", "#{client_pid}\t#{client_activity}\t#{client_tty}\t#{session_id}",
+        result = self.tmux("list-clients", "-F",
+                           "#{client_pid}\t#{client_activity}\t#{client_tty}\t#{session_id}\t#{window_id}",
                            check=False)
         found = []
         for line in result.stdout.splitlines():
             fields = line.split("\t")
-            if len(fields) == 4:
+            if len(fields) == 5:
                 try:
                     found.append({"pid": int(fields[0]), "activity": int(fields[1]),
-                                  "tty": fields[2], "session": fields[3]})
+                                  "tty": fields[2], "session": fields[3], "window": fields[4]})
                 except ValueError:
                     pass
         return sorted(found, key=lambda item: item["activity"], reverse=True)
 
+    def viewer(self, pane):
+        """tmux argv for a client with its own grouped session, so each viewer keeps its own window.
+        destroy-unattached removes that session again once the viewer closes."""
+        name = "view-" + uuid.uuid4().hex[:12]
+        return ["tmux", "-f", CONFIG, "-S", self.socket, "new-session", "-t", pane["session"], "-s", name, ";",
+                "set-option", "-t", name, "destroy-unattached", "on", ";",
+                "select-window", "-t", name + ":" + pane["window"]]
+
     def attach(self, record, interactive=False):
-        self.select(record)
+        """Focus a viewer showing the agent, or open one of its own; other viewers keep their window."""
+        pane = self.pane(record)
+        if not pane:
+            raise TmuxError("the managed terminal has ended")
         if interactive:
             if os.environ.get("TMUX", "").rsplit(",", 2)[0] == self.socket:
-                self.tmux("switch-client", "-t", record["session"])
+                # Without a target tmux resolves the calling viewer's session.
+                current = self.tmux("display-message", "-p", "#{session_id}").stdout.strip()
+                self.tmux("select-window", "-t", current + ":" + pane["window"])
                 return {"opened": False, "pids": []}
             env = dict(os.environ)
             env.pop("TMUX", None)
-            os.execvpe("tmux", ["tmux", "-S", self.socket, "attach-session", "-t", record["session"]], env)
-        clients = self.clients()
-        if clients:
-            client = next((c for c in clients if c["session"] == record["session"]), clients[0])
-            self.tmux("switch-client", "-c", client["tty"], "-t", record["session"])
+            argv = self.viewer(pane)
+            os.execvpe(argv[0], argv, env)
+        client = next((c for c in self.clients() if c["window"] == pane["window"]), None)
+        if client:
             return {"opened": False, "pids": lineage(client["pid"])}
         from agent_eta_providers import executable, spawn
         terminal = executable("terminal")
         command = [terminal] + (["--separate"] if Path(terminal).name == "konsole" else [])
-        command += ["-e", "tmux", "-S", self.socket, "attach-session", "-t", record["session"]]
+        command += ["-e", *self.viewer(pane)]
         env = dict(os.environ)
         env.pop("TMUX", None)
         env.pop("TMUX_PANE", None)

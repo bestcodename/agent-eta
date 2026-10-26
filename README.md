@@ -46,7 +46,8 @@ agent-eta handoff claude:<session> --to codex   # continue a session's plan in C
 A handoff refuses a folder the destination client does not trust yet, and its message names the command that opens
 the client there once to accept the trust question.
 
-Managed CLI rows select their tmux pane and focus an attachment, opening the configured viewer when detached.
+Managed CLI rows focus the window already showing their pane, or open a window of their own. Inside a viewer, a
+click on a status-line tab switches agents.
 Desktop threads open in the app. Unmanaged CLI sessions remain visible but must be closed and resumed with
 `agent-eta account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` before cross-provider handoff.
 Resuming a session with a live writer is refused. Existing clients are never moved into tmux.
