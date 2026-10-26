@@ -449,11 +449,11 @@ Two triggers start a handoff by themselves, each detached and once per tripped w
 
 - **Claude Code**: bestcodename/ai's usage guard hands each session that prompts to Codex when no other Claude account
   is free and its `codex_handoff` setting allows it.
-- **Codex**: the Stop hook hands the thread to Claude Code at 90 % of its 5-hour window or 95 % of its weekly window.
+- **Codex**: the Stop hook hands the thread to Claude Code at 90 % of its 5-hour window or 98 % of its weekly window.
   A reset never moves a session back. The settings live in `~/.config/agent-eta/config.json`:
 
   ```json
-  {"codex_handoff": {"enabled": true, "five_hour_percent": 90, "weekly_percent": 95}}
+  {"codex_handoff": {"enabled": true, "five_hour_percent": 90, "weekly_percent": 98}}
   ```
 
 ## Install

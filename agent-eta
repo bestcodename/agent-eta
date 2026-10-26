@@ -122,7 +122,7 @@ CODEX_STATES = {"UserPromptSubmit": "working", "PreToolUse": "working", "PostToo
                 "PermissionRequest": "waiting", "Stop": "idle", "Interrupt": "idle"}
 TURN_ENDS = ("UserPromptSubmit", "Stop", "Interrupt", "SessionEnd")
 # The Codex limit trigger's defaults, overridden by `codex_handoff` in ~/.config/agent-eta/config.json.
-HANDOFF_TRIGGER = {"enabled": True, "five_hour_percent": 90, "weekly_percent": 95}
+HANDOFF_TRIGGER = {"enabled": True, "five_hour_percent": 90, "weekly_percent": 98}
 HANDOFF_WAIT = 1800
 # Codex tools that put a question to the user. No hook sees them, and none sees a plan waiting
 # for approval either, so the reader looks for both in the thread's rollout transcript.
