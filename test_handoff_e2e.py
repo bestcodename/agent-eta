@@ -130,6 +130,19 @@ class ManagedHandoff(unittest.TestCase):
         record = json.loads(out)
         return record
 
+    def wait_destination(self, process):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            destination = self.read("destination.json")
+            if destination:
+                return destination
+            if process.poll() is not None:
+                break
+            time.sleep(.05)
+        process.terminate()
+        out, err = process.communicate(timeout=20)
+        self.fail(f"destination did not start; controller exit {process.returncode}: {out}\n{err}")
+
     def assert_source_live_and_thawed(self):
         self.assertEqual(tmux.proc_start(self.source["pid"]), self.source["start"])
         state = subprocess.run(["systemctl", "--user", "show", "-P", "FreezerState", self.source_terminal["scope"]], text=True, capture_output=True)
@@ -192,7 +205,7 @@ class ManagedHandoff(unittest.TestCase):
         silent.chmod(0o700)
         self.env["AGENT_ETA_CODEX_BIN"] = str(silent)
         process = subprocess.Popen(self.command(), env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.wait(lambda: self.read("destination.json"))
+        self.wait_destination(process)
         process.terminate()
         record = self.finish(process)
         self.assertEqual((process.returncode, record["state"], record["destination_cancelled"]), (1, "cancelled", True))
