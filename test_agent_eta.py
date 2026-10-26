@@ -1312,8 +1312,8 @@ class CodexLimitTrigger(unittest.TestCase):
         self.assertEqual(self.fire(90), "handoff-started")
         self.assertEqual(self.started[0][2:], ["handoff", "codex:t1", "--to", "claude", "--wait", "1800"])
         self.assertEqual(self.fire(95), "handoff-known")
-        self.assertEqual(self.fire(94, minutes=10080), "handoff-below")
-        self.assertEqual(self.fire(95, minutes=10080), "handoff-started")
+        self.assertEqual(self.fire(97, minutes=10080), "handoff-below")
+        self.assertEqual(self.fire(98, minutes=10080), "handoff-started")
         self.assertEqual(len(self.started), 2)
 
     def test_a_reset_window_triggers_nothing(self):
@@ -1323,7 +1323,7 @@ class CodexLimitTrigger(unittest.TestCase):
         with open(self.config, "w") as handle:
             json.dump({"codex_handoff": {"five_hour_percent": 80, "weekly_percent": "x"}}, handle)
         self.assertEqual(self.fire(85), "handoff-started")
-        self.assertEqual(eta.handoff_trigger_settings()["weekly_percent"], 95)
+        self.assertEqual(eta.handoff_trigger_settings()["weekly_percent"], 98)
         with open(self.config, "w") as handle:
             json.dump({"codex_handoff": {"enabled": False}}, handle)
         self.assertEqual(self.fire(99, resets_at=3000), "handoff-off")
