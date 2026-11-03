@@ -60,6 +60,10 @@ priority.
 15. (low) A Claude Code session that a handoff started holds no ExitPlanMode approval, so moving it on to Codex forks
     a summary and plans again. Proposal: count such a session as approved from the completed handoff record that
     started it with an approved plan (ca. 2 hours).
+16. (next) The modal's *Log in* button did not log in on 2026-11-03, while `/login` in Claude Code worked. The
+    button runs `agent-eta account login <id>`, which spawns `claude auth login` in a separate terminal
+    (`agent_eta_providers.launch`). Reproduce from a shell and from the button, and confirm the cause before a
+    fix (ca. 1 Stunde)
 
 Waiting: counter-test for the agent-eta Codex permission fix of 0.66.7 (ca. 15 Minuten). The Codex weekly limit is
 used up until 2026-10-08 03:22. In a Codex thread with the reviewer set to `user`, an escalated `sleep 60` must show
