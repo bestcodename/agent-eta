@@ -392,6 +392,10 @@ A running systemd 254+ user manager and tmux are required. Service environment v
 so their values do not enter command arguments. Inspect the host journal with `journalctl --user -u UNIT` using
 the runtime's recorded service name.
 
+`agent-eta attach` also works from another machine as `ssh -t HOST agent-eta attach claude:<session>`, which opens a
+viewer of its own there without moving or pausing the agent. The session id comes from `ssh HOST agent-eta list
+--json`. The local list and widget show this machine's sessions only, see [TODO.md](../TODO.md).
+
 Interactive pane launchers discard inherited `NO_COLOR` from automation tools while preserving `TERM` and
 `COLORTERM`. Explicit launcher environment overrides still apply. Existing processes need a session resume to
 receive this environment correction.

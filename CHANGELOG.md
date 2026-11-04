@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `agent-eta attach` over SSH from another machine is documented
+
 ## [2.2.1] - 2026-11-04
 
 ### Fixed
