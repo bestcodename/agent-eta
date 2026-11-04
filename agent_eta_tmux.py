@@ -72,8 +72,12 @@ def lineage(pid):
 
 
 def launcher(argv, environment=None):
-    """Clear provider/service markers, then explicitly apply the chosen account."""
-    unset = " ".join("-u " + name for name in INHERITED + SERVICE_CONTEXT)
+    """Clear parent automation markers, then explicitly apply the chosen account.
+
+    NO_COLOR from a tool runner must not disable an interactive agent terminal.
+    Keep TERM/COLORTERM so the destination retains its real color capabilities.
+    """
+    unset = " ".join("-u " + name for name in INHERITED + SERVICE_CONTEXT + ("NO_COLOR",))
     values = [name + "=" + str(value) for name, value in (environment or {}).items()
               if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)]
     return "#!/bin/sh\nexec env %s %s\n" % (unset, shlex.join(values + list(argv)))

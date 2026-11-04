@@ -58,6 +58,15 @@ class RuntimeUnit(unittest.TestCase):
             self.assertEqual(json.loads(result.stdout), [command[-1], None, None, None, "/chosen account", "tmux-256color"])
         self.assertFalse((Path(self.tmp.name) / "never").exists())
 
+    def test_launcher_drops_parent_no_color_without_losing_terminal_color_support(self):
+        command = [sys.executable, "-c",
+                   "import os,json;print(json.dumps([os.getenv('NO_COLOR'),os.getenv('COLORTERM'),os.getenv('TERM')]))"]
+        script = Path(self.tmp.name) / "color-launch.sh"
+        script.write_text(tmux.launcher(command))
+        env = dict(os.environ, NO_COLOR="1", COLORTERM="truecolor", TERM="tmux-256color")
+        result = subprocess.run(["sh", str(script)], env=env, check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), [None, "truecolor", "tmux-256color"])
+
     def test_stale_agent_or_server_identity_cannot_supply_a_target(self):
         with mock.patch.object(tmux, "proc_start", return_value="new"):
             self.assertIsNone(self.runtime.find(123, "old"))

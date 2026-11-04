@@ -28,6 +28,8 @@ Install tmux with your package manager before running the installer. A private t
 independently of viewers and handoff controllers. Konsole is the default viewer; `AGENT_ETA_TERMINAL_BIN` can select
 another terminal supporting `-e`. Closing the viewer leaves agents running; explicitly ending an agent stops it.
 Each pane keeps a separate launcher so tmux's own scope tracking cannot move the agent out of its owned scope.
+The launcher clears inherited `NO_COLOR` so automation tools cannot force an interactive agent into grayscale.
+It preserves `TERM` and `COLORTERM`; explicitly supplied launcher settings still take precedence.
 
 ## Usage
 
@@ -40,6 +42,7 @@ agent-eta list --json --all        # what the widget reads, contract schema 1
 agent-eta account launch claude:NAME --directory /trusted/project
 agent-eta account launch codex --cli --directory /trusted/project
 agent-eta attach claude:<session>   # show the existing managed terminal
+ssh -t HOST agent-eta attach claude:<session>   # the same from another machine
 agent-eta handoff claude:<session> --to codex   # continue a session's plan in Codex
 ```
 
