@@ -392,6 +392,10 @@ A running systemd 254+ user manager and tmux are required. Service environment v
 so their values do not enter command arguments. Inspect the host journal with `journalctl --user -u UNIT` using
 the runtime's recorded service name.
 
+Interactive pane launchers discard inherited `NO_COLOR` from automation tools while preserving `TERM` and
+`COLORTERM`. Explicit launcher environment overrides still apply. Existing processes need a session resume to
+receive this environment correction.
+
 The pane launcher waits for the agent in a separate process, so tmux's automatic `tmux-spawn` scope can move the
 launcher without moving the agent. On failure, timeout, Ctrl-C, SIGTERM or SIGHUP, cancellation kills the owned
 launcher process group and stops the complete agent scope. Only confirmed cancellation allows the source scope to thaw. If cancellation is
