@@ -205,6 +205,10 @@ class AttachTest(unittest.TestCase):
         self.assertEqual(result, {"opened": False, "pids": lineage(os.getpid())})
         self.assertFalse(self.recorded.exists())
 
+    def test_a_viewer_whose_terminal_resolved_ssh_through_path_is_found(self):
+        self.fake_process(os.getpid(), ["/usr/bin/ssh"] + self.argv[1:])
+        self.assertEqual(remote.attach("desktop", "codex:t1", False, proc=str(self.proc))["opened"], False)
+
     def test_without_a_viewer_a_terminal_runs_the_remote_attach(self):
         self.fake_process(os.getpid(), self.argv[:-1] + ["codex:other"])
         self.assertEqual(remote.attach("desktop", "codex:t1", False, proc=str(self.proc)), {"opened": True, "pids": []})

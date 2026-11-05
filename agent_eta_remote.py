@@ -190,8 +190,9 @@ def merge(listing, cache, now):
 
 
 def viewer(argv, proc="/proc"):
-    """The pid of a process of this user that runs exactly argv."""
-    wanted = b"".join(arg.encode() + b"\0" for arg in argv)
+    """The pid of a process of this user that runs argv. A terminal resolves argv[0] through PATH, as
+    Konsole runs `ssh` as `/usr/bin/ssh`, so only its basename counts."""
+    wanted = [arg.encode() for arg in argv]
     uid = os.getuid()
     for name in os.listdir(proc):
         if not name.isdigit():
@@ -201,8 +202,9 @@ def viewer(argv, proc="/proc"):
             if os.stat(base).st_uid != uid:
                 continue
             with open(os.path.join(base, "cmdline"), "rb") as handle:
-                if handle.read() == wanted:
-                    return int(name)
+                found = handle.read().split(b"\0")[:-1]
+            if found[1:] == wanted[1:] and found and os.path.basename(found[0]) == wanted[0]:
+                return int(name)
         except OSError:
             continue
     return None

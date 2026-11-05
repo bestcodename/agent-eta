@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-11-05
+
+### Fixed
+
+- A remote session's viewer is focused again on the next click, also when Konsole runs `ssh` as `/usr/bin/ssh`
+- Opening a managed session no longer picks a viewer that another machine attached over SSH, which left nothing to focus
+
 ## [2.3.0] - 2026-11-05
 
 ### Added
