@@ -68,10 +68,6 @@ priority.
     (`inputNeededNotifEnabled`, off since 2026-11-04) next to the *Notify when* checkboxes. The key lives in
     `claude/settings.json` of bestcodename/ai, so a flip shows up there as a diff, like a `/config` change.
     Proposal: an `agent-eta claude-push on|off|status` subcommand behind the checkbox (ca. 3 hours)
-18. (low) List the managed sessions of other machines in `agent-eta list` and the widget, with a jump that runs
-    `ssh -t HOST agent-eta attach SOURCE` in the configured terminal. Today a session on stefan-notebook is missing
-    from the desktop's modal. Proposal: a `remote_hosts` list in `config.json` and one
-    `ssh -o BatchMode=yes -o ConnectTimeout=3 HOST agent-eta list --json` per host (ca. 6 hours)
 
 Waiting: counter-test for the agent-eta Codex permission fix of 0.66.7 (ca. 15 Minuten). The Codex weekly limit is
 used up until 2026-10-08 03:22. In a Codex thread with the reviewer set to `user`, an escalated `sleep 60` must show

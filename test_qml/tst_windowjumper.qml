@@ -162,4 +162,27 @@ TestCase {
         compare(TaskFixture.activated, []);
     }
 
+    function test_remote_tmux_navigation_attaches_over_the_host_and_raises_by_pid_only() {
+        const remote = {agent: "codex", id: "t1", host: "desktop", project_name: "sec", pids: [],
+                        navigation: {kind: "tmux", host: "desktop"}};
+        verify(jumper.canJump(remote));
+        verify(jumper.jump(remote));
+        compare(launcher.commands, ["agent-eta attach 'codex:t1' --json --host 'desktop'"]);
+        // "sec — Konsole" matches the project name, but a remote project says nothing about local windows.
+        launcher.answer(0, JSON.stringify({opened: false, pids: [999]}));
+        compare(TaskFixture.activated, []);
+        verify(jumper.jump(remote));
+        launcher.answer(0, JSON.stringify({opened: false, pids: [58086]}));
+        compare(TaskFixture.activated, [0]);
+    }
+
+    function test_unavailable_remote_session_never_falls_back_to_a_local_window() {
+        const remote = {agent: "claude", id: "s1", host: "desktop", project_name: "sec", pids: [],
+                        navigation: {kind: "unavailable", reason: "Runs on desktop"}};
+        compare(jumper.unavailableReason(remote), "Runs on desktop");
+        verify(!jumper.jump(remote));
+        compare(launcher.commands, []);
+        compare(TaskFixture.activated, []);
+    }
+
 }

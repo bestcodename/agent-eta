@@ -87,6 +87,7 @@ import agent_eta_handoff as handoff_api
 import agent_eta_tmux as tmux_api
 import agent_eta_konsole as konsole_api
 import agent_eta_model as model
+import agent_eta_remote as remote_api
 from agent_eta_dsh import DSH_LOCK, DSH_LOG, dsh_sessions, dsh_summary, dsh_web_url, is_dsh  # noqa: F401
 from agent_eta_model import (DORMANT_AFTER, DORMANT_SECTION, LABEL_MAX, OVERDUE_MIN, UNKNOWN_TTL, account_note,
                              agent_label, clip, at_rest, dormant, expired, has_running_task, progress, section,
@@ -1392,7 +1393,11 @@ def cmd_list(args):
     result = snapshot(directory, now, usage=account_data["usage"], accounts=account_data["accounts"])
     tasks = list(result.tasks)
     if args.json:
-        json.dump(model.listing(result, session_json), sys.stdout, indent=2, sort_keys=True)
+        found = model.listing(result, session_json)
+        if not args.local:
+            remote_api.maybe_refresh(store, os.path.realpath(__file__), now)
+            found = remote_api.merge(found, remote_api.read_cache(store), now)
+        json.dump(found, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
     elif args.tasks:
         sys.stdout.write(render(tasks, now))
@@ -1779,6 +1784,12 @@ def cmd_handoff(args):
 
 
 def cmd_attach(args):
+    interactive = not args.json and sys.stdin.isatty()
+    if args.host:
+        result = remote_api.attach(args.host, args.source, interactive)
+        if args.json:
+            print(json.dumps(result))
+        return 0
     source = handoff_api.parse_source(args.source)
     session = handoff_inspect(source)
     if not session:
@@ -1787,7 +1798,7 @@ def cmd_attach(args):
     record = runtime.find(session["pid"], session["proc_start"])
     if not record:
         raise tmux_api.TmuxError("the session is not in a managed tmux terminal")
-    result = runtime.attach(record, interactive=not args.json and sys.stdin.isatty())
+    result = runtime.attach(record, interactive=interactive)
     if args.json:
         print(json.dumps(result))
     return 0
@@ -1807,6 +1818,7 @@ def build_parser():
     listing.add_argument("--json", action="store_true", help="machine-readable output")
     listing.add_argument("--tasks", action="store_true", help="the flat task list instead of the sessions")
     listing.add_argument("--all", action="store_true", help="also list dormant sessions, idle for more than %dh" % (DORMANT_AFTER // 3600))
+    listing.add_argument("--local", action="store_true", help="leave out the sessions of remote hosts")
     sub.add_parser("hook", help="hook entry point for Claude Code and Codex")
     run = sub.add_parser("run", help="run a command and list it while it runs")
     run.add_argument("--eta", type=eta_type, required=True, help="25m, 1h30m, 7200, ca. 10 minutes")
@@ -1825,26 +1837,28 @@ def build_parser():
     done = sub.add_parser("done", help="remove entries recorded with add")
     done.add_argument("ids", nargs="+")
     accounts_api.add_parser(sub)
+    remote_api.add_parser(sub)
     handoff_api.add_parser(sub)
     konsole_api.add_parser(sub)
     attach = sub.add_parser("attach", help="show an existing managed CLI session")
     attach.add_argument("source", metavar="SOURCE", help="claude:<session> or codex:<thread>")
     attach.add_argument("--json", action="store_true", help="select or open a viewer and report window PIDs")
+    attach.add_argument("--host", help="the SSH host the session runs on, as added with remote add")
     return parser
 
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or argv[0] in ("--json", "--tasks", "--all"):
+    if not argv or argv[0] in ("--json", "--tasks", "--all", "--local"):
         argv.insert(0, "list")
     args = build_parser().parse_args(argv)
     handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done,
                 "turn": cmd_turn, "handoff": cmd_handoff,
                 "account": lambda args: accounts_api.account_action(args, handoff_batch, handoff_inspect),
-                "tab": konsole_api.tab_action, "attach": cmd_attach}
+                "tab": konsole_api.tab_action, "attach": cmd_attach, "remote": remote_api.remote_action}
     try:
         return handlers[args.cmd](args)
-    except (StateDirError, AccountError, handoff_api.HandoffError, tmux_api.TmuxError) as exc:
+    except (StateDirError, AccountError, handoff_api.HandoffError, tmux_api.TmuxError, remote_api.RemoteError) as exc:
         print("agent-eta: %s" % exc, file=sys.stderr)
         return 1
 

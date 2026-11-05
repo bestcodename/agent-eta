@@ -11,7 +11,8 @@ import "../code/logic.mjs" as Logic
 // windows in one process, so `agent-eta tab` first makes the session's tab current over D-Bus and
 // reports the caption titles that pick its window. PhpStorm owns all its project windows in one
 // process, so the project name picks among them. A tab in PhpStorm's terminal cannot be chosen from
-// outside.
+// outside. A managed tmux session of another host carries that host, and `agent-eta attach --host`
+// focuses or opens the terminal that runs its viewer over SSH.
 Item {
     id: jumper
 
@@ -74,12 +75,13 @@ Item {
             return openUrl(target.url);
         }
         if (target && target.kind === "tmux") {
-            const attach = command + " attach " + Logic.shellQuote(session.agent + ":" + session.id) + " --json";
+            const attach = command + " attach " + Logic.shellQuote(session.agent + ":" + session.id) + " --json"
+                + (target.host ? " --host " + Logic.shellQuote(target.host) : "");
             launcher.run(attach, (code, stdout) => {
                 if (code !== 0) return;
                 try {
                     const result = JSON.parse(stdout);
-                    if (Array.isArray(result.pids)) raise({pids: result.pids, project_name: session.project_name}, []);
+                    if (Array.isArray(result.pids)) raise({pids: result.pids, project_name: target.host ? "" : session.project_name}, []);
                 } catch (_) {}
             });
             return true;

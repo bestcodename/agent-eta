@@ -192,7 +192,7 @@ export function etaText(item, now) {
 
 // The second line of a session row.
 export function detailLine(session, now) {
-    const parts = [agentLabel(session)];
+    const parts = session.host ? [session.host, agentLabel(session)] : [agentLabel(session)];
     if (session.model) {
         parts.push(session.model);
     }
@@ -429,7 +429,8 @@ function titleProject(title) {
 
 // Python chooses Codex's UI target. Only older listings without that field keep thread links.
 export function codexNavigation(session) {
-    if (session && session.navigation && session.navigation.kind === "tmux") return session.navigation;
+    // A remote session that cannot be opened says why, whichever agent runs it.
+    if (session && session.navigation && ["tmux", "unavailable"].includes(session.navigation.kind)) return session.navigation;
     if (!session || session.agent !== "codex") return null;
     if (session.navigation === undefined && session.id) {
         return {kind: "url", url: "codex://threads/" + encodeURIComponent(session.id)};
@@ -490,6 +491,9 @@ export function shellQuote(text) {
 // What "Copy" puts on the clipboard. A Claude Code session gets the command that resumes it in its
 // directory and account, a Codex thread its link in the Codex app, which has no CLI on the PATH.
 export function resumeCommand(session) {
+    if (session.host) {
+        return "";
+    }
     const cli = session.navigation && (session.navigation.kind === "tmux" || session.navigation.kind === "window");
     if (session.agent === "codex" && session.id && !cli) {
         return `codex://threads/${session.id}`;

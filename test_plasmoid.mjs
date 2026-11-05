@@ -232,6 +232,17 @@ test("copy gives a resume command for Claude Code and a thread link for Codex", 
     assert.equal(logic.resumeCommand(session({agent: "dsh", id: "session-1"})), "");
 });
 
+test("a remote row names its host, copies nothing and keeps an unavailable reason for every agent", () => {
+    const tmux = session({id: "abc", host: "desktop", cwd: null, navigation: {kind: "tmux", host: "desktop"}});
+    const claude = session({id: "abc", host: "desktop", cwd: null, navigation: {kind: "unavailable", reason: "Runs on desktop"}});
+    assert.equal(logic.resumeCommand(tmux), "");
+    assert.equal(logic.resumeCommand(session({agent: "codex", id: "t-1", host: "desktop"})), "");
+    assert.deepEqual(logic.codexNavigation(tmux), {kind: "tmux", host: "desktop"});
+    assert.deepEqual(logic.codexNavigation(claude), {kind: "unavailable", reason: "Runs on desktop"});
+    assert.equal(logic.codexNavigation(session({id: "abc"})), null);
+    assert.match(logic.detailLine(tmux, NOW), /^desktop · claude · shop · /);
+});
+
 test("only a listing of contract 1 passes, and an older CLI is told to update", () => {
     const mixed = fixture("mixed");
     assert.equal(logic.validateListing(JSON.stringify(mixed)).listing.now, mixed.now);

@@ -43,6 +43,7 @@ agent-eta account launch claude:NAME --directory /trusted/project
 agent-eta account launch codex --cli --directory /trusted/project
 agent-eta attach claude:<session>   # show the existing managed terminal
 ssh -t HOST agent-eta attach claude:<session>   # the same from another machine
+agent-eta remote add HOST           # show HOST's sessions in the widget, opened over SSH
 agent-eta handoff claude:<session> --to codex   # continue a session's plan in Codex
 ```
 
