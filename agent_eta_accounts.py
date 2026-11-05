@@ -59,6 +59,31 @@ def file_lock(path, nonblocking=False):
         os.close(fd)
 
 
+def start_worker(lock, argv, due):
+    """Start `argv --lock-fd N` holding `lock` when `due()`, called under the lock, allows it.
+
+    The worker inherits the open file description and with it the lock, so repeated polls do not
+    create a queue of workers.
+    """
+    try:
+        with file_lock(lock, nonblocking=True) as fd:
+            if not due():
+                return False
+            subprocess.Popen(list(argv) + ["--lock-fd", str(fd)], pass_fds=(fd,), stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            return True
+    except OSError:
+        return False
+
+
+def check_worker_lock(lock, fd):
+    """Refuse a worker whose inherited descriptor is not `lock`, the file start_worker locked."""
+    own = os.stat(lock)
+    inherited = os.fstat(fd)
+    if (own.st_dev, own.st_ino) != (inherited.st_dev, inherited.st_ino):
+        raise AccountError("Invalid refresh worker lock")
+
+
 class AccountStore:
     def __init__(self):
         isolated = os.environ.get("AGENT_ETA_DIR")
@@ -157,46 +182,33 @@ class AccountStore:
         return {"accounts": accounts, "usage": windows}
 
     def maybe_refresh(self, cli_path, now=None):
-        """Hand one lock to one worker. Repeated polls do not create a queue of workers."""
         if os.environ.get("AGENT_ETA_NO_REFRESH") == "1":
             return False
         now = time.time() if now is None else now
-        try:
-            with file_lock(self.worker_lock, nonblocking=True) as fd:
-                attempted = read_json(self.cache_path).get("refresh_attempted_at")
-                if attempted is not None and 0 <= now - attempted < REFRESH_SECONDS:
-                    return False
-                self.update(lambda cache: cache.update(refresh_attempted_at=now))
-                subprocess.Popen([sys.executable, str(cli_path), "account", "refresh", "--lock-fd", str(fd)],
-                                 pass_fds=(fd,), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL, start_new_session=True)
-                return True
-        except BlockingIOError:
-            return False
-        except OSError:
-            return False
+        return start_worker(self.worker_lock, [sys.executable, str(cli_path), "account", "refresh"],
+                            lambda: self._due(now))
 
     def refresh(self, lock_fd=None, now=None):
         now = time.time() if now is None else now
-        # The inherited worker descriptor already holds the same open-file-description lock.
         if lock_fd is not None:
             try:
-                own = os.stat(self.worker_lock)
-                inherited = os.fstat(lock_fd)
-                if (own.st_dev, own.st_ino) != (inherited.st_dev, inherited.st_ino):
-                    raise AccountError("Invalid refresh worker lock")
+                check_worker_lock(self.worker_lock, lock_fd)
                 return self._refresh(now)
             finally:
                 os.close(lock_fd)
         try:
             with file_lock(self.worker_lock, nonblocking=True):
-                attempted = read_json(self.cache_path).get("refresh_attempted_at")
-                if attempted is not None and 0 <= now - attempted < REFRESH_SECONDS:
-                    return False
-                self.update(lambda cache: cache.update(refresh_attempted_at=now))
-                return self._refresh(now)
+                return self._due(now) and self._refresh(now)
         except BlockingIOError:
             return False
+
+    def _due(self, now):
+        """Whether the throttle allows a refresh now, and if so mark it as attempted. Call under the worker lock."""
+        attempted = read_json(self.cache_path).get("refresh_attempted_at")
+        if attempted is not None and 0 <= now - attempted < REFRESH_SECONDS:
+            return False
+        self.update(lambda cache: cache.update(refresh_attempted_at=now))
+        return True
 
     def _refresh(self, now):
         deadline = time.monotonic() + 30

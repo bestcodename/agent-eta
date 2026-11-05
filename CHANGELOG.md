@@ -7,9 +7,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-05
+
 ### Added
 
 - `agent-eta attach` over SSH from another machine is documented
+- `agent-eta remote add|remove|list|refresh` for SSH hosts whose sessions `list --json` merges as display-only rows
+- `list --local` leaves out remote rows
+- `attach SOURCE --host HOST` focuses or opens a terminal running the remote attach
+- Widget 2.1.0: remote rows name their host, and a remote session in managed tmux opens over SSH
+
+### Changed
+
+- `start_worker` and `check_worker_lock` carry the account refresh worker's lock handling, and `open_terminal` the
+  viewer terminal launch, for reuse by the remote hosts
+
+### Fixed
+
+- The documented QML test command sets `QML_XHR_ALLOW_FILE_READ=1`, which the contract tests need
 
 ## [2.2.1] - 2026-11-04
 

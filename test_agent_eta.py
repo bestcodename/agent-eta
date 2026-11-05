@@ -608,6 +608,24 @@ class Sessions(StateTest):
         child.wait(timeout=5)
         self.assertEqual(json.loads(self.cli("list", "--json", "--all").stdout)["sessions"], [])
 
+    def test_json_list_merges_fresh_remote_hosts_unless_local(self):
+        listing = json.loads(self.cli("list", "--json", "--local").stdout)
+        remote = dict(listing, sessions=[{"key": "claude:r1", "agent": "claude", "id": "r1", "tasks": [],
+                                          "navigation": {"kind": "tmux"}, "cwd": "/work", "pids": [5]}],
+                      tasks=[], sections=[{"index": 1, "title": "Working", "session_keys": ["claude:r1"]}])
+        os.makedirs(os.path.join(self.dir, "accounts"), exist_ok=True)
+        eta.write_atomic(os.path.join(self.dir, "accounts", "remote.json"),
+                         {"hosts": {"desktop": {"fetched_at": time.time(), "listing": remote}}})
+        merged = json.loads(self.cli("list", "--json").stdout)
+        row = next(s for s in merged["sessions"] if s["key"] == "remote:desktop/claude:r1")
+        self.assertEqual((row["host"], row["navigation"], row["cwd"], row["pids"]),
+                         ("desktop", {"kind": "tmux", "host": "desktop"}, None, []))
+        self.assertIn("remote:desktop/claude:r1", next(s for s in merged["sections"] if s["index"] == 1)["session_keys"])
+        local = json.loads(self.cli("list", "--json", "--local").stdout)
+        self.assertFalse([s for s in local["sessions"] if s["key"].startswith("remote:")])
+        # Text output stays local.
+        self.assertNotIn("r1", self.cli("list").stdout)
+
     def test_codex_reused_host_pid_is_removed_before_it_can_supply_a_window(self):
         child = self.codex_process("--no-daemon")
         path = eta.codex_session_path(self.dir, "thread-1")

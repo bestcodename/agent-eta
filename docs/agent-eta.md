@@ -326,14 +326,14 @@ and `list --json` publishes it as contract schema 1, which the widget validates 
 |---|---|
 | `schema_version` | `1`. A listing without it makes the widget report "agent-eta CLI too old, update it" |
 | `labels` | the state and section labels and `dormant_after` in seconds |
-| `sessions` | every session with `key`, `reported_state` as its agent reported it, `activity_state` as it effectively is, `activity_label`, `light` (`attention`, `caution`, `active`, `off`), `dormant`, `section`, its ETA fields, its task ids and `handoff` |
+| `sessions` | every session with `key`, `reported_state` as its agent reported it, `activity_state` as it effectively is, `activity_label`, `light` (`attention`, `caution`, `active`, `off`), `dormant`, `section`, its ETA fields, its task ids and `handoff`; a session of a remote host also has `host`, and its `tmux` navigation carries that `host` |
 | `tasks`, `usage`, `accounts` | the tasks, usage windows and accounts, each with a `key` |
 | `summary` | the counts per state, `light`, `badge_count`, `status` and `progress_session_key` for the tray icon |
 | `sections`, `usage_groups` | the display order, as lists of keys |
 | `notification_signals` | one signal per waiting, overdue or reset condition, with `key`, `kind`, `entity_key`, `active`, `edge`, `notify_on_new`, `dedupe_key` and `message_params` |
 
 Keys are `claude:<pid>`, `codex:<thread>`, `task:<id>`, `window:<agent>:<minutes>`, `account:<id>` and
-`usage:<agent>`. An idle session that owns verified background work is working, while a reminder without a holder
+`usage:<agent>`, and a remote host's session and task keys and task ids start with `remote:<host>/`. An idle session that owns verified background work is working, while a reminder without a holder
 proves nothing. A Codex turn that runs on while an async question waits stays red and reads "working, question open".
 The widget sends a notification only between two valid listings, for a rising signal with `notify_on_new` or for a
 falling reset, and never on the first poll. `test_model.py` writes the fixtures in `test_fixtures/contract-v1/` when
@@ -393,8 +393,33 @@ so their values do not enter command arguments. Inspect the host journal with `j
 the runtime's recorded service name.
 
 `agent-eta attach` also works from another machine as `ssh -t HOST agent-eta attach claude:<session>`, which opens a
-viewer of its own there without moving or pausing the agent. The session id comes from `ssh HOST agent-eta list
---json`. The local list and widget show this machine's sessions only, see [TODO.md](../TODO.md).
+viewer of its own there without moving or pausing the agent. A Codex thread is listed, and can be attached this way,
+only after its first prompt in the CLI, because Codex has no SessionStart hook. Until then
+`agent_eta_tmux.Runtime().attach(record, interactive=True)` opens it by its tmux record id. A launch from a plain SSH
+shell copies that shell's environment into a new tmux server, so it lacks `DISPLAY` and the SSH agent. Running
+`eval "$(systemctl --user show-environment | sed "s/^/export /")"` before `agent-eta account launch` gives it the
+graphical session's environment.
+
+### Remote hosts
+
+`agent-eta remote add HOST` adds an SSH host name or alias to `remote_hosts` in the account preferences, and `remote
+remove HOST` takes it out again. `list --json` then starts a background worker at most every 10 seconds, which runs
+`ssh -T -o BatchMode=yes -o ConnectTimeout=3 HOST '~/.local/bin/agent-eta list --json --all --local'` for each host with
+an 8 second timeout and writes the result to `remote.json` in the usage cache directory. `--local` leaves out the
+remote rows, so two hosts never fetch each other in a loop. Hosts fetched within the last 60 seconds merge into the
+JSON listing. Their session and task keys and task ids gain the prefix `remote:HOST/`, and they join the local
+sections. `cwd`, `project_root` and `pids` are cleared and the handoff is unavailable, so only opening remains. A
+session in a managed tmux keeps its `tmux` navigation with `host`, and every other remote session reads "Runs on
+HOST". The summary, notifications, usage and accounts stay local, and the text list shows local sessions only.
+`agent-eta remote list` prints each host with its last fetch and its error, which is `unreachable`, `agent-eta on
+HOST is too old`, `invalid listing` or `exit N`, and `remote refresh` fetches at once. Remote output never reaches the
+cache as an error. BatchMode needs the key in an agent, and plasmashell has the user manager's `SSH_AUTH_SOCK`.
+
+`agent-eta attach SOURCE --host HOST` validates both, because ssh hands its arguments to the remote shell as one
+string. From a terminal it runs `ssh -t HOST ~/.local/bin/agent-eta attach SOURCE` in place. With `--json` it looks for
+a process of the user that runs exactly that command and reports the pids of it and its ancestors, so the widget
+raises its terminal. Otherwise it opens a terminal running that command. A viewer started by hand with other ssh
+arguments is not found.
 
 Interactive pane launchers discard inherited `NO_COLOR` from automation tools while preserving `TERM` and
 `COLORTERM`. Explicit launcher environment overrides still apply. Existing processes need a session resume to
@@ -765,7 +790,7 @@ plasmawindowed com.github.bestcodename.agenteta    # the overview in a window, w
 ```sh
 python3 -m unittest discover -s . -v
 node --test --test-isolation=none test_plasmoid.mjs
-QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -import test_qml/stubs -input test_qml
+QT_QPA_PLATFORM=offscreen QML_XHR_ALLOW_FILE_READ=1 /usr/lib/qt6/bin/qmltestrunner -import test_qml/stubs -input test_qml
 journalctl --user -u plasma-plasmashell -n 200 | grep -i agenteta    # QML errors of the widget
 ```
 
@@ -789,6 +814,9 @@ reuse, viewer detachment, source-pane removal, unrelated-pane preservation, time
 of the last server. It clearly skips without tmux or a systemd user manager. `test_tmux.py` covers private runtime
 ownership, stale identities, account environment isolation, launch quoting, attachment-only viewers and the native
 Claude-account terminal adapter.
+`test_remote.py` covers the remote merge with its prefixes, cleared actions, navigation and stale hosts, host
+validation, the fetch against a fake `ssh` for each error, the worker throttle and lock, and the viewer lookup in a
+fake proc tree.
 
 `test_accounts.py` uses isolated homes and stub native clients for authentication, logout, mismatches, cache
 persistence, identity changes, expired readings, refresh failures, the 50-empty-rollout regression, throttling and

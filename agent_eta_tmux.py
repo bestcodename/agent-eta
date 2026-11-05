@@ -348,15 +348,20 @@ class Runtime:
         client = next((c for c in self.clients() if c["window"] == pane["window"]), None)
         if client:
             return {"opened": False, "pids": lineage(client["pid"])}
-        from agent_eta_providers import executable, spawn
-        terminal = executable("terminal")
-        command = [terminal] + (["--separate"] if Path(terminal).name == "konsole" else [])
-        command += ["-e", *self.viewer(pane)]
-        env = dict(os.environ)
-        env.pop("TMUX", None)
-        env.pop("TMUX_PANE", None)
-        spawn(command, env)
+        open_terminal(self.viewer(pane))
         return {"opened": True, "pids": []}
+
+
+def open_terminal(argv):
+    """Run argv in a terminal window of its own, outside any tmux the caller runs in."""
+    from agent_eta_providers import executable, spawn
+    terminal = executable("terminal")
+    command = [terminal] + (["--separate"] if Path(terminal).name == "konsole" else [])
+    command += ["-e", *argv]
+    env = dict(os.environ)
+    env.pop("TMUX", None)
+    env.pop("TMUX_PANE", None)
+    spawn(command, env)
 
 
 def account_tabs(path):
