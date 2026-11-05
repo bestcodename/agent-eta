@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-11-05
+
+### Added
+
+- TODO item 18 for the tray badge count reported as wrong
+
 ## [2.3.1] - 2026-11-05
 
 ### Fixed

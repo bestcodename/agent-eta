@@ -68,6 +68,12 @@ priority.
     (`inputNeededNotifEnabled`, off since 2026-11-04) next to the *Notify when* checkboxes. The key lives in
     `claude/settings.json` of bestcodename/ai, so a flip shows up there as a diff, like a `/config` change.
     Proposal: an `agent-eta claude-push on|off|status` subcommand behind the checkbox (ca. 3 hours)
+18. (next, bug) The tray icon's notification badge seemed to show a wrong number, reported on 2026-11-05. No
+    snapshot of that moment exists. `summary()` in `agent_eta_model.py` sets `badge_count` to the waiting
+    sessions as soon as one waits, otherwise to idle plus overdue, and leaves out dormant sessions and those in
+    state `unknown`. So the badge never counts all sessions and switches meaning with the light. Next time it looks
+    wrong, save `agent-eta list --json` and a screenshot of the badge and popup, then decide whether the count
+    or the expectation is off. Fix with a regression case in `test_model.py` (ca. 1 Stunde)
 
 Waiting: counter-test for the agent-eta Codex permission fix of 0.66.7 (ca. 15 Minuten). The Codex weekly limit is
 used up until 2026-10-08 03:22. In a Codex thread with the reviewer set to `user`, an escalated `sleep 60` must show
