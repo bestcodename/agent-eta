@@ -118,9 +118,29 @@ class RuntimeUnit(unittest.TestCase):
         clients = [{"pid": 123, "tty": "/dev/pts/3", "session": "$4", "window": "@1", "activity": 42}]
         with mock.patch.object(self.runtime, "pane", return_value=self.PANE), \
                 mock.patch.object(self.runtime, "clients", return_value=clients), \
-                mock.patch.object(self.runtime, "tmux") as run, mock.patch.object(tmux, "lineage", return_value=[123, 100]):
+                mock.patch.object(self.runtime, "tmux") as run, mock.patch.object(tmux, "lineage", return_value=[123, 100]), \
+                mock.patch.object(tmux, "remote_client", return_value=False):
             self.assertEqual(self.runtime.attach({}), {"opened": False, "pids": [123, 100]})
         run.assert_not_called()
+
+    def test_a_viewer_from_another_machine_is_not_focused_but_a_local_one_opens(self):
+        clients = [{"pid": 123, "tty": "/dev/pts/6", "session": "$4", "window": "@1", "activity": 42}]
+        with mock.patch.object(self.runtime, "pane", return_value=self.PANE), \
+                mock.patch.object(self.runtime, "clients", return_value=clients), \
+                mock.patch.object(tmux, "remote_client", return_value=True), \
+                mock.patch("agent_eta_providers.executable", return_value="/usr/bin/konsole"), \
+                mock.patch("agent_eta_providers.spawn") as spawn:
+            self.assertEqual(self.runtime.attach({}), {"opened": True, "pids": []})
+        spawn.assert_called_once()
+
+    def test_a_client_below_an_ssh_server_is_remote(self):
+        comms = {10: "tmux: client", 9: "bash", 8: "sshd-session", 20: "tmux: client", 19: "konsole"}
+        def read_text(path):
+            return comms[int(str(path).split("/")[2])] + "\n"
+        with mock.patch.object(tmux, "lineage", side_effect=lambda pid: [10, 9, 8] if pid == 10 else [20, 19]), \
+                mock.patch.object(tmux.Path, "read_text", lambda self: read_text(self)):
+            self.assertTrue(tmux.remote_client(10))
+            self.assertFalse(tmux.remote_client(20))
 
     def test_a_viewer_of_another_agent_is_left_alone(self):
         clients = [{"pid": 123, "tty": "/dev/pts/3", "session": "$4", "window": "@2", "activity": 42}]

@@ -71,6 +71,17 @@ def lineage(pid):
     return found
 
 
+def remote_client(pid):
+    """Whether a tmux client runs below an SSH server, as a viewer opened from another machine does."""
+    for parent in lineage(pid):
+        try:
+            if Path(f"/proc/{parent}/comm").read_text().strip().startswith("sshd"):
+                return True
+        except OSError:
+            pass
+    return False
+
+
 def launcher(argv, environment=None):
     """Clear parent automation markers, then explicitly apply the chosen account.
 
@@ -345,7 +356,8 @@ class Runtime:
             env.pop("TMUX", None)
             argv = self.viewer(pane)
             os.execvpe(argv[0], argv, env)
-        client = next((c for c in self.clients() if c["window"] == pane["window"]), None)
+        # A client that comes in over SSH has no window here, so only a local one can be focused.
+        client = next((c for c in self.clients() if c["window"] == pane["window"] and not remote_client(c["pid"])), None)
         if client:
             return {"opened": False, "pids": lineage(client["pid"])}
         open_terminal(self.viewer(pane))

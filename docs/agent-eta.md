@@ -383,7 +383,7 @@ records from targeting IDs reused after a server restart. Managed panes use `rem
 Konsole is the default viewer, launched only to attach a client. `AGENT_ETA_TERMINAL_BIN` selects another terminal
 supporting `-e`. Each viewer attaches through its own grouped session with `destroy-unattached on`, so it keeps its
 own current window and its session disappears when it closes; agents continue. Navigation focuses a viewer already
-showing the agent and otherwise opens a new one, and a status-line click switches agents inside a viewer. A handoff
+showing the agent on this machine and otherwise opens a new one, since a viewer below `sshd` has no local window, and a status-line click switches agents inside a viewer. A handoff
 moves every session showing its source to the destination. Handoffs never control Konsole tabs or their crash
 handling. The server loads only the repository's `tmux.conf` (mouse, 50000 lines of scrollback, agent titles instead
 of record IDs in the status line), never the user's tmux configuration; inherited provider and service markers
@@ -417,7 +417,8 @@ cache as an error. BatchMode needs the key in an agent, and plasmashell has the 
 
 `agent-eta attach SOURCE --host HOST` validates both, because ssh hands its arguments to the remote shell as one
 string. From a terminal it runs `ssh -t HOST ~/.local/bin/agent-eta attach SOURCE` in place. With `--json` it looks for
-a process of the user that runs exactly that command and reports the pids of it and its ancestors, so the widget
+a process of the user that runs that command, with `ssh` matched by its basename because Konsole resolves it to
+`/usr/bin/ssh`, and reports the pids of it and its ancestors, so the widget
 raises its terminal. Otherwise it opens a terminal running that command. A viewer started by hand with other ssh
 arguments is not found.
 
