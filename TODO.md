@@ -74,6 +74,13 @@ priority.
     state `unknown`. So the badge never counts all sessions and switches meaning with the light. Next time it looks
     wrong, save `agent-eta list --json` and a screenshot of the badge and popup, then decide whether the count
     or the expectation is off. Fix with a regression case in `test_model.py` (ca. 1 Stunde)
+19. (low, bug) A remote viewer that agent-eta did not open with its own argv is never focused. `viewer()` in
+    `agent_eta_remote.py` compares every argument after `ssh` exactly against
+    `ssh -t HOST ~/.local/bin/agent-eta attach SOURCE`. On 2026-11-05 a Konsole on stefan-desktop, opened at 16:16:20
+    before 2.3.0 was installed there, ran `ssh -t notebook /home/stefanr/.local/bin/agent-eta attach claude:<id>`, and
+    the lookup returned no viewer for it, so a click opens a new terminal instead. A viewer opened by hand with the
+    documented `ssh -t HOST agent-eta attach claude:<session>` misses the same way. Proposal: compare the CLI
+    argument by its basename too, with a case in `test_remote.py` (ca. 30 Minuten)
 
 Waiting: counter-test for the agent-eta Codex permission fix of 0.66.7 (ca. 15 Minuten). The Codex weekly limit is
 used up until 2026-10-08 03:22. In a Codex thread with the reviewer set to `user`, an escalated `sleep 60` must show
