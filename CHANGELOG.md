@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.3.3] - 2026-11-05
+
+### Added
+
+- TODO item 19 for remote viewers whose `ssh` argv differs from agent-eta's own
+
 ## [2.3.2] - 2026-11-05
 
 ### Added
