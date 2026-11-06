@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-11-06
+
+### Fixed
+
+- A desktop Codex thread driven by `codex exec resume` stays listed after the exec's `SessionEnd`
+
 ## [2.4.0] - 2026-11-06
 
 ### Added

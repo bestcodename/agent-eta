@@ -556,7 +556,8 @@ def codex_threads():
 
     `name` is set once Codex has named a thread or the user renamed it. Until then the app
     shows the first prompt, which the database keeps as `title`, so its first line stands in.
-    `archived` is set while the user has archived the thread in the app.
+    `archived` is set while the user has archived the thread in the app. `source` is `vscode` for a
+    thread of the desktop app, `cli` for one the TUI started and `exec` for a headless run.
     """
     path = newest_codex_db("state")
     if not path:
@@ -567,11 +568,12 @@ def codex_threads():
         try:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(threads)")}
             archived = "archived" if "archived" in columns else "0"
-            for thread, name, title, rollout, gone in connection.execute(
-                    "SELECT id, name, title, rollout_path, %s FROM threads" % archived):
+            source = "source" if "source" in columns else "NULL"
+            for thread, name, title, rollout, gone, origin in connection.execute(
+                    "SELECT id, name, title, rollout_path, %s, %s FROM threads" % (archived, source)):
                 first = next((line.strip() for line in str(title or "").splitlines() if line.strip()), "")
                 threads[thread] = {"name": name or first.rstrip(":") or None, "rollout": rollout,
-                                   "archived": bool(gone)}
+                                   "archived": bool(gone), "source": origin}
         finally:
             connection.close()
     except sqlite3.Error:
@@ -1322,6 +1324,52 @@ def project_name(root):
     return name or os.path.basename(root.rstrip(os.sep))
 
 
+def desktop_owned(pids):
+    """Whether the Codex process heading this lineage runs under the desktop app's GUI. A server
+    launched by another Codex runtime does not display its threads in that outer runtime's GUI, which
+    also bounds discovery when tools start nested clients."""
+    for parent in pids[1:]:
+        if comm_of(parent) == "codex":
+            return False
+        try:
+            executable = os.path.basename(os.readlink("/proc/%d/exe" % parent).removesuffix(" (deleted)"))
+        except OSError:
+            continue
+        if executable in ("ChatGPT", "Codex"):
+            return True
+    return False
+
+
+def codex_arguments(pid):
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as handle:
+            return handle.read().split(b"\0")
+    except OSError:
+        return []
+
+
+def codex_desktop_server(proc="/proc"):
+    """{"pid", "start"} of the desktop app's Codex app-server, or None while the app is closed."""
+    for name in os.listdir(proc):
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if comm_of(pid) != "codex" or b"app-server" not in codex_arguments(pid):
+            continue
+        if desktop_owned(lineage(pid)):
+            return {"pid": pid, "start": proc_start(pid)}
+    return None
+
+
+def codex_desktop_holder(thread, threads=None):
+    """The desktop app-server that keeps thread open, for a thread of the desktop app that is not
+    archived, or None. Such a thread outlives any CLI or `codex exec resume` that runs a turn of it."""
+    found = (codex_threads() if threads is None else threads).get(thread) or {}
+    if found.get("source") != "vscode" or found.get("archived"):
+        return None
+    return codex_desktop_server()
+
+
 def codex_navigation(session):
     """The current UI target and its lineage, independently of the thread's execution host.
 
@@ -1344,19 +1392,7 @@ def codex_navigation(session):
     except (OSError, ValueError, IndexError):
         return unavailable("Codex process changed or exited.")
     pids = lineage(pid)
-    desktop = False
-    for parent in pids[1:]:
-        # A server launched by another Codex runtime does not display its threads in that
-        # outer runtime's GUI. This also bounds discovery when tools start nested clients.
-        if comm_of(parent) == "codex":
-            break
-        try:
-            executable = os.path.basename(os.readlink("/proc/%d/exe" % parent).removesuffix(" (deleted)"))
-        except OSError:
-            continue
-        if executable in ("ChatGPT", "Codex"):
-            desktop = True
-            break
+    desktop = desktop_owned(pids)
     if not pid_alive(pid, start):
         return unavailable("Codex process changed or exited.")
     if terminal and b"app-server" not in arguments and b"exec-server" not in arguments:
@@ -1488,8 +1524,9 @@ def codex_post(directory, payload):
     return "removed" if remove(entry_path(directory, "codex-" + safe_id(use_id))) else "unknown"
 
 
-def codex_state(directory, payload, state, waiting_for=None, now=None):
-    """Record the state of a Codex thread. `since` moves only when the state changes."""
+def codex_state(directory, payload, state, waiting_for=None, now=None, holder=None):
+    """Record the state of a Codex thread. `since` moves only when the state changes. The holder is the
+    Codex process the thread lives as long as, by default the hook's own Codex ancestor."""
     thread = payload.get("session_id")
     if not thread:
         return "no-session-id"
@@ -1502,10 +1539,21 @@ def codex_state(directory, payload, state, waiting_for=None, now=None):
                    "updated": int(now), "cwd": payload.get("cwd") or record.get("cwd"),
                    "transcript": payload.get("transcript_path") or record.get("transcript")})
     app = ancestor(lambda pid: comm_of(pid) == "codex")
-    if app:
+    if not holder and app and codex_headless(app):
+        holder = codex_desktop_holder(thread)
+    if holder:
+        # A headless run of a desktop thread ends with its turn, the thread stays open in the app.
+        record["app"] = holder
+    elif app:
         record["app"] = {"pid": app, "start": proc_start(app)}
     write_atomic(path, record)
     return state
+
+
+def codex_headless(pid):
+    """Whether the Codex process is a `codex exec` run, which has no UI of its own."""
+    arguments = codex_arguments(pid)
+    return b"exec" in arguments[1:] and b"app-server" not in arguments and b"exec-server" not in arguments
 
 
 def codex_event(directory, payload):
@@ -1526,13 +1574,26 @@ def codex_event(directory, payload):
             actions.append("handoff-error-%s" % type(exc).__name__)
     if event in TURN_ENDS and thread and remove(turn_path(directory, "codex", {"id": thread})):
         actions.append("turn-cleared")
-    if event == "SessionEnd" and thread:
+    holder = codex_end_holder(thread) if event == "SessionEnd" and thread else None
+    if holder:
+        # A CLI or `codex exec resume` that ran a desktop thread ended, the thread lives on in the app.
+        actions.append("client-ended+" + codex_state(directory, payload, "idle", holder=holder))
+    elif event == "SessionEnd" and thread:
         remove(codex_session_path(directory, thread))
         actions.append("ended")
     elif event in CODEX_STATES:
         state = CODEX_STATES[event]
         actions.append(codex_state(directory, payload, state, "permission" if state == "waiting" else None))
     return "+".join(actions) or "ignored"
+
+
+def codex_end_holder(thread):
+    """The desktop app-server that keeps thread open after a SessionEnd from another client, such as a
+    `codex exec resume` that ran one turn of it, or None when the SessionEnd ends the thread itself."""
+    holder = codex_desktop_holder(thread)
+    if holder and ancestor(lambda pid: comm_of(pid) == "codex") != holder["pid"]:
+        return holder
+    return None
 
 
 def handoff_trigger_settings():

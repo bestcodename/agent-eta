@@ -24,6 +24,7 @@ import tempfile
 import time
 import unittest
 import unittest.mock
+from unittest import mock
 
 _SRC = pathlib.Path(__file__).with_name("agent-eta")
 _spec = importlib.util.spec_from_loader(
@@ -548,6 +549,77 @@ class Sessions(StateTest):
                 self.assertEqual((session["name"], session["state"], session["waiting_for"]), ("Shop", state, reason))
         self.hook(self.codex_event("SessionEnd"))
         self.assertEqual(self.view(), [])
+
+    def desktop_thread(self, source="vscode", archived=0):
+        """A desktop app whose server is pid 4242, and thread-1 with the given source in its state database."""
+        threads = {"thread-1": {"name": "Proxmox", "rollout": None, "archived": bool(archived), "source": source}}
+        server = {"pid": 4242, "start": "77"}
+        return (mock.patch.object(eta, "codex_threads", return_value=threads),
+                mock.patch.object(eta, "codex_desktop_server", return_value=server))
+
+    def test_a_headless_run_of_a_desktop_thread_leaves_it_to_the_desktop_app(self):
+        threads, server = self.desktop_thread()
+        with threads, server, mock.patch.object(eta, "ancestor", return_value=999), \
+                mock.patch.object(eta, "codex_headless", return_value=True):
+            eta.codex_event(self.dir, self.codex_event("UserPromptSubmit"))
+            self.assertEqual(eta.read_json(eta.codex_session_path(self.dir, "thread-1"))["app"],
+                             {"pid": 4242, "start": "77"})
+            self.assertEqual(eta.codex_event(self.dir, self.codex_event("SessionEnd")), "client-ended+idle")
+        record = eta.read_json(eta.codex_session_path(self.dir, "thread-1"))
+        self.assertEqual((record["state"], record["app"]), ("idle", {"pid": 4242, "start": "77"}))
+
+    def test_a_terminal_client_of_a_desktop_thread_holds_it_until_its_session_end(self):
+        threads, server = self.desktop_thread()
+        with threads, server, mock.patch.object(eta, "ancestor", return_value=999), \
+                mock.patch.object(eta, "codex_headless", return_value=False), \
+                mock.patch.object(eta, "proc_start", return_value="5"):
+            eta.codex_event(self.dir, self.codex_event("UserPromptSubmit"))
+            self.assertEqual(eta.read_json(eta.codex_session_path(self.dir, "thread-1"))["app"]["pid"], 999)
+            eta.codex_event(self.dir, self.codex_event("SessionEnd"))
+        self.assertEqual(eta.read_json(eta.codex_session_path(self.dir, "thread-1"))["app"]["pid"], 4242)
+
+    def test_session_end_from_the_desktop_app_or_for_other_threads_ends_the_thread(self):
+        for source, archived, sender in (("vscode", 0, 4242), ("exec", 0, 999), ("cli", 0, 999), ("vscode", 1, 999)):
+            with self.subTest(source=source, archived=archived, sender=sender):
+                threads, server = self.desktop_thread(source, archived)
+                with threads, server, mock.patch.object(eta, "ancestor", return_value=sender):
+                    eta.codex_state(self.dir, self.codex_event("Stop"), "idle")
+                    self.assertEqual(eta.codex_event(self.dir, self.codex_event("SessionEnd")), "ended")
+                self.assertIsNone(eta.read_json(eta.codex_session_path(self.dir, "thread-1")))
+
+    def test_session_end_without_a_desktop_app_ends_a_desktop_thread(self):
+        threads, _ = self.desktop_thread()
+        with threads, mock.patch.object(eta, "codex_desktop_server", return_value=None), \
+                mock.patch.object(eta, "ancestor", return_value=999):
+            eta.codex_state(self.dir, self.codex_event("Stop"), "idle")
+            self.assertEqual(eta.codex_event(self.dir, self.codex_event("SessionEnd")), "ended")
+
+    def test_the_desktop_server_is_the_app_server_under_the_desktop_gui(self):
+        proc = self.root / "proc"
+        for pid, comm, argv in ((10, "codex", ["codex", "app-server"]), (11, "codex", ["codex", "exec", "resume"]),
+                                (12, "codex", ["codex", "app-server"]), (13, "bash", ["bash"])):
+            (proc / str(pid)).mkdir(parents=True)
+            (proc / str(pid) / "cmdline").write_bytes(b"".join(a.encode() + b"\0" for a in argv))
+            (proc / str(pid) / "comm").write_text(comm + "\n")
+        def comm(pid):
+            return (proc / str(pid) / "comm").read_text().strip()
+        def arguments(pid):
+            return (proc / str(pid) / "cmdline").read_bytes().split(b"\0")
+        with mock.patch.object(eta, "comm_of", side_effect=comm), \
+                mock.patch.object(eta, "codex_arguments", side_effect=arguments), \
+                mock.patch.object(eta, "lineage", side_effect=lambda pid: [pid, 1]), \
+                mock.patch.object(eta, "desktop_owned", side_effect=lambda pids: pids[0] == 12), \
+                mock.patch.object(eta, "proc_start", return_value="9"):
+            self.assertEqual(eta.codex_desktop_server(str(proc)), {"pid": 12, "start": "9"})
+            with mock.patch.object(eta, "desktop_owned", return_value=False):
+                self.assertIsNone(eta.codex_desktop_server(str(proc)))
+
+    def test_only_codex_exec_counts_as_headless(self):
+        for argv, headless in ((["codex", "exec", "resume", "t"], True), (["codex", "app-server"], False),
+                               (["codex", "exec-server", "--remote", "x"], False), (["codex", "resume", "t"], False)):
+            with self.subTest(argv=argv), \
+                    mock.patch.object(eta, "codex_arguments", return_value=[a.encode() for a in argv] + [b""]):
+                self.assertEqual(eta.codex_headless(1), headless)
 
     def codex_process(self, *arguments, terminal=True):
         # A fresh process with the native client's comm, so hook ancestry and PID identity are real.
