@@ -381,7 +381,9 @@ Runtime records include stable session/window/pane IDs and server/pane PID/start
 records from targeting IDs reused after a server restart. Managed panes use `remain-on-exit off`.
 
 Konsole is the default viewer, launched only to attach a client. `AGENT_ETA_TERMINAL_BIN` selects another terminal
-supporting `-e`. Each viewer attaches through its own grouped session with `destroy-unattached on`, so it keeps its
+supporting `-e`. The viewer starts through `systemd-run --user` in a transient unit of its own, so it gets the graphical
+session's environment when the caller came in over SSH and outlives a caller that is itself a unit;
+`AGENT_ETA_SYSTEMD_RUN_BIN` replaces that binary for tests, and without systemd-run the terminal starts directly. Each viewer attaches through its own grouped session with `destroy-unattached on`, so it keeps its
 own current window and its session disappears when it closes; agents continue. Navigation focuses a viewer already
 showing the agent on this machine and otherwise opens a new one, since a viewer below `sshd` has no local window, and a status-line click switches agents inside a viewer. A handoff
 moves every session showing its source to the destination. Handoffs never control Konsole tabs or their crash
@@ -434,7 +436,9 @@ the destination before using that recovery command. A repeated request refuses u
 the shared server to cancel one handoff. SIGKILL of the controller still requires this manual recovery.
 
 Local Claude-account moves keep the existing account/transcript migration code and use its
-`CLAUDE_HANDOFF_TERMINAL` extension to call the tmux adapter. Remote-host moves keep their existing behavior.
+`CLAUDE_HANDOFF_TERMINAL` extension to call the tmux adapter. A move to another host runs the same adapter there as
+`agent-eta account-tabs FILE` over SSH, so the moved sessions are managed and the widget of the source machine can
+attach to them; before 2.4.0 they opened as plain Konsole tabs, which a remote row cannot reach.
 `AGENT_ETA_HANDOFF_TERMINAL` is retired; unmanaged sessions remain listed but cross-provider handoff refuses them
 before pausing. Close an unmanaged writer and resume it through `account launch --cli --resume` to migrate.
 

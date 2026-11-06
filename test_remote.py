@@ -189,7 +189,11 @@ class AttachTest(unittest.TestCase):
         terminal = self.root / "terminal"
         terminal.write_text('#!/bin/sh\nprintf "%%s\\n" "$@" > %s\n' % self.recorded)
         terminal.chmod(0o755)
-        patcher = mock.patch.dict(os.environ, AGENT_ETA_TERMINAL_BIN=str(terminal))
+        # A runner that drops systemd-run's own options and runs the terminal directly.
+        runner = self.root / "systemd-run"
+        runner.write_text('#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n')
+        runner.chmod(0o755)
+        patcher = mock.patch.dict(os.environ, AGENT_ETA_TERMINAL_BIN=str(terminal), AGENT_ETA_SYSTEMD_RUN_BIN=str(runner))
         patcher.start()
         self.addCleanup(patcher.stop)
         self.argv = ["ssh", "-t", "desktop", "~/.local/bin/agent-eta", "attach", "codex:t1"]

@@ -255,6 +255,12 @@ class Commands(StateTest):
         self.assertEqual(child.wait(timeout=10), 128 + signal.SIGTERM)
         self.assertEqual(os.listdir(self.dir), [])
 
+    def test_account_tabs_reports_an_unreadable_file(self):
+        missing = os.path.join(self.dir, "missing-tabs.txt")
+        done = self.cli("account-tabs", missing)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("unreadable tabs file", done.stderr)
+
     def test_add_and_done(self):
         added = self.cli("add", "--eta", "10m", "--label", "CI pipeline")
         self.assertEqual(added.returncode, 0, added.stderr)
