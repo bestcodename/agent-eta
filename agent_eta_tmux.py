@@ -365,11 +365,19 @@ class Runtime:
 
 
 def open_terminal(argv):
-    """Run argv in a terminal window of its own, outside any tmux the caller runs in."""
+    """Run argv in a terminal window of its own, outside any tmux the caller runs in.
+
+    The terminal runs in a transient unit of the user manager, so it gets the graphical session's environment even
+    when the caller came in over SSH without DISPLAY, and it outlives a caller that is itself a unit, such as a
+    claude-account host move. Without systemd-run the terminal starts from the caller directly.
+    """
     from agent_eta_providers import executable, spawn
     terminal = executable("terminal")
     command = [terminal] + (["--separate"] if Path(terminal).name == "konsole" else [])
     command += ["-e", *argv]
+    runner = os.environ.get("AGENT_ETA_SYSTEMD_RUN_BIN") or shutil.which("systemd-run")
+    if runner:
+        command = [runner, "--user", "--collect", "--quiet", "--expand-environment=no", "--"] + command
     env = dict(os.environ)
     env.pop("TMUX", None)
     env.pop("TMUX_PANE", None)
@@ -377,7 +385,9 @@ def open_terminal(argv):
 
 
 def account_tabs(path):
-    """claude-account's local terminal extension; account/transcript migration stays native."""
+    """claude-account's terminal extension: every tab of a handoff tabs file becomes a managed tmux agent with a
+    viewer. Locally claude-account finds it through CLAUDE_HANDOFF_TERMINAL, and a host move reaches it as
+    `agent-eta account-tabs FILE` on the host. Account and transcript migration stay native."""
     runtime = Runtime()
     for line in Path(path).read_text().splitlines():
         if not line.strip() or line.lstrip().startswith("#"):

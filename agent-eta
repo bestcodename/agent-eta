@@ -40,6 +40,11 @@ dsh's own session logs, without an ETA. See docs/agent-eta.md.
         Share account actions with the tray. Launch accepts --directory for a one-off
         folder. Readings and preferences persist; native clients own all credentials.
 
+    agent-eta account-tabs FILE
+        Start every tab of a claude-account handoff tabs file as a managed tmux agent with a
+        viewer, so a moved session is listed with tmux navigation. claude-account runs it
+        on the target host of a move.
+
     agent-eta handoff SOURCE... --to claude|codex [--account NAME] [--plan PATH] [--wait SEC] [--dry-run]
         Hand claude:<session> or codex:<thread> over to the other provider with its plan,
         see agent_eta_handoff.py. The Codex Stop hook starts one at a usage threshold.
@@ -1804,6 +1809,15 @@ def cmd_attach(args):
     return 0
 
 
+def cmd_account_tabs(args):
+    """The tabs of a claude-account handoff, in managed tmux. A host move runs this on the host over SSH."""
+    try:
+        tmux_api.account_tabs(args.file)
+    except (OSError, KeyError, ValueError) as error:
+        raise tmux_api.TmuxError("%s: unreadable tabs file (%s)" % (args.file, error)) from None
+    return 0
+
+
 def eta_type(text):
     try:
         return parse_eta_arg(text)
@@ -1844,6 +1858,8 @@ def build_parser():
     attach.add_argument("source", metavar="SOURCE", help="claude:<session> or codex:<thread>")
     attach.add_argument("--json", action="store_true", help="select or open a viewer and report window PIDs")
     attach.add_argument("--host", help="the SSH host the session runs on, as added with remote add")
+    tabs = sub.add_parser("account-tabs", help="start the tabs of a claude-account handoff in managed tmux")
+    tabs.add_argument("file", help="the tabs file claude-account wrote")
     return parser
 
 
@@ -1855,7 +1871,8 @@ def main(argv=None):
     handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done,
                 "turn": cmd_turn, "handoff": cmd_handoff,
                 "account": lambda args: accounts_api.account_action(args, handoff_batch, handoff_inspect),
-                "tab": konsole_api.tab_action, "attach": cmd_attach, "remote": remote_api.remote_action}
+                "tab": konsole_api.tab_action, "attach": cmd_attach, "remote": remote_api.remote_action,
+                "account-tabs": cmd_account_tabs}
     try:
         return handlers[args.cmd](args)
     except (StateDirError, AccountError, handoff_api.HandoffError, tmux_api.TmuxError, remote_api.RemoteError) as exc:

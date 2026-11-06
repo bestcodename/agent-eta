@@ -109,7 +109,7 @@ class RuntimeUnit(unittest.TestCase):
                 mock.patch("agent_eta_providers.spawn") as spawn:
             self.assertEqual(self.runtime.attach({}), {"opened": True, "pids": []})
         name = "view-" + "f" * 12
-        self.assertEqual(spawn.call_args.args[0], [
+        self.assertEqual(spawn.call_args.args[0][spawn.call_args.args[0].index("--") + 1:], [
             "/usr/bin/konsole", "--separate", "-e", "tmux", "-f", tmux.CONFIG, "-S", self.runtime.socket,
             "new-session", "-t", "$0", "-s", name, ";", "set-option", "-t", name, "destroy-unattached", "on", ";",
             "select-window", "-t", name + ":@1"])
@@ -175,6 +175,22 @@ class RuntimeUnit(unittest.TestCase):
         self.assertEqual(call.args, (["/bin/sh", "/private/launch.sh"], "/project with spaces"))
         self.assertRegex(call.kwargs["identifier"], r"^[a-f0-9]{32}$")
         runtime.return_value.attach.assert_called_once()
+
+    def test_a_viewer_terminal_runs_in_a_user_unit(self):
+        with mock.patch.dict(os.environ, AGENT_ETA_TERMINAL_BIN="/usr/bin/konsole", AGENT_ETA_SYSTEMD_RUN_BIN="/run/sd"), \
+                mock.patch("agent_eta_providers.executable", return_value="/usr/bin/konsole"), \
+                mock.patch("agent_eta_providers.spawn") as spawn:
+            tmux.open_terminal(["tmux", "attach"])
+        self.assertEqual(spawn.call_args.args[0], ["/run/sd", "--user", "--collect", "--quiet", "--expand-environment=no", "--",
+                                                   "/usr/bin/konsole", "--separate", "-e", "tmux", "attach"])
+
+    def test_without_systemd_run_the_viewer_terminal_starts_directly(self):
+        with mock.patch.dict(os.environ, {"AGENT_ETA_SYSTEMD_RUN_BIN": ""}), \
+                mock.patch.object(tmux.shutil, "which", return_value=None), \
+                mock.patch("agent_eta_providers.executable", return_value="/usr/bin/xterm"), \
+                mock.patch("agent_eta_providers.spawn") as spawn:
+            tmux.open_terminal(["tmux", "attach"])
+        self.assertEqual(spawn.call_args.args[0], ["/usr/bin/xterm", "-e", "tmux", "attach"])
 
     def test_account_adapter_confirms_launch_failure_cleanup(self):
         tabs = Path(self.tmp.name) / "tabs.txt"

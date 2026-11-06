@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-06
+
+### Added
+
+- `agent-eta account-tabs FILE`, which starts a claude-account handoff's tabs in managed tmux, for host moves
+
+### Changed
+
+- Viewer terminals start through `systemd-run --user`, so they get the graphical environment over SSH
+
 ## [2.3.4] - 2026-11-06
 
 ### Added
