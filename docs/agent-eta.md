@@ -162,7 +162,11 @@ gets no `PostToolUse`, because Codex polls it no more, and its app-server lives 
 entries of an idle or stopped thread that predate the end of its turn, so rejected commands missing PostToolUse
 cannot keep a completed chat in the working section. Manual reminders and live PID or lock jobs are retained. On
 2026-10-04 at 02:27 the one command of the failed turn had no process left. A thread appears with its first hook call, and it disappears with its Codex CLI or app-server, after
-`SessionEnd`, or after twelve hours without any hook call. One that claims to work or wait but has been silent for six
+`SessionEnd`, or after twelve hours without any hook call. A thread of the desktop app, `source` `vscode` in the
+`threads` table, outlives the clients that run a turn of it while the app's app-server runs. A `codex exec resume`
+of it records that app-server as its holder, so the row opens the thread in the app, and a `SessionEnd` from any
+client but that app-server leaves it idle instead of removing it. On 2026-11-06 a Claude session drove the desktop
+thread `01a1aeaf…` with `codex exec resume`, and the exec's `SessionEnd` at 18:13:42 had removed the thread. One that claims to work or wait but has been silent for six
 hours most likely missed its `Stop`, and it counts as idle. A thread archived in the app, marked by `archived` in the
 `threads` table of `~/.codex/state_<n>.sqlite`, is left out while it stays archived, and it comes back once unarchived.
 Codex consolidates its memories in a sub-agent thread that works in `~/.codex/memories`. That thread has no row in
