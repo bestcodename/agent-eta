@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.4.2] - 2026-11-06
+
+### Added
+
+- TODO items 21 and 22 for launch settings and desktop Codex threads while the app is closed
+
 ## [2.4.1] - 2026-11-06
 
 ### Fixed
