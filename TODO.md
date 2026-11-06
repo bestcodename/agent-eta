@@ -101,3 +101,14 @@ the log database only.
   raised its window; the desktop thread URL was accepted and activated the desktop app. The temporary tab was closed.
   No Agent ETA QML errors appeared in the reload journal. Shared/remote servers without a proven local UI association
   explain that navigation is unavailable; the inspected native protocol exposes no terminal PID mapping.
+20. (low, proposal) Rename sessions from agent-eta, requested on 2026-11-05. Names are only read today, from
+    Claude Code's `custom-title` or `ai-title` and Codex's thread name (see [docs/agent-eta.md](docs/agent-eta.md)).
+    1. **`agent-eta rename <session> <name>`** plus a row action in the widget. It renames the session in its agent,
+       for Claude Code presumably by typing `/rename <name>` into it rather than writing its transcript, and sets
+       the Konsole tab title over D-Bus (`/Sessions/<n>`, next to `title` in `agent_eta_konsole.py`), which the
+       window caption follows. A PhpStorm terminal tab has no such route, see #6 (ca. 3 Stunden)
+    2. **`agent-eta rename --all`**, which asks each idle session for the shortest fitting name of its current work,
+       checks that the answer differs from every other session's name, and applies it through 1. A working session
+       is skipped rather than interrupted, and the answer must not land in the session's own work as a turn of
+       substance. Delivering the prompt needs the same input route as 1, through Konsole, tmux or dsh
+       (ca. 4 Stunden)

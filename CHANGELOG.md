@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.3.4] - 2026-11-06
+
+### Added
+
+- TODO item 20 for renaming sessions from agent-eta
+
 ## [2.3.3] - 2026-11-05
 
 ### Added
