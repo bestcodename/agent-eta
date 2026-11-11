@@ -27,6 +27,7 @@ SERVICE_CONTEXT = ("INVOCATION_ID", "JOURNAL_STREAM", "SYSTEMD_EXEC_PID", "NOTIF
                    "LISTEN_FDS", "LISTEN_FDNAMES", "WATCHDOG_PID", "WATCHDOG_USEC")
 # The private server's only configuration; the user's own tmux configuration is never loaded.
 CONFIG = str(Path(__file__).resolve().with_name("tmux.conf"))
+VIEWER_PREFIX = "view-"
 
 
 class TmuxError(Exception):
@@ -245,8 +246,20 @@ class Runtime:
                 raise TmuxError("the managed command exited during launch")
             record.update(pane)
             self.write(record)
-            self.tmux("set-option", "-w", "-t", record["window"], "remain-on-exit", "off")
+            self.watch(record["window"])
         return record
+
+    def watch(self, window):
+        """Keep the pane after its agent exits, so a pane-died hook can close every viewer showing it
+        before the window goes; tmux would otherwise show another agent in those viewers. The hook
+        only kills sessions and the window, never detaches a client (docs/agent-eta.md)."""
+        if not re.fullmatch(r"@\d+", window or ""):
+            raise TmuxError("invalid tmux window ID")
+        # #{hook_window} is empty in pane-died, so the window ID is written into the hook itself.
+        close = ("run-shell -C \"#{S:#{?#{&&:#{m:%s*,#{session_name}},#{==:#{window_id},%s}},"
+                 "kill-session -t '=#{session_name}' ; ,}}kill-window -t %s\"") % (VIEWER_PREFIX, window, window)
+        self.tmux("set-option", "-w", "-t", window, "remain-on-exit", "on")
+        self.tmux("set-hook", "-w", "-t", window, "pane-died", close)
 
     def find(self, pid, start):
         if not start or proc_start(pid) != start:
@@ -336,7 +349,7 @@ class Runtime:
     def viewer(self, pane):
         """tmux argv for a client with its own grouped session, so each viewer keeps its own window.
         destroy-unattached removes that session again once the viewer closes."""
-        name = "view-" + uuid.uuid4().hex[:12]
+        name = VIEWER_PREFIX + uuid.uuid4().hex[:12]
         return ["tmux", "-f", CONFIG, "-S", self.socket, "new-session", "-t", pane["session"], "-s", name, ";",
                 "set-option", "-t", name, "destroy-unattached", "on", ";",
                 "select-window", "-t", name + ":" + pane["window"]]

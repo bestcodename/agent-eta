@@ -128,28 +128,21 @@ priority.
     3. **Managed sessions and handoff.** tmux runs on macOS, but the owned systemd scopes and `systemctl --user
        freeze` have no launchd equivalent; candidates are a process-group `SIGSTOP`/`SIGCONT` and a Terminal.app or
        iTerm2 viewer through `osascript`. These stay Linux-only until 1 and 2 run (ca. 16 hours)
-24. (next, proposal) Keep one tmux crash from killing every managed agent. On 2026-11-11 at 17:41:45
-    `tmux detach-client -t /dev/pts/5`, run against a duplicate Konsole viewer of a grouped `destroy-unattached`
-    view session, made the tmux 3.5a server dump core (`systemd-coredump`, process `tmux: server`), and all four
-    Claude sessions in its panes died. The crash is measured; that the detach of a grouped viewer triggers it is
-    inferred from the timing. A repro on a fresh throwaway server with the same config did not crash for a detach
-    with the viewer's window alive, a detach after it closed, or a SIGHUP of the client, so the trigger needs more
-    state; the next probe is a backtrace of the core (`coredumpctl gdb 3000632` with debuginfod). Proposals are to close a
-    duplicate viewer by ending its Konsole process instead of `detach-client` and to document that (ca. 30 Minuten),
-    and to give each agent its own tmux socket so a server crash takes one session, not all (ca. 4 Stunden)
-25. (next, proposal) `account launch --resume` refuses a dead session as a "live writer". On 2026-11-11 after the
-    tmux crash of item 24, `handoff_inspect` in `agent-eta` still returned the proxmox session, because its open ETA
-    task (`add-*.json`) kept it in the snapshot with `pids: []` and gate reason "it has no running session". The
-    check in `agent_eta_accounts.account_action` tests only for `is not None`; it should refuse only when the result
-    has a live `pid`, with a test in `test_accounts.py` (ca. 30 Minuten)
-26. (next, proposal) Close a viewer whose agent ends instead of showing another agent in it. All agents are windows of
-    the one tmux session `agents`, and each viewer is a grouped session sharing every window
-    (`agent_eta_tmux.Tmux.viewer`). When the shown agent exits, tmux makes another window of the group current in
-    that viewer, so it shows an agent that another Konsole tab already shows. Reported on 2026-11-11 for the proxmox
-    session and reproduced on a throwaway server the same day, where `kill-window` of `a1` moved viewer `view1` to
-    `a2` beside `view2`. Proposal: keep `remain-on-exit on` and let a `pane-died` hook `kill-session` every `view-*`
-    session whose current window is the dead one before killing the window, so `detach-on-destroy` closes that
-    viewer's Konsole tab; no `detach-client`, see 24; test in `test_tmux.py` against a throwaway server (ca. 2 Stunden)
+24. (low, proposal) Install tmux 3.7c from trixie-backports on stefan-desktop and stefan-notebook and add it to the
+    workstation setup of [bestcodename/ai](https://github.com/bestcodename/ai). On 2026-11-11 at 17:41:45
+    `tmux detach-client -t /dev/pts/5`, run against a duplicate Konsole viewer, crashed the tmux 3.5a server and all
+    four Claude sessions in its panes died. The backtrace of core 3000632 (Debian debuginfod) shows the SIGSEGV in
+    `server_client_check_modes`, which reads `c->session->curw->window`; the crashing client is `/dev/pts/5` with
+    `CLIENT_EXIT_DETACH`, and its session `view-80b5f2bfc101` was already destroyed (`curw` NULL, no references).
+    In 3.5a `server_client_detach` leaves `c->session` set and `server_check_unattached` destroys the
+    `destroy-unattached` session without taking clients off it. tmux 3.7c guards that read; only master also takes the
+    clients off first. agent-eta never detaches a client, and its viewers now close through `kill-session`, which takes
+    clients off before destroying. The private server keeps 3.5a until it restarts, which ends every agent, so switch
+    while none runs and run the test suite against 3.7c first (ca. 30 Minuten)
 27. (low) Install Qt 6's `qmltestrunner` on stefan-desktop and add it to the workstation setup of
     [bestcodename/ai](https://github.com/bestcodename/ai). `test_qml.Qml.test_widget_qml` is skipped here on
     2026-11-11 for lack of it, so widget changes are only tested on the notebook (ca. 15 Minuten)
+28. (low, proposal) Prune runtime records of ended terminals. On 2026-11-11 `/tmp/agent-eta-1000/tmux` held 65 records
+    and their `launch.sh` folders for 4 live windows; nothing in `agent_eta_tmux.py` deletes them, and `find()` reads
+    them all. Proposal: delete record and folder once `pane()` is `None` and the server identity is gone, in `stop()`
+    and in a sweep from `find()`, with a `test_tmux.py` case (ca. 1 Stunde)

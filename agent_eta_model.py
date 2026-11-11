@@ -73,6 +73,10 @@ def agent_label(agent, account):
     return "%s/%s" % (agent, account) if account else agent
 
 
+# The gate reason of a row that only an ETA task keeps listed, so callers can tell it from a live session.
+NO_RUNNING_SESSION = "it has no running session"
+
+
 def session_key(agent, session):
     """Claude Code sessions are matched by pid, which survives a /clear, Codex threads by id."""
     if agent == "claude" and session.get("pid"):
@@ -492,7 +496,7 @@ def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, h
                 "agent": task.get("agent"), "id": session.get("id"), "pid": session.get("pid"),
                 "name": task.get("session_name") or "-", "state": "unknown", "reported_state": "unknown",
                 "waiting_for": None, "since": task.get("started"), "cwd": task.get("cwd"), "tasks": [],
-                "key": key_text(key), "gate_reason": "it has no running session"}
+                "key": key_text(key), "gate_reason": NO_RUNNING_SESSION}
             sessions.append(owner)
         owner["tasks"].append(task)
     for session in sessions:

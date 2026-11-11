@@ -7,13 +7,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Removed
+## [2.4.5] - 2026-11-11
 
-- Stale TODO notes on the Codex permission counter-test and the 2026-10-18 bug follow-up
+### Fixed
+
+- A managed viewer closes when its agent ends instead of showing another agent
+- Handoff, attach and `account launch --resume` treat a session that only an ETA task keeps listed as ended
 
 ### Added
 
 - TODO item 27 for the QML test runner on stefan-desktop
+- TODO item 28 for pruning runtime records of ended terminals
+
+### Changed
+
+- TODO item 24 narrowed to a tmux upgrade, with the measured crash cause
+
+### Removed
+
+- Stale TODO notes on the Codex permission counter-test and the 2026-10-18 bug follow-up
+- TODO items 25 and 26
 
 ## [2.4.4] - 2026-11-11
 

@@ -1815,10 +1815,13 @@ def handoff_records():
 
 
 def handoff_inspect(source):
-    """A live session for agent_eta_handoff, or None."""
+    """A live session for agent_eta_handoff, or None. A row that only an ETA task keeps listed is no
+    running session."""
     result = snapshot(state_dir(), time.time())
     for session in result.sessions:
         if session["agent"] != source[0] or session.get("id") != source[1]:
+            continue
+        if session.get("gate_reason") == model.NO_RUNNING_SESSION:
             continue
         pid, start, reason = handoff_gate(session, result.sessions)
         transcripts = claude_transcript_paths(source[1]) if source[0] == "claude" else []
