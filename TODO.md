@@ -147,3 +147,17 @@ the log database only.
     3. **Managed sessions and handoff.** tmux runs on macOS, but the owned systemd scopes and `systemctl --user
        freeze` have no launchd equivalent; candidates are a process-group `SIGSTOP`/`SIGCONT` and a Terminal.app or
        iTerm2 viewer through `osascript`. These stay Linux-only until 1 and 2 run (ca. 16 hours)
+24. (next, proposal) Keep one tmux crash from killing every managed agent. On 2026-11-11 at 17:41:45
+    `tmux detach-client -t /dev/pts/5`, run against a duplicate Konsole viewer of a grouped `destroy-unattached`
+    view session, made the tmux 3.5a server dump core (`systemd-coredump`, process `tmux: server`), and all four
+    Claude sessions in its panes died. The crash is measured; that the detach of a grouped viewer triggers it is
+    inferred from the timing. A repro on a fresh throwaway server with the same config did not crash for a detach
+    with the viewer's window alive, a detach after it closed, or a SIGHUP of the client, so the trigger needs more
+    state; the next probe is a backtrace of the core (`coredumpctl gdb 3000632` with debuginfod). Proposals are to close a
+    duplicate viewer by ending its Konsole process instead of `detach-client` and to document that (ca. 30 Minuten),
+    and to give each agent its own tmux socket so a server crash takes one session, not all (ca. 4 Stunden)
+25. (next, proposal) `account launch --resume` refuses a dead session as a "live writer". On 2026-11-11 after the
+    tmux crash of item 24, `handoff_inspect` in `agent-eta` still returned the proxmox session, because its open ETA
+    task (`add-*.json`) kept it in the snapshot with `pids: []` and gate reason "it has no running session". The
+    check in `agent_eta_accounts.account_action` tests only for `is not None`; it should refuse only when the result
+    has a live `pid`, with a test in `test_accounts.py` (ca. 30 Minuten)
