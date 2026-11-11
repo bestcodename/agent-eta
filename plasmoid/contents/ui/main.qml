@@ -140,12 +140,9 @@ PlasmoidItem {
     }
 
     // Account actions have one implementation in the CLI. Errors survive ordinary polls.
-    function accountAction(action, account, directory, source) {
-        let args = " account " + action + " " + Logic.shellQuote(account.id);
-        if (source) args += " --from " + source;
-        if (directory !== undefined && directory !== null)
-            args += action === "launch" ? " --directory " + Logic.shellQuote(directory) : " " + Logic.shellQuote(directory);
-        runner.run(command + args, (code, stdout, stderr) => {
+    function accountAction(action, account, directory, source, launchInCli) {
+        if (launchInCli === undefined) launchInCli = Plasmoid.configuration.launchInCli;
+        runner.run(Logic.accountCommand(command, action, account, directory, source, launchInCli), (code, stdout, stderr) => {
             actionFailure = code === 0 ? "" : (stderr || i18n("Account action failed")).trim();
             refresh();
             if (code === 0 && (action === "login" || action === "launch")) expanded = false;

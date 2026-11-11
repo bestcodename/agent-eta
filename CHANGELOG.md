@@ -7,6 +7,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- TODO item 31 for Codex CLI resume visibility, mixed-version tmux viewers and desktop handoff recovery
+- TODO item 32 for accessible tooltips across settings, context-menu actions and remaining widget controls
+- TODO item 33 for Claude CLI/desktop launch preferences and one-launch context-menu overrides
+
+## [2.5.0] - 2026-11-11
+
+### Added
+
+- Widget setting **Use CLI by default**, enabled by default for new sessions
+- Codex account menu actions for a one-launch client override in the default or a chosen directory
+- TODO items 29 and 30 for broader user-facing configuration and settings sections
+
+### Changed
+
+- New Codex sessions from the widget use the managed CLI unless the desktop client is selected
+
 ## [2.4.5] - 2026-11-11
 
 ### Fixed

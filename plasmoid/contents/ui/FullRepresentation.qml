@@ -157,10 +157,17 @@ PlasmaExtras.Representation {
         id: folderDialog
         property var account: null
         property string action: "launch"
+        property bool launchInCli: true
+        function show(account, action, launchInCli) {
+            this.account = account;
+            this.action = action;
+            this.launchInCli = launchInCli === undefined ? Plasmoid.configuration.launchInCli : launchInCli;
+            open();
+        }
         title: action === "launch" ? i18n("New session in…") : i18n("Default session directory")
         onAccepted: {
             const path = Logic.folderPath(selectedFolder);
-            if (path !== null) root.accountAction(action, account, path);
+            if (path !== null) root.accountAction(action, account, path, null, launchInCli);
             else root.actionFailure = i18n("Choose a local directory");
         }
     }
@@ -168,6 +175,7 @@ PlasmaExtras.Representation {
     PlasmaExtras.Menu {
         id: accountMenu
         property var account: null
+        readonly property bool alternateCli: !Plasmoid.configuration.launchInCli
         onStatusChanged: root.menuOpen = status !== PlasmaExtras.Menu.Closed
         function show(account, item, x, y) {
             if (!account) return;
@@ -182,11 +190,22 @@ PlasmaExtras.Representation {
         }
         PlasmaExtras.MenuItem {
             text: i18n("New session in…")
-            onClicked: { folderDialog.account = accountMenu.account; folderDialog.action = "launch"; folderDialog.open(); }
+            onClicked: folderDialog.show(accountMenu.account, "launch")
+        }
+        PlasmaExtras.MenuItem {
+            text: accountMenu.alternateCli ? i18n("New CLI session in the default directory")
+                : i18n("New desktop session in the default directory")
+            visible: !!accountMenu.account && accountMenu.account.provider === "codex"
+            onClicked: root.accountAction("launch", accountMenu.account, null, null, accountMenu.alternateCli)
+        }
+        PlasmaExtras.MenuItem {
+            text: accountMenu.alternateCli ? i18n("New CLI session in…") : i18n("New desktop session in…")
+            visible: !!accountMenu.account && accountMenu.account.provider === "codex"
+            onClicked: folderDialog.show(accountMenu.account, "launch", accountMenu.alternateCli)
         }
         PlasmaExtras.MenuItem {
             text: i18n("Set default directory…")
-            onClicked: { folderDialog.account = accountMenu.account; folderDialog.action = "default-directory"; folderDialog.open(); }
+            onClicked: folderDialog.show(accountMenu.account, "default-directory")
         }
         PlasmaExtras.MenuItem {
             text: i18n("Log in")

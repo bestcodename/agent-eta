@@ -146,3 +146,39 @@ priority.
     and their `launch.sh` folders for 4 live windows; nothing in `agent_eta_tmux.py` deletes them, and `find()` reads
     them all. Proposal: delete record and folder once `pane()` is `None` and the server identity is gone, in `stop()`
     and in a sweep from `find()`, with a `test_tmux.py` case (ca. 1 Stunde)
+29. (low, proposal) Audit user-facing defaults and make useful behavior configurable through the existing widget
+    settings and CLI configuration, requested on 2026-11-11. New widget sessions already have a CLI/desktop default
+    and a one-launch menu override. Review session-click behavior, terminal and IDE commands, session visibility,
+    notification rules and the model, effort and permission settings in #21. Reuse native client settings and
+    existing environment overrides; keep process ownership and live-writer checks mandatory. Propose the remaining
+    options and their implementation effort after this audit (ca. 2 hours)
+30. (low, proposal) Split widget configuration into sections, requested on 2026-11-11. Use Plasma's existing
+    configuration categories in `plasmoid/contents/config/config.qml`; proposed sections are General, Sessions
+    and Launching, Appearance, and Notifications. Preserve existing setting keys, defaults and saved values,
+    and test that each section loads and saves its controls (ca. 1 hour)
+31. (next, bug) Make Codex CLI resumes visible and their viewers reliable after a tmux upgrade. On 2026-11-11,
+    `account launch codex --cli --resume` returned success for "List relevant private todos", but Konsole closed
+    before attaching. The installed tmux 3.7c client reported `open terminal failed: not a terminal` against the
+    still-running 3.5a server; a client started from that server's `/proc/<pid>/exe` attached to the same pane.
+    The resumed CLI remained absent from `list` and `attach` before its first prompt, as documented, so the widget
+    could not navigate to it. A queued resume of "Finish Proxmox handover" also expired after five minutes because
+    its desktop writer remained present. Proposal: negotiate or retain a compatible viewer client without restarting
+    active agents, associate resumed session IDs with validated managed process identities before the first prompt,
+    and report success only after an actual viewer attachment. Keep live-writer protection; explain when the desktop
+    must close instead of queuing a resume that cannot proceed. Cover mixed tmux versions, pre-prompt discovery,
+    viewer reuse and focus, closed-viewer reopening, and desktop-to-CLI recovery with regression tests and a real
+    Konsole check (ca. 4 hours)
+32. (low, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize settings
+    in `configGeneral.qml` and the sections proposed in #30, plus account and session context-menu actions in
+    `FullRepresentation.qml`; then cover remaining controls and unclear icons, status indicators and abbreviations.
+    Explain purpose, effect or disabled state instead of repeating labels. Keep essential information visible and
+    provide accessible names. Reuse Qt/Plasma tooltip facilities and native timing, with pointer hover and keyboard
+    focus; verify that disabled-action explanations remain discoverable. Add focused QML coverage for settings and
+    both context menus, including focus and disabled states, and check them in Plasma (ca. 2 hours)
+33. (low, proposal) Offer Claude the same configurable CLI/desktop launch default and one-launch context-menu
+    override as Codex, requested on 2026-11-11. Support both the saved default directory and a chosen directory,
+    keep CLI as the initial default, and store each provider's preference independently. First verify the native
+    desktop launch route on the target OS and whether it preserves the selected Claude account and project folder.
+    If that route is unavailable, explain why instead of silently opening a different account. Reuse the existing
+    launch pipeline and configuration; add focused command and QML tests for defaults, overrides, directory choice
+    and account isolation, plus tooltips under #32 (ca. 3 hours)

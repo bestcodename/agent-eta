@@ -11,6 +11,33 @@ import test from "node:test";
 
 import * as logic from "./plasmoid/contents/code/logic.mjs";
 
+test("account launches default to CLI and allow a desktop override in either directory", () => {
+    const codex = {id: "codex", provider: "codex"};
+    for (const directory of [undefined, "/work/a 'quoted' $(never) project"]) {
+        const suffix = directory === undefined ? "" : " --directory " + logic.shellQuote(directory);
+        const launch = "agent-eta account launch 'codex'";
+        assert.equal(logic.accountCommand("agent-eta", "launch", codex, directory), launch + " --cli" + suffix);
+        assert.equal(logic.accountCommand("agent-eta", "launch", codex, directory, null, false), launch + suffix);
+        assert.equal(logic.accountCommand("agent-eta", "launch", codex, directory, null, true), launch + " --cli" + suffix);
+    }
+});
+
+test("launch preference leaves login, directory preferences and handoffs unchanged", () => {
+    const claude = {id: "claude:work's", provider: "claude"};
+    const prefix = "'/path with spaces/agent-eta' account ";
+    for (const cli of [true, false]) {
+        const build = (action, directory, source) =>
+            logic.accountCommand("'/path with spaces/agent-eta'", action, claude, directory, source, cli);
+        assert.equal(build("login"), prefix + "login " + logic.shellQuote(claude.id));
+        assert.equal(build("default-directory", "/a folder"),
+            prefix + "default-directory " + logic.shellQuote(claude.id) + " '/a folder'");
+        assert.equal(build("handoff", null, "codex"),
+            prefix + "handoff " + logic.shellQuote(claude.id) + " --from 'codex'");
+    }
+    assert.equal(logic.accountCommand("agent-eta", "launch", claude),
+        "agent-eta account launch " + logic.shellQuote(claude.id) + " --cli");
+});
+
 const NOW = 1791162767;
 
 function session(fields) {

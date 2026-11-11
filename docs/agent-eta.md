@@ -306,6 +306,9 @@ Each account has a saved default session directory, falling back to the home dir
 prints it; supplying a path saves it. `launch --directory` chooses one folder without replacing that preference.
 Claude launches through its account wrapper in a managed tmux window. Codex opens the new-thread composer through
 `codex://threads/new?path=...`, with the path encoded; `account launch codex --cli` starts its managed CLI instead.
+The widget adds `--cli` by default. Its **Use CLI by default** setting switches new Codex sessions between the CLI
+and desktop app, and the account menu offers the other client for one launch in the default or a chosen directory.
+The override leaves the saved client and directory preferences unchanged. Claude sessions always use their CLI.
 `account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` resumes a session after its existing writer has
 exited. The command refuses a live writer. `agent-eta attach claude:ID` or `codex:ID` shows its existing managed
 terminal, without starting a model session. In a terminal it attaches or switches; `--json` selects a pane and
@@ -625,6 +628,10 @@ and what the hook did. The command text never goes there. The log rotates at 256
   accounts offer Login and Remove controls. A left or right click anywhere on an account's row opens its menu, with
   **New session in the default directory**, **New session in…**, **Set default directory…**, **Log in** and, for a
   registered Claude account, **Move all sessions here** (see [claude-account.md](https://github.com/bestcodename/ai/blob/main/docs/claude-account.md#handing-sessions-to-another-account)).
+  New sessions use the CLI by default. Clearing **Use CLI by default** in the widget settings makes Codex launches
+  open the desktop app. Its account menu offers **New desktop session in the default directory** and
+  **New desktop session in…** when CLI is the default, or the corresponding CLI actions when desktop is the default.
+  Both folder choices preserve that one-launch override, and cancelling the chooser starts nothing.
   A Claude account also offers **Move all Codex sessions here** and the Codex row **Move all Claude sessions here**,
   which run `agent-eta account handoff ID --from codex|claude` and hand every session that can move over at once.
   The pointer turns into a hand wherever a click does something, on account rows and session rows alike. Cancelling a folder chooser starts no process.

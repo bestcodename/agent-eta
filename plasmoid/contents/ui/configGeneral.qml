@@ -10,6 +10,7 @@ KCM.SimpleKCM {
     property alias cfg_pollClosed: pollClosed.value
     property alias cfg_pollOpen: pollOpen.value
     property alias cfg_showUsage: showUsage.checked
+    property alias cfg_launchInCli: launchInCli.checked
     property alias cfg_yellowWidth: yellowWidth.value
     property alias cfg_blendYellow: blendYellow.checked
     property alias cfg_blendWidth: blendWidth.value
@@ -21,6 +22,7 @@ KCM.SimpleKCM {
     property int cfg_pollClosedDefault
     property int cfg_pollOpenDefault
     property bool cfg_showUsageDefault
+    property bool cfg_launchInCliDefault
     property int cfg_yellowWidthDefault
     property bool cfg_blendYellowDefault
     property int cfg_blendWidthDefault
@@ -51,6 +53,11 @@ KCM.SimpleKCM {
             id: showUsage
             Kirigami.FormData.label: i18nc("@title:group", "Show:")
             text: i18nc("@option:check", "Usage windows")
+        }
+        QQC2.CheckBox {
+            id: launchInCli
+            Kirigami.FormData.label: i18nc("@title:group", "New Codex sessions:")
+            text: i18nc("@option:check", "Use CLI by default")
         }
         QQC2.Button {
             text: i18n("Restore Codex monitoring")

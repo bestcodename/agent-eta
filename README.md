@@ -5,6 +5,8 @@ ETA and its background tasks, and shows the usage windows of every account. Sess
 Completed Codex turns stay idle even when a rejected command misses its completion hook; unanswered native questions
 show as waiting. A Plasma 6 tray widget shows the same overview, shows a session's existing terminal on click and offers account
 actions such as starting a session, logging in and moving all Claude Code sessions to another account.
+New sessions from the widget use the CLI by default. **Use CLI by default** in the widget settings selects the
+Codex launch client; its account menu also offers the other client for a single launch.
 `agent-eta handoff` moves a session between Claude Code and Codex with its plan, by hand or at a usage limit.
 
 Hooks and the agents' own session registries fill the list, so an agent only has to write down the ETA it states anyway.
@@ -54,7 +56,7 @@ the client there once to accept the trust question.
 
 Managed CLI rows focus the window already showing their pane, or open a window of their own. Inside a viewer, a
 click on a status-line tab switches agents.
-Desktop threads open in the app. Unmanaged CLI sessions remain visible but must be closed and resumed with
+Existing desktop threads open in the app. Unmanaged CLI sessions remain visible but must be closed and resumed with
 `agent-eta account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` before cross-provider handoff.
 Resuming a session with a live writer is refused; a session that only an open ETA keeps listed has none.
 Existing clients are never moved into tmux.
