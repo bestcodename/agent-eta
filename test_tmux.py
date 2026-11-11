@@ -166,6 +166,12 @@ class RuntimeUnit(unittest.TestCase):
                 self.assertRaisesRegex(tmux.TmuxError, "has ended"):
             self.runtime.attach({})
 
+    def test_watch_refuses_a_malformed_window(self):
+        with mock.patch.object(self.runtime, "tmux") as run, \
+                self.assertRaisesRegex(tmux.TmuxError, "invalid tmux window ID"):
+            self.runtime.watch("@1; kill-server")
+        run.assert_not_called()
+
     def test_account_migration_adapter_reuses_native_launch_script(self):
         tabs = Path(self.tmp.name) / "tabs.txt"
         tabs.write_text("title: native;; workdir: /project with spaces;; command: /bin/sh /private/launch.sh\n")
@@ -236,6 +242,7 @@ class ServerUnit(unittest.TestCase):
             time.sleep(.05)
 
     def view(self, record):
+        before = len(self.runtime.clients())
         child, fd = pty.fork()
         if child == 0:
             os.environ["TERM"] = "xterm-256color"
@@ -244,8 +251,18 @@ class ServerUnit(unittest.TestCase):
                 os.execvp(argv[0], argv)
             finally:
                 os._exit(127)
-        self.until(self.runtime.clients)
+        self.until(lambda: len(self.runtime.clients()) > before)
         return child, fd
+
+    def ended(self, child, fd):
+        self.until(lambda: os.waitpid(child, os.WNOHANG)[0] == child)
+        os.close(fd)
+
+    def die(self, record):
+        os.kill(self.runtime.pane(record)["pane_pid"], signal.SIGTERM)
+
+    def windows(self):
+        return self.tmux("list-windows", "-t", "agents", "-F", "#{window_id}")
 
     def close(self, child, fd):
         os.kill(child, signal.SIGTERM)
@@ -274,12 +291,34 @@ class ServerUnit(unittest.TestCase):
             self.close(child, fd)
         self.until(lambda: self.tmux("list-sessions", "-F", "#{session_name}") == "agents")
 
+    def test_a_viewer_closes_with_its_agent_and_others_keep_theirs(self):
+        b = self.window(self.b)
+        self.runtime.watch(self.window(self.a))
+        first, second, other = self.view(self.a), self.view(self.a), self.view(self.b)
+        try:
+            self.die(self.a)
+            self.ended(*first)
+            self.ended(*second)
+            self.until(lambda: self.windows() == b)
+            self.assertEqual([c["window"] for c in self.runtime.clients()], [b])
+            views = [name for name in self.tmux("list-sessions", "-F", "#{session_name}").split()
+                     if name.startswith(tmux.VIEWER_PREFIX)]
+            self.assertEqual(len(views), 1)
+        finally:
+            self.close(*other)
+
     def test_a_handoff_moves_each_view_of_its_source(self):
+        b = self.window(self.b)
+        self.runtime.watch(self.window(self.a))
         child, fd = self.view(self.a)
         try:
             self.runtime.follow(self.a, self.b)
-            self.assertEqual([c["window"] for c in self.runtime.clients()], [self.window(self.b)])
-            self.assertEqual(self.tmux("display-message", "-p", "-t", "agents", "#{window_id}"), self.window(self.b))
+            self.assertEqual([c["window"] for c in self.runtime.clients()], [b])
+            self.assertEqual(self.tmux("display-message", "-p", "-t", "agents", "#{window_id}"), b)
+            self.die(self.a)
+            self.until(lambda: self.windows() == b)
+            self.assertEqual(os.waitpid(child, os.WNOHANG), (0, 0))
+            self.assertEqual([c["window"] for c in self.runtime.clients()], [b])
         finally:
             self.close(child, fd)
 

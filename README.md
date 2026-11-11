@@ -27,6 +27,7 @@ Managed CLI sessions and cross-provider handoffs require tmux and a running syst
 Install tmux with your package manager before running the installer. A private tmux server hosts agent terminals
 independently of viewers and handoff controllers. Konsole is the default viewer; `AGENT_ETA_TERMINAL_BIN` can select
 another terminal supporting `-e`. Closing the viewer leaves agents running; explicitly ending an agent stops it.
+A viewer closes once its agent ends, instead of showing another agent.
 Each pane keeps a separate launcher so tmux's own scope tracking cannot move the agent out of its owned scope.
 The launcher clears inherited `NO_COLOR` so automation tools cannot force an interactive agent into grayscale.
 It preserves `TERM` and `COLORTERM`; explicitly supplied launcher settings still take precedence.
@@ -55,7 +56,8 @@ Managed CLI rows focus the window already showing their pane, or open a window o
 click on a status-line tab switches agents.
 Desktop threads open in the app. Unmanaged CLI sessions remain visible but must be closed and resumed with
 `agent-eta account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` before cross-provider handoff.
-Resuming a session with a live writer is refused. Existing clients are never moved into tmux.
+Resuming a session with a live writer is refused; a session that only an open ETA keeps listed has none.
+Existing clients are never moved into tmux.
 
 The hooks for Claude Code and Codex, every command and the widget are described in
 [docs/agent-eta.md](docs/agent-eta.md).

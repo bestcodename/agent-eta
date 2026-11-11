@@ -79,7 +79,7 @@ are resolved at read time, so a renamed session shows its current name. A Claude
 `~/.claude/sessions/<pid>.json`, unless that name is only derived from the directory (`nameSource: "derived"`, as in
 `ai-0b`). Then the latest `custom-title` or `ai-title` in its transcript wins, which is the title Claude Code itself
 displays. A Codex thread shows its name from `~/.codex/session_index.jsonl` or the `threads` table of
-`~/.codex/state_<n>.sqlite`. A thread Codex has not named yet shows the first line of its first prompt, as the app does. A task whose session is unknown, such as a local run, stands as a session of its own. A Claude Code task whose pid is gone joins the running session with the same session id, because a resume keeps the id under a new pid, while a `/clear` keeps the pid under a new id.
+`~/.codex/state_<n>.sqlite`. A thread Codex has not named yet shows the first line of its first prompt, as the app does. A task whose session is unknown, such as a local run, stands as a session of its own. A Claude Code task whose pid is gone joins the running session with the same session id, because a resume keeps the id under a new pid, while a `/clear` keeps the pid under a new id. A row that only such a task keeps listed stands for no running session, so handoff, attach and `account launch --resume` treat its session as ended.
 
 **Dormant sessions.** An idle session without a running task counts as dormant once it has been idle for more than two
 hours. The list leaves it out and ends with a line that counts the dormant sessions. `agent-eta --all` lists them in a
@@ -382,13 +382,19 @@ One private socket connects to `agent-eta-tmux-<socket-hash>.service`. The trans
 `Type=forking`, `ExitType=cgroup` and `GuessMainPID=no`; individual agent scopes are independent of it and of the
 handoff controller. The server exits when its last session ends. Its service is collected automatically.
 Runtime records include stable session/window/pane IDs and server/pane PID/start identities, preventing stale
-records from targeting IDs reused after a server restart. Managed panes use `remain-on-exit off`.
+records from targeting IDs reused after a server restart. Managed panes use `remain-on-exit on` and a `pane-died`
+window hook (`Runtime.watch`). When the agent exits, the hook closes every viewer session showing it and then removes
+the window, so no viewer falls through to another agent. A handoff moves the viewers to the destination before it
+stops the source.
 
 Konsole is the default viewer, launched only to attach a client. `AGENT_ETA_TERMINAL_BIN` selects another terminal
 supporting `-e`. The viewer starts through `systemd-run --user` in a transient unit of its own, so it gets the graphical
 session's environment when the caller came in over SSH and outlives a caller that is itself a unit;
 `AGENT_ETA_SYSTEMD_RUN_BIN` replaces that binary for tests, and without systemd-run the terminal starts directly. Each viewer attaches through its own grouped session with `destroy-unattached on`, so it keeps its
-own current window and its session disappears when it closes; agents continue. Navigation focuses a viewer already
+own current window and its session disappears when it closes; agents continue. Close a viewer by closing its terminal
+window, never with `tmux detach-client`. In tmux 3.5a a detach destroys the viewer's `destroy-unattached` session
+while the client still points at it, and the shared server crashes with every agent in it; tmux 3.7c guards that
+access. Navigation focuses a viewer already
 showing the agent on this machine and otherwise opens a new one, since a viewer below `sshd` has no local window, and a status-line click switches agents inside a viewer. A handoff
 moves every session showing its source to the destination. Handoffs never control Konsole tabs or their crash
 handling. The server loads only the repository's `tmux.conf` (mouse, 50000 lines of scrollback, agent titles instead

@@ -26,6 +26,8 @@ import unittest
 import unittest.mock
 from unittest import mock
 
+from test_model import NOW, session as model_session, task as model_task
+
 _SRC = pathlib.Path(__file__).with_name("agent-eta")
 _spec = importlib.util.spec_from_loader(
     "agent_eta",
@@ -1235,6 +1237,30 @@ class CodexNavigation(unittest.TestCase):
                 target, pids = self.target(**fields)
                 self.assertEqual(target["kind"], "unavailable")
                 self.assertEqual(pids, [])
+
+
+class HandoffInspect(unittest.TestCase):
+    """Handoff, attach and resume see only running sessions, never a row an ETA task keeps listed."""
+
+    def inspect(self, sessions, tasks, gate=(4242, "4242-start", None)):
+        result = eta.model.build_snapshot(now=NOW, sessions=sessions, tasks=tasks)
+        with mock.patch.object(eta, "snapshot", return_value=result), \
+                mock.patch.object(eta, "state_dir", return_value="/nonexistent"), \
+                mock.patch.object(eta, "handoff_gate", return_value=gate), \
+                mock.patch.object(eta, "claude_transcript_paths", return_value=[]):
+            return eta.handoff_inspect(("claude", "s-100"))
+
+    def test_a_session_only_an_eta_task_keeps_listed_is_not_running(self):
+        ended = model_session(pid=100)
+        self.assertIsNone(self.inspect([], [model_task("wait", holder=None, owner=ended)]))
+
+    def test_a_running_session_is_found_with_its_gate(self):
+        live = model_session(pid=100)
+        self.assertEqual(self.inspect([live], [model_task("wait", holder=None, owner=live)])["pid"], 4242)
+
+    def test_an_unmanaged_running_session_is_found_without_a_gate(self):
+        found = self.inspect([model_session(pid=100)], [], gate=(None, None, "unmanaged CLI"))
+        self.assertEqual((found["pid"], found["gate_reason"]), (None, "unmanaged CLI"))
 
 
 class Usage(StateTest):
