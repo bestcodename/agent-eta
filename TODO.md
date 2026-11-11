@@ -175,3 +175,10 @@ priority.
     provide accessible names. Reuse Qt/Plasma tooltip facilities and native timing, with pointer hover and keyboard
     focus; verify that disabled-action explanations remain discoverable. Add focused QML coverage for settings and
     both context menus, including focus and disabled states, and check them in Plasma (ca. 2 hours)
+33. (low, proposal) Offer Claude the same configurable CLI/desktop launch default and one-launch context-menu
+    override as Codex, requested on 2026-11-11. Support both the saved default directory and a chosen directory,
+    keep CLI as the initial default, and store each provider's preference independently. First verify the native
+    desktop launch route on the target OS and whether it preserves the selected Claude account and project folder.
+    If that route is unavailable, explain why instead of silently opening a different account. Reuse the existing
+    launch pipeline and configuration; add focused command and QML tests for defaults, overrides, directory choice
+    and account isolation, plus tooltips under #32 (ca. 3 hours)
