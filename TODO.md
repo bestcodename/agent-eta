@@ -146,3 +146,13 @@ priority.
     and their `launch.sh` folders for 4 live windows; nothing in `agent_eta_tmux.py` deletes them, and `find()` reads
     them all. Proposal: delete record and folder once `pane()` is `None` and the server identity is gone, in `stop()`
     and in a sweep from `find()`, with a `test_tmux.py` case (ca. 1 Stunde)
+29. (low, proposal) Audit user-facing defaults and make useful behavior configurable through the existing widget
+    settings and CLI configuration, requested on 2026-11-11. New widget sessions already have a CLI/desktop default
+    and a one-launch menu override. Review session-click behavior, terminal and IDE commands, session visibility,
+    notification rules and the model, effort and permission settings in #21. Reuse native client settings and
+    existing environment overrides; keep process ownership and live-writer checks mandatory. Propose the remaining
+    options and their implementation effort after this audit (ca. 2 hours)
+30. (low, proposal) Split widget configuration into sections, requested on 2026-11-11. Use Plasma's existing
+    configuration categories in `plasmoid/contents/config/config.qml`; proposed sections are General, Sessions
+    and Launching, Appearance, and Notifications. Preserve existing setting keys, defaults and saved values,
+    and test that each section loads and saves its controls (ca. 1 hour)

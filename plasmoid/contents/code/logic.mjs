@@ -488,6 +488,16 @@ export function shellQuote(text) {
     return `'${String(text).replace(/'/g, "'\\''")}'`;
 }
 
+// Widget launches use the configured client; an explicit menu choice overrides it for one launch.
+export function accountCommand(command, action, account, directory, source, launchInCli = true) {
+    let args = " account " + action + " " + shellQuote(account.id);
+    if (action === "launch" && launchInCli) args += " --cli";
+    if (source) args += " --from " + shellQuote(source);
+    if (directory !== undefined && directory !== null)
+        args += (action === "launch" ? " --directory " : " ") + shellQuote(directory);
+    return command + args;
+}
+
 // What "Copy" puts on the clipboard. A Claude Code session gets the command that resumes it in its
 // directory and account, a Codex thread its link in the Codex app, which has no CLI on the PATH.
 export function resumeCommand(session) {

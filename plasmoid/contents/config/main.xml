@@ -19,6 +19,9 @@
     <entry name="showUsage" type="Bool">
       <default>true</default>
     </entry>
+    <entry name="launchInCli" type="Bool">
+      <default>true</default>
+    </entry>
     <!-- Half-width of a usage bar's yellow band around the tick, in percent of the usage past the tick. -->
     <entry name="yellowWidth" type="Int">
       <default>66</default>
