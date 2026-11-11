@@ -87,6 +87,18 @@ class Activity(unittest.TestCase):
         self.assertEqual((found["state"], found["activity_state"], found["section"]), ("unknown", "unknown", 0))
         self.assertEqual((snap.summary["working"], snap.summary["live"], snap.summary["light"]), (0, 0, "off"))
 
+    def test_a_task_of_a_resumed_claude_session_joins_it_under_its_new_pid(self):
+        before = session(pid=100, state="idle")
+        resumed = session(pid=200, state="waiting", id=before["id"])
+        [found] = build(sessions=[resumed], tasks=[task("wait", holder=None, owner=before)]).sessions
+        self.assertEqual((found["key"], [t["id"] for t in found["tasks"]]), ("claude:200", ["wait"]))
+
+    def test_a_task_of_a_cleared_claude_session_stays_with_its_pid(self):
+        owner = session(pid=100)
+        other = session(pid=200, id="s-new")
+        snap = build(sessions=[owner, other], tasks=[task("wait", holder=None, owner=dict(owner, id="s-old"))])
+        self.assertEqual([t["id"] for t in by_key(snap)["claude:100"]["tasks"]], ["wait"])
+
     def test_an_idle_owner_with_only_a_manual_wait_stays_idle(self):
         owner = session(state="idle")
         [found] = build(sessions=[owner], tasks=[task("wait", holder=None, owner=owner)]).sessions

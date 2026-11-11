@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.4.4] - 2026-11-11
+
+### Fixed
+
+- A task of a resumed Claude Code session joins its running session instead of a stale row of its own
+
+### Added
+
+- TODO item 26 for viewers that show another agent after theirs ends
+
 ## [2.4.3] - 2026-11-11
 
 ### Added

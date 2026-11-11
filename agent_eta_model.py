@@ -457,6 +457,8 @@ def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, h
     """One snapshot from the collected inputs, none of which it changes.
 
     A task whose session is not known, such as a local run, stands as a session of its own. A
+    Claude Code task whose pid is gone joins the running session with its session id, which a
+    resume keeps under a new pid. A
     Codex command left without PostToolUse when its turn ended goes to `prune_tasks`. A session
     that does not work while its account has a reached usage limit counts as stopped until that
     limit resets. `turns` maps a session_key() to the turn ETA record of that session, and
@@ -472,10 +474,14 @@ def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, h
         session["tasks"] = []
         session["key"] = key_text(session_key(session["agent"], session) or ("task", "-"))
         by_key[session_key(session["agent"], session)] = session
+    resumed = {session["id"]: session for session in sessions if session["agent"] == "claude" and session.get("id")}
     kept, prune = [], []
     for task in sorted((task_view(task, now) for task in copy.deepcopy(list(tasks))), key=task_sort_key):
         key = session_key(task.get("agent"), task.get("session") or {}) or ("task", task["id"])
         owner = by_key.get(key)
+        if owner is None and task.get("agent") == "claude":
+            # A resumed Claude Code session keeps its id under a new pid.
+            owner = resumed.get((task.get("session") or {}).get("id"))
         if owner and stopped_before(owner, task):
             prune.append(task["id"])
             continue
