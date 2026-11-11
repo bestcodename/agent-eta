@@ -79,7 +79,7 @@ are resolved at read time, so a renamed session shows its current name. A Claude
 `~/.claude/sessions/<pid>.json`, unless that name is only derived from the directory (`nameSource: "derived"`, as in
 `ai-0b`). Then the latest `custom-title` or `ai-title` in its transcript wins, which is the title Claude Code itself
 displays. A Codex thread shows its name from `~/.codex/session_index.jsonl` or the `threads` table of
-`~/.codex/state_<n>.sqlite`. A thread Codex has not named yet shows the first line of its first prompt, as the app does. A task whose session is unknown, such as a local run, stands as a session of its own.
+`~/.codex/state_<n>.sqlite`. A thread Codex has not named yet shows the first line of its first prompt, as the app does. A task whose session is unknown, such as a local run, stands as a session of its own. A Claude Code task whose pid is gone joins the running session with the same session id, because a resume keeps the id under a new pid, while a `/clear` keeps the pid under a new id.
 
 **Dormant sessions.** An idle session without a running task counts as dormant once it has been idle for more than two
 hours. The list leaves it out and ends with a line that counts the dormant sessions. `agent-eta --all` lists them in a

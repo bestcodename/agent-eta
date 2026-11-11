@@ -161,3 +161,11 @@ the log database only.
     task (`add-*.json`) kept it in the snapshot with `pids: []` and gate reason "it has no running session". The
     check in `agent_eta_accounts.account_action` tests only for `is not None`; it should refuse only when the result
     has a live `pid`, with a test in `test_accounts.py` (ca. 30 Minuten)
+26. (next, proposal) Close a viewer whose agent ends instead of showing another agent in it. All agents are windows of
+    the one tmux session `agents`, and each viewer is a grouped session sharing every window
+    (`agent_eta_tmux.Tmux.viewer`). When the shown agent exits, tmux makes another window of the group current in
+    that viewer, so it shows an agent that another Konsole tab already shows. Reported on 2026-11-11 for the proxmox
+    session and reproduced on a throwaway server the same day, where `kill-window` of `a1` moved viewer `view1` to
+    `a2` beside `view2`. Proposal: keep `remain-on-exit on` and let a `pane-died` hook `kill-session` every `view-*`
+    session whose current window is the dead one before killing the window, so `detach-on-destroy` closes that
+    viewer's Konsole tab; no `detach-client`, see 24; test in `test_tmux.py` against a throwaway server (ca. 2 Stunden)
