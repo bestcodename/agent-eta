@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- TODO item 31 for Codex CLI resume visibility, mixed-version tmux viewers and desktop handoff recovery
+
 ## [2.5.0] - 2026-11-11
 
 ### Added
