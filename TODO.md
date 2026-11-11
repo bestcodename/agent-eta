@@ -147,3 +147,10 @@ the log database only.
     3. **Managed sessions and handoff.** tmux runs on macOS, but the owned systemd scopes and `systemctl --user
        freeze` have no launchd equivalent; candidates are a process-group `SIGSTOP`/`SIGCONT` and a Terminal.app or
        iTerm2 viewer through `osascript`. These stay Linux-only until 1 and 2 run (ca. 16 hours)
+24. (next, proposal) Keep one tmux crash from killing every managed agent. On 2026-11-11 at 17:41:45
+    `tmux detach-client -t /dev/pts/5`, run against a duplicate Konsole viewer of a grouped `destroy-unattached`
+    view session, made the tmux 3.5a server dump core (`systemd-coredump`, process `tmux: server`), and all four
+    Claude sessions in its panes died. The crash is measured; that the detach of a grouped viewer triggers it is
+    inferred from the timing and needs a repro on a throwaway socket (`test_tmux.py` style). Proposals are to close a
+    duplicate viewer by ending its Konsole process instead of `detach-client` and to document that (ca. 30 Minuten),
+    and to give each agent its own tmux socket so a server crash takes one session, not all (ca. 4 Stunden)
