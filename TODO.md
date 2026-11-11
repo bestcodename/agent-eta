@@ -168,3 +168,10 @@ priority.
     must close instead of queuing a resume that cannot proceed. Cover mixed tmux versions, pre-prompt discovery,
     viewer reuse and focus, closed-viewer reopening, and desktop-to-CLI recovery with regression tests and a real
     Konsole check (ca. 4 hours)
+32. (low, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize settings
+    in `configGeneral.qml` and the sections proposed in #30, plus account and session context-menu actions in
+    `FullRepresentation.qml`; then cover remaining controls and unclear icons, status indicators and abbreviations.
+    Explain purpose, effect or disabled state instead of repeating labels. Keep essential information visible and
+    provide accessible names. Reuse Qt/Plasma tooltip facilities and native timing, with pointer hover and keyboard
+    focus; verify that disabled-action explanations remain discoverable. Add focused QML coverage for settings and
+    both context menus, including focus and disabled states, and check them in Plasma (ca. 2 hours)
