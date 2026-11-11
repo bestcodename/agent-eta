@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Removed
+
+- Stale TODO notes on the Codex permission counter-test and the 2026-10-18 bug follow-up
+
+### Added
+
+- TODO item 27 for the QML test runner on stefan-desktop
+
 ## [2.4.4] - 2026-11-11
 
 ### Fixed
