@@ -82,25 +82,6 @@ priority.
     documented `ssh -t HOST agent-eta attach claude:<session>` misses the same way. Proposal: compare the CLI
     argument by its basename too, with a case in `test_remote.py` (ca. 30 Minuten)
 
-Waiting: counter-test for the agent-eta Codex permission fix of 0.66.7 (ca. 15 Minuten). The Codex weekly limit is
-used up until 2026-10-08 03:22. In a Codex thread with the reviewer set to `user`, an escalated `sleep 60` must show
-`waiting (permission)` until the click and `working` after it. In an `auto_review` thread the same command must show
-`working` within about 10 seconds. It confirms that auto-review requests rarely reach the user, which so far rests on
-the log database only.
-
-## Bug follow-up (2026-10-18)
-
-- Live Codex setup: Laptop handlers reviewed; both intended chats registered and appeared in the modal. Native
-  working, idle and SessionEnd removal observed, with the independent reminder retained. Laptop Plasma reload and
-  QML suite passed after sandbox access was changed. Laptop 1.1.2 red question status was confirmed
-  live by the user; answering cleared the wait. Desktop native hook review and QML dependency installation remain
-  pending. Confirm idle display after the current turn ends.
-- 2026-10-22, TODO #17 completed locally on `fix/codex-cli-navigation`: Codex navigation is inferred from verified
-  current process ownership. All 218 Python tests (including QML) and 27 JavaScript tests pass. After installation
-  and Plasma reload, the live row action switched from a temporary shell tab to the existing CLI's Konsole tab and
-  raised its window; the desktop thread URL was accepted and activated the desktop app. The temporary tab was closed.
-  No Agent ETA QML errors appeared in the reload journal. Shared/remote servers without a proven local UI association
-  explain that navigation is unavailable; the inspected native protocol exposes no terminal PID mapping.
 20. (low, proposal) Rename sessions from agent-eta, requested on 2026-11-05. Names are only read today, from
     Claude Code's `custom-title` or `ai-title` and Codex's thread name (see [docs/agent-eta.md](docs/agent-eta.md)).
     1. **`agent-eta rename <session> <name>`** plus a row action in the widget. It renames the session in its agent,
@@ -169,3 +150,6 @@ the log database only.
     `a2` beside `view2`. Proposal: keep `remain-on-exit on` and let a `pane-died` hook `kill-session` every `view-*`
     session whose current window is the dead one before killing the window, so `detach-on-destroy` closes that
     viewer's Konsole tab; no `detach-client`, see 24; test in `test_tmux.py` against a throwaway server (ca. 2 Stunden)
+27. (low) Install Qt 6's `qmltestrunner` on stefan-desktop and add it to the workstation setup of
+    [bestcodename/ai](https://github.com/bestcodename/ai). `test_qml.Qml.test_widget_qml` is skipped here on
+    2026-11-11 for lack of it, so widget changes are only tested on the notebook (ca. 15 Minuten)
