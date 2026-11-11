@@ -151,7 +151,9 @@ the log database only.
     `tmux detach-client -t /dev/pts/5`, run against a duplicate Konsole viewer of a grouped `destroy-unattached`
     view session, made the tmux 3.5a server dump core (`systemd-coredump`, process `tmux: server`), and all four
     Claude sessions in its panes died. The crash is measured; that the detach of a grouped viewer triggers it is
-    inferred from the timing and needs a repro on a throwaway socket (`test_tmux.py` style). Proposals are to close a
+    inferred from the timing. A repro on a fresh throwaway server with the same config did not crash for a detach
+    with the viewer's window alive, a detach after it closed, or a SIGHUP of the client, so the trigger needs more
+    state; the next probe is a backtrace of the core (`coredumpctl gdb 3000632` with debuginfod). Proposals are to close a
     duplicate viewer by ending its Konsole process instead of `detach-client` and to document that (ca. 30 Minuten),
     and to give each agent its own tmux socket so a server crash takes one session, not all (ca. 4 Stunden)
 25. (next, proposal) `account launch --resume` refuses a dead session as a "live writer". On 2026-11-11 after the
