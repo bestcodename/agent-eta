@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.4.3] - 2026-11-11
+
+### Added
+
+- TODO item 23 for macOS support in this repository
+
 ## [2.4.2] - 2026-11-06
 
 ### Added

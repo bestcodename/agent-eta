@@ -129,3 +129,21 @@ the log database only.
     open `codex://threads/<id>`, which starts the app. It contradicts the rule in
     [docs/agent-eta.md](docs/agent-eta.md) that navigation never falls back to a desktop link without a verified
     Codex process, so decide that rule first (ca. 2 Stunden)
+23. (low, proposal) Support macOS in this repository rather than in a second one, asked on 2026-11-11. The hooks,
+    the state directory, the Claude Code and Codex registry parsers, the usage windows and `list --json` (contract
+    schema 1, fixtures in `test_fixtures/contract-v1/`) are standard-library Python without OS calls, and they
+    change with every agent release, so a copy would need each fix twice. Linux-bound are 21 `/proc` reads in
+    `agent-eta`, `agent_eta_tmux.py`, `agent_eta_handoff.py`, `agent_eta_dsh.py` and `agent_eta_remote.py`, 14
+    `systemd-run` and `systemctl --user` calls for the managed scopes and the handoff freeze, the Konsole viewer with
+    its D-Bus calls and the Plasma widget. Claude Code 2.1.322 holds the string `lstart=` next to its
+    `/proc/<pid>/stat` reader, so its `procStart` on macOS is presumably `ps -o lstart=` output, which `proc_start()`
+    has to match; read a session registry on a Mac before building on it.
+    1. **Platform module.** `agent_eta_platform.py` holds the process probes (`proc_start`, `parent_of`, `comm_of`,
+       the cmdline reads and the fd scan of `find_task_pid`), from `/proc` on Linux and from `ps` and `lsof` on
+       macOS; a `macos-latest` job in `.github/workflows/tests.yml` runs the suite (ca. 8 hours)
+    2. **Menu bar frontend.** A SwiftBar plugin under `macos/` renders `agent-eta list --json --all` and is tested
+       against the contract fixtures; a native SwiftUI app follows only if the plugin falls short, and it gets a
+       repository of its own only if its signing and release cycle demand one (ca. 4 hours)
+    3. **Managed sessions and handoff.** tmux runs on macOS, but the owned systemd scopes and `systemctl --user
+       freeze` have no launchd equivalent; candidates are a process-group `SIGSTOP`/`SIGCONT` and a Terminal.app or
+       iTerm2 viewer through `osascript`. These stay Linux-only until 1 and 2 run (ca. 16 hours)
