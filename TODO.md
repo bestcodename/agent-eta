@@ -154,3 +154,8 @@ the log database only.
     inferred from the timing and needs a repro on a throwaway socket (`test_tmux.py` style). Proposals are to close a
     duplicate viewer by ending its Konsole process instead of `detach-client` and to document that (ca. 30 Minuten),
     and to give each agent its own tmux socket so a server crash takes one session, not all (ca. 4 Stunden)
+25. (next, proposal) `account launch --resume` refuses a dead session as a "live writer". On 2026-11-11 after the
+    tmux crash of item 24, `handoff_inspect` in `agent-eta` still returned the proxmox session, because its open ETA
+    task (`add-*.json`) kept it in the snapshot with `pids: []` and gate reason "it has no running session". The
+    check in `agent_eta_accounts.account_action` tests only for `is not None`; it should refuse only when the result
+    has a live `pid`, with a test in `test_accounts.py` (ca. 30 Minuten)
