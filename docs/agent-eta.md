@@ -401,7 +401,16 @@ binary and a client of another version fails with `open terminal failed: not a t
 window, never with `tmux detach-client`. In tmux 3.5a a detach destroys the viewer's `destroy-unattached` session
 while the client still points at it, and the shared server crashes with every agent in it; tmux 3.7c guards that
 access. Navigation focuses a viewer already
-showing the agent on this machine and otherwise opens a new one, since a viewer below `sshd` has no local window, and a status-line click switches agents inside a viewer. A handoff
+showing the agent on this machine and otherwise opens a new one, since a viewer below `sshd` has no local window, and a status-line click switches agents inside a viewer.
+Each agent shows in at most one local viewer. An interactive `agent-eta attach`, from a terminal or from inside a
+viewer, points at the viewer that already shows the agent instead of opening or switching to a second one: a tmux
+message appears in that viewer and, under Konsole, its tab becomes current. Raising its window needs KWin, which
+only the tray widget reaches. Every viewer start installs a global `session-window-changed` hook (`Runtime.guard_hook`)
+that runs `agent-eta viewer-guard` when tmux counts more than one client on the selected window; the guard
+(`Runtime.guard`) sends a viewer that selected such an agent back to its previous window, unless that window is shown
+elsewhere too, and points at the other viewer. The hook passes `AGENT_ETA_DIR` and `AGENT_ETA_CONFIG`, so the guard
+acts on the server that fired it. `"viewer_duplicates": true` in `config.json` allows duplicates; the next viewer
+start then removes the hook. A handoff
 moves every session showing its source to the destination. Handoffs never control Konsole tabs or their crash
 handling. The server loads only the repository's `tmux.conf` (mouse, 50000 lines of scrollback, agent titles instead
 of record IDs in the status line), never the user's tmux configuration; inherited provider and service markers

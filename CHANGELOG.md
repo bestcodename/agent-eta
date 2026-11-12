@@ -7,12 +7,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-11-12
+
 ### Added
 
+- Each agent shows in at most one local viewer; `attach` and status-line clicks point at the viewer that shows it
+- `agent-eta viewer-guard` for the viewers' `session-window-changed` hook
+- `"viewer_duplicates": true` in `config.json` allows duplicates
 - TODO item 31 for Codex CLI resume visibility, mixed-version tmux viewers and desktop handoff recovery
 - TODO item 32 for accessible tooltips across settings, context-menu actions and remaining widget controls
 - TODO item 33 for Claude CLI/desktop launch preferences and one-launch context-menu overrides
-- TODO item 34 for one viewer per agent unless duplicates are enabled in the config
+
+### Removed
+
+- TODO item 34, now implemented
 
 ## [2.5.1] - 2026-11-12
 
