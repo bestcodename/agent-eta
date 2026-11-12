@@ -173,7 +173,10 @@ priority.
     present. Proposal: associate resumed session IDs with validated managed process identities before the first
     prompt, and report success only after an actual viewer attachment. Keep live-writer protection; explain when the
     desktop must close instead of queuing a resume that cannot proceed. Cover pre-prompt discovery, closed-viewer
-    reopening and desktop-to-CLI recovery with regression tests and a real Konsole check (ca. 3 hours)
+    reopening and desktop-to-CLI recovery with regression tests and a real Konsole check (ca. 3 hours). On
+    2026-11-12 `attach --json --host desktop` also returned `{"opened": true}` twice while the remote attach only
+    pointed at a desktop viewer and exited, so the notebook terminal closed at once; 2.6.1 fixed that cause, and the
+    same confirmation of a real attachment covers the remote path
 32. (low, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize settings
     in `configGeneral.qml` and the sections proposed in #30, plus account and session context-menu actions in
     `FullRepresentation.qml`; then cover remaining controls and unclear icons, status indicators and abbreviations.
@@ -188,3 +191,7 @@ priority.
     If that route is unavailable, explain why instead of silently opening a different account. Reuse the existing
     launch pipeline and configuration; add focused command and QML tests for defaults, overrides, directory choice
     and account isolation, plus tooltips under #32 (ca. 3 hours)
+34. (low, proposal) A flaky Python test. On 2026-11-12 one full run of `python3 -m unittest discover -s .` on
+    stefan-notebook ended with `FAILED (failures=1)` and four reruns passed; the failing test was not captured. On the
+    next failure, record its name with `python3 -m unittest discover -s . 2>&1 | grep -E '^(FAIL|ERROR):'` and fix
+    the race behind it (ca. 1 hour)
