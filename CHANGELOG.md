@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - TODO item 31 for Codex CLI resume visibility, mixed-version tmux viewers and desktop handoff recovery
 - TODO item 32 for accessible tooltips across settings, context-menu actions and remaining widget controls
 - TODO item 33 for Claude CLI/desktop launch preferences and one-launch context-menu overrides
+- TODO item 34 for one viewer per agent unless duplicates are enabled in the config
 
 ## [2.5.0] - 2026-11-11
 
