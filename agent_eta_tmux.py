@@ -403,8 +403,14 @@ class Runtime:
             return False
         sessions = self.tmux("list-sessions", "-F", "#{session_name}\t#{session_id}", check=False).stdout
         session = next((line.split("\t")[1] for line in sessions.splitlines() if line.startswith(name + "\t")), None)
+        if not session:
+            return False
+        # A viewer that came in over SSH shows the agent on another machine's screen, so it duplicates nothing here.
+        own = [client for client in self.clients() if client["session"] == session]
+        if own and all(remote_client(client["pid"]) for client in own):
+            return False
         other = self.local_client(window, session)
-        if not session or not other:
+        if not other:
             return False
         listed = self.tmux("list-windows", "-t", session, "-F", "#{window_last_flag}\t#{window_id}", check=False)
         last = next((line.split("\t")[1] for line in listed.stdout.splitlines() if line.startswith("1\t")), None)
@@ -446,7 +452,9 @@ class Runtime:
                 "select-window", "-t", name + ":" + pane["window"], ";", *install]
 
     def attach(self, record, interactive=False):
-        """Focus a viewer showing the agent, or open one of its own; other viewers keep their window."""
+        """Focus a viewer showing the agent, or open one of its own; other viewers keep their window.
+        A caller that came in over SSH always gets a viewer of its own, because a viewer on this
+        machine's screen is no use to someone at another machine."""
         pane = self.pane(record)
         if not pane:
             raise TmuxError("the managed terminal has ended")
@@ -454,7 +462,8 @@ class Runtime:
             inside = os.environ.get("TMUX", "").rsplit(",", 2)[0] == self.socket
             # Without a target tmux resolves the calling viewer's session.
             current = self.tmux("display-message", "-p", "#{session_id}").stdout.strip() if inside else None
-            other = None if viewer_duplicates() else self.local_client(pane["window"], current)
+            single = not viewer_duplicates() and not remote_client(os.getpid())
+            other = self.local_client(pane["window"], current) if single else None
             if other:
                 print("agent-eta: a viewer on %s already shows this agent" % other["tty"], file=sys.stderr)
                 return {"opened": False, "pids": self.focus(other)}

@@ -409,7 +409,11 @@ only the tray widget reaches. Every viewer start installs a global `session-wind
 that runs `agent-eta viewer-guard` when tmux counts more than one client on the selected window; the guard
 (`Runtime.guard`) sends a viewer that selected such an agent back to its previous window, unless that window is shown
 elsewhere too, and points at the other viewer. The hook passes `AGENT_ETA_DIR` and `AGENT_ETA_CONFIG`, so the guard
-acts on the server that fired it. `"viewer_duplicates": true` in `config.json` allows duplicates; the next viewer
+acts on the server that fired it. Only viewers on the same machine count as duplicates. An attach whose process runs
+below `sshd`, such as `agent-eta attach SOURCE --host HOST` from the other machine, always opens a viewer of its own,
+because a viewer on this machine's screen is no use to someone at the other one, and the guard leaves a viewer whose
+clients all came in over SSH alone. tmux then sizes the shared window to the client used last (its default
+`window-size latest`). `"viewer_duplicates": true` in `config.json` allows duplicates; the next viewer
 start then removes the hook. A handoff
 moves every session showing its source to the destination. Handoffs never control Konsole tabs or their crash
 handling. The server loads only the repository's `tmux.conf` (mouse, 50000 lines of scrollback, agent titles instead

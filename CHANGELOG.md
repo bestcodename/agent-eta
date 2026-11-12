@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-11-12
+
+### Fixed
+
+- An attach over SSH (`--host`) opens a viewer of its own even when a viewer on the agent's machine shows the agent;
+  the viewer guard leaves viewers that came in over SSH alone
+
 ### Changed
 
 - TODO item 23 extended by distribution as a Claude Code plugin and marketplace listings
