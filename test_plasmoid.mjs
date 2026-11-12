@@ -287,7 +287,7 @@ test("rows show agent-eta's activity labels and lights", () => {
     const mixed = fixture("mixed");
     const question = find(mixed, "codex:s-t-1");
     assert.equal(logic.stateLabel(question), "working, question open");
-    assert.equal(logic.stateLight(question), "red");
+    assert.equal(logic.stateLight(question), "green");
     assert.match(logic.detailLine(question, mixed.now), /working, question open \(question\)/);
     const owner = find(mixed, "claude:1");
     assert.deepEqual([owner.state, logic.stateLabel(owner), logic.stateLight(owner)], ["idle", "working", "green"]);
@@ -300,10 +300,10 @@ test("rows show agent-eta's activity labels and lights", () => {
 test("the tray summary is agent-eta's, with the orb colour and the progress session", () => {
     const summary = logic.summary(fixture("mixed"));
     assert.deepEqual([summary.waiting, summary.working, summary.overdue, summary.dormant, summary.attention],
-                     [2, 2, 1, 1, 3]);
-    assert.deepEqual([summary.light, summary.orbCount, summary.status], ["red", 2, "attention"]);
+                     [1, 3, 1, 1, 2]);
+    assert.deepEqual([summary.light, summary.orbCount, summary.status], ["red", 1, "attention"]);
     assert.equal(summary.next.key, "claude:2");
-    assert.equal(summary.headline, "2 waiting · 1 overdue · 2 working · 1 idle · 1 stopped");
+    assert.equal(summary.headline, "1 waiting · 1 overdue · 3 working · 1 idle · 1 stopped");
     const empty = logic.summary(fixture("empty"));
     assert.deepEqual([empty.light, empty.orbCount, empty.status, empty.next], ["none", 0, "passive", null]);
     assert.equal(logic.summary(null).headline, "No active agent sessions");
@@ -311,15 +311,16 @@ test("the tray summary is agent-eta's, with the orb colour and the progress sess
 
 test("sections come in agent-eta's order, and stopped and dormant ones open independently", () => {
     const mixed = fixture("mixed");
-    for (const [dormant, stopped, lengths] of [[false, false, [4, 2, 0, 0]], [true, false, [4, 2, 0, 1]],
-                                             [false, true, [4, 2, 1, 0]], [true, true, [4, 2, 1, 1]]]) {
+    for (const [dormant, stopped, lengths] of [[false, false, [3, 3, 0, 0]], [true, false, [3, 3, 0, 1]],
+                                             [false, true, [3, 3, 1, 0]], [true, true, [3, 3, 1, 1]]]) {
         const groups = logic.groupSessions(mixed, dormant, stopped);
         assert.deepEqual(groups.map(g => [g.title, g.count]),
-                         [["Needs you", 4], ["Working", 2], ["Stopped until a limit resets", 1], ["Dormant", 1]]);
+                         [["Needs you", 3], ["Working", 3], ["Stopped until a limit resets", 1], ["Dormant", 1]]);
         assert.deepEqual(groups.map(g => g.sessions.length), lengths);
     }
     const [needs, working] = logic.groupSessions(mixed, false);
-    assert.deepEqual(needs.sessions.map(s => s.key), ["codex:s-t-1", "claude:3", "task:reminder", "claude:4"]);
+    assert.deepEqual(needs.sessions.map(s => s.key), ["claude:3", "task:reminder", "claude:4"]);
+    assert.ok(working.sessions.some(s => s.key === "codex:s-t-1"));
     assert.equal(working.sessions[1].taskItems[0].id, "build");
     assert.deepEqual(logic.groupSessions(fixture("empty"), true, true), []);
 });
@@ -361,8 +362,8 @@ test("the tooltip escapes names, uses the activity label and cuts off after the 
     mixed.sessions[0].name = "<b>x</b>";
     const lines = logic.tooltipLines(mixed, 2);
     assert.deepEqual(lines, [
-        "<b>&lt;b&gt;x&lt;/b&gt;</b> · working, question open (question)",
-        "<b>permission</b> · waiting (permission)",
+        "<b>&lt;b&gt;x&lt;/b&gt;</b> · waiting (permission)",
+        "<b>reminder</b> · unknown, 5m left",
         "… 5 more",
     ]);
 });

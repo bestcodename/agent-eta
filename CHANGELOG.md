@@ -16,6 +16,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - TODO item 31 extended by the remote attach that reported success without attaching
 
+## [2.6.2] - 2026-11-12
+
+### Added
+
+- GitLab CI jobs for Python, JavaScript and QML tests
+
+### Fixed
+
+- Codex turns that continue with an open asynchronous question stay green in Working without a waiting badge or notification
+- An unresolved permission request stays red even when an asynchronous question is also open
+
 ## [2.6.1] - 2026-11-12
 
 ### Fixed

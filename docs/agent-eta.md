@@ -146,6 +146,9 @@ also looks at the end of the thread's rollout transcript in `~/.codex/sessions/`
 the moment it asked. Native `request_user_input_async` questions also wait after Stop. Their immediate
 `accepted` result only acknowledges delivery; the matching `send_user_message_question_reply` envelope clears each
 answered question by call id and question index. A partial answer leaves the other questions waiting.
+While its turn continues, the session stays green in Working and reads "working, question open" without a waiting
+notification. Once the turn ends, an unanswered question puts it in Needs you. An unresolved permission request takes
+precedence over an open async question and stays red until its command receives an output.
 In plan mode a turn ends with an `item_completed` event of type `Plan` before its `task_complete`,
 and the app then asks whether to implement the plan. An idle thread whose last finished turn carries such a plan
 therefore waits as well, shown as `(plan approval)` and counted from the end of that turn. A turn that fails fires no
@@ -341,7 +344,9 @@ and `list --json` publishes it as contract schema 1, which the widget validates 
 
 Keys are `claude:<pid>`, `codex:<thread>`, `task:<id>`, `window:<agent>:<minutes>`, `account:<id>` and
 `usage:<agent>`, and a remote host's session and task keys and task ids start with `remote:<host>/`. An idle session that owns verified background work is working, while a reminder without a holder
-proves nothing. A Codex turn that runs on while an async question waits stays red and reads "working, question open".
+proves nothing. A Codex turn that runs on while an async question waits stays green in Working and reads
+"working, question open". It contributes to the working count, with no waiting badge or notification; after the turn
+ends, the unanswered question contributes to Needs you instead. Permission waits stay red.
 The widget sends a notification only between two valid listings, for a rising signal with `notify_on_new` or for a
 falling reset, and never on the first poll. `test_model.py` writes the fixtures in `test_fixtures/contract-v1/` when
 `AGENT_ETA_WRITE_FIXTURES=1` is set and fails when they are stale, and the JavaScript and QML tests read them.
@@ -824,6 +829,10 @@ plasmawindowed com.github.bestcodename.agenteta    # the overview in a window, w
   context menu or follow its entries into `act()`. Plasma's `i18n` is missing there, so task labels stay empty.
 
 ## Tests
+
+GitHub Actions and the optional GitLab CI configuration define Python, JavaScript and QML test jobs.
+The GitLab Python job uses Node 24 with the distribution's Python 3 and tmux; its QML job uses the same Debian
+Trixie packages as GitHub Actions.
 
 ```sh
 python3 -m unittest discover -s . -v

@@ -112,19 +112,29 @@ class Activity(unittest.TestCase):
         self.assertEqual([t["id"] for t in snap.tasks], ["live"])
         self.assertEqual(snap.sessions[0]["activity_state"], "working")
 
-    def test_an_async_question_during_a_running_turn_needs_you_under_its_own_label(self):
+    def test_an_async_question_during_a_running_turn_stays_working_under_its_own_label(self):
         thread = session(agent="codex", pid="t-1", state="waiting", waiting_for="question",
                          reported_state="working", turn_running=True)
         snap = build(sessions=[thread])
         [found] = snap.sessions
         self.assertEqual((found["activity_state"], found["activity_label"], found["light"], found["section"]),
-                         ("waiting", model.QUESTION_OPEN_LABEL, "attention", 0))
+                         ("working", model.QUESTION_OPEN_LABEL, "active", 1))
         self.assertEqual((snap.summary["waiting"], snap.summary["light"], snap.summary["badge_count"]),
-                         (1, "attention", 1))
+                         (0, "active", 0))
+        [waiting] = [signal for signal in snap.signals if signal["kind"] == "waiting"]
+        self.assertFalse(waiting["active"])
 
-    def test_an_answered_question_without_a_running_turn_reads_waiting(self):
+    def test_an_unanswered_question_without_a_running_turn_reads_waiting(self):
         [found] = build(sessions=[session(agent="codex", pid="t-1", state="waiting", waiting_for="question")]).sessions
         self.assertEqual(found["activity_label"], "waiting")
+        self.assertEqual((found["activity_state"], found["light"], found["section"]),
+                         ("waiting", "attention", 0))
+
+    def test_a_permission_wait_does_not_become_working_from_a_turn_running_flag(self):
+        thread = session(agent="codex", state="waiting", waiting_for="permission", turn_running=True)
+        [found] = build(sessions=[thread]).sessions
+        self.assertEqual((found["activity_state"], found["activity_label"], found["light"], found["section"]),
+                         ("waiting", "waiting", "attention", 0))
 
     def test_a_long_rest_is_dormant_and_left_out_of_summary_and_signals(self):
         snap = build(sessions=[session(state="idle", since=NOW - model.DORMANT_AFTER - 1)])
@@ -145,7 +155,8 @@ class Activity(unittest.TestCase):
     def test_a_running_turn_with_an_open_question_is_not_stopped_by_its_limit(self):
         thread = session(agent="codex", pid="t-1", state="waiting", waiting_for="question", turn_running=True)
         [found] = build(sessions=[thread], usage=[window("codex", used=100.0)]).sessions
-        self.assertEqual((found["state"], found["activity_label"]), ("waiting", model.QUESTION_OPEN_LABEL))
+        self.assertEqual((found["state"], found["activity_state"], found["activity_label"]),
+                         ("waiting", "working", model.QUESTION_OPEN_LABEL))
 
 
 class Eta(unittest.TestCase):
@@ -314,7 +325,7 @@ class Contract(unittest.TestCase):
                          ("stopped", "usage limit"))
         self.assertEqual(found["task:reminder"]["activity_state"], "unknown")
         self.assertEqual((snap.summary["waiting"], snap.summary["overdue"], snap.summary["light"]),
-                         (2, 1, "attention"))
+                         (1, 1, "attention"))
 
     def test_fixtures_match_the_model(self):
         """AGENT_ETA_WRITE_FIXTURES=1 rewrites them after a deliberate change."""

@@ -51,34 +51,6 @@
   "notification_signals": [
     {
       "active": true,
-      "dedupe_key": "waiting:codex:s-t-1:1759999940",
-      "edge": "rising",
-      "entity_key": "codex:s-t-1",
-      "key": "waiting:codex:s-t-1",
-      "kind": "waiting",
-      "message_params": {
-        "agent": "codex",
-        "name": "question during a turn",
-        "waiting_for": "question"
-      },
-      "notify_on_new": true
-    },
-    {
-      "active": false,
-      "dedupe_key": "overdue:codex:s-t-1:None",
-      "edge": "rising",
-      "entity_key": "codex:s-t-1",
-      "key": "overdue:codex:s-t-1",
-      "kind": "overdue",
-      "message_params": {
-        "due": null,
-        "name": "question during a turn",
-        "turn_label": null
-      },
-      "notify_on_new": false
-    },
-    {
-      "active": true,
       "dedupe_key": "waiting:claude:3:1759999940",
       "edge": "rising",
       "entity_key": "claude:3",
@@ -188,6 +160,34 @@
         "waiting_for": "input"
       },
       "notify_on_new": true
+    },
+    {
+      "active": false,
+      "dedupe_key": "waiting:codex:s-t-1:1759999940",
+      "edge": "rising",
+      "entity_key": "codex:s-t-1",
+      "key": "waiting:codex:s-t-1",
+      "kind": "waiting",
+      "message_params": {
+        "agent": "codex",
+        "name": "question during a turn",
+        "waiting_for": "question"
+      },
+      "notify_on_new": true
+    },
+    {
+      "active": false,
+      "dedupe_key": "overdue:codex:s-t-1:None",
+      "edge": "rising",
+      "entity_key": "codex:s-t-1",
+      "key": "overdue:codex:s-t-1",
+      "kind": "overdue",
+      "message_params": {
+        "due": null,
+        "name": "question during a turn",
+        "turn_label": null
+      },
+      "notify_on_new": false
     },
     {
       "active": false,
@@ -322,7 +322,6 @@
     {
       "index": 0,
       "session_keys": [
-        "codex:s-t-1",
         "claude:3",
         "task:reminder",
         "claude:4"
@@ -333,7 +332,8 @@
       "index": 1,
       "session_keys": [
         "claude:2",
-        "claude:1"
+        "claude:1",
+        "codex:s-t-1"
       ],
       "title": "Working"
     },
@@ -353,40 +353,6 @@
     }
   ],
   "sessions": [
-    {
-      "activity_label": "working, question open",
-      "activity_state": "waiting",
-      "agent": "codex",
-      "cwd": "/work",
-      "dormant": false,
-      "due": null,
-      "eta_source": null,
-      "eta_started": null,
-      "handoff": {
-        "available": true,
-        "reason": null,
-        "status": null,
-        "targets": [
-          "claude"
-        ]
-      },
-      "id": "s-t-1",
-      "key": "codex:s-t-1",
-      "light": "attention",
-      "name": "question during a turn",
-      "overdue": false,
-      "pid": null,
-      "progress": null,
-      "remaining": null,
-      "reported_state": "working",
-      "section": 0,
-      "since": 1759999940,
-      "state": "waiting",
-      "tasks": [],
-      "turn_label": null,
-      "turn_running": true,
-      "waiting_for": "question"
-    },
     {
       "activity_label": "waiting",
       "activity_state": "waiting",
@@ -561,6 +527,40 @@
       "waiting_for": null
     },
     {
+      "activity_label": "working, question open",
+      "activity_state": "working",
+      "agent": "codex",
+      "cwd": "/work",
+      "dormant": false,
+      "due": null,
+      "eta_source": null,
+      "eta_started": null,
+      "handoff": {
+        "available": true,
+        "reason": null,
+        "status": null,
+        "targets": [
+          "claude"
+        ]
+      },
+      "id": "s-t-1",
+      "key": "codex:s-t-1",
+      "light": "active",
+      "name": "question during a turn",
+      "overdue": false,
+      "pid": null,
+      "progress": null,
+      "remaining": null,
+      "reported_state": "working",
+      "section": 1,
+      "since": 1759999940,
+      "state": "waiting",
+      "tasks": [],
+      "turn_label": null,
+      "turn_running": true,
+      "waiting_for": "question"
+    },
+    {
       "activity_label": "stopped",
       "activity_state": "stopped",
       "agent": "codex",
@@ -630,8 +630,8 @@
     }
   ],
   "summary": {
-    "attention": 3,
-    "badge_count": 2,
+    "attention": 2,
+    "badge_count": 1,
     "dormant": 1,
     "idle": 1,
     "light": "attention",
@@ -640,8 +640,8 @@
     "progress_session_key": "claude:2",
     "status": "attention",
     "stopped": 1,
-    "waiting": 2,
-    "working": 2
+    "waiting": 1,
+    "working": 3
   },
   "tasks": [
     {

@@ -1,0 +1,29 @@
+# Adapted from hetzner-api-server-export's Python job and sdwa5-dsp's Node job.
+# The QML image and packages match .github/workflows/tests.yml.
+stages:
+  - test
+
+test:
+  stage: test
+  image: node:24
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq python3 git tmux
+  script:
+    - python3 -m unittest discover -s . -v
+    - node --test --test-isolation=none test_plasmoid.mjs
+    - python3 -m py_compile agent-eta agent_eta_*.py
+    - bash -n install.sh
+
+qml:
+  stage: test
+  image: debian:trixie
+  before_script:
+    - apt-get update -qq
+    - >-
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends
+      python3 qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick-layouts
+      qml6-module-qtquick-templates qml6-module-org-kde-kirigami
+      qml6-module-org-kde-plasma-plasma5support plasma-workspace plasma-desktoptheme
+  script:
+    - test -x /usr/lib/qt6/bin/qmltestrunner
+    - python3 -m unittest -v test_qml

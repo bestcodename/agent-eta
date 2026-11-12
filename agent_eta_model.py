@@ -182,7 +182,7 @@ def session_sort_key(session):
     """By how soon a session needs you. Waiting for an answer first, then at rest with the most
     recently active first, then working by its ETA like the tasks, then stopped until a usage
     limit resets."""
-    if session["state"] == "waiting":
+    if session["state"] == "waiting" and not working_with_question(session):
         rank = 0
     elif session["state"] == "unknown" or (at_rest(session) and not has_running_task(session)):
         rank = 1
@@ -202,16 +202,24 @@ def section(session):
     return max(session_sort_key(session)[0] - 1, 0)
 
 
+def working_with_question(session):
+    """An async question is open while Codex continues its current turn."""
+    return (session.get("agent") == "codex" and session.get("state") == "waiting"
+            and session.get("waiting_for") == "question" and session.get("turn_running"))
+
+
 def activity_state(session):
     """What a session effectively does. An idle or unknown owner of verified background work works,
     while the state its agent reported stays in `reported_state`."""
+    if working_with_question(session):
+        return "working"
     if session["state"] in ("idle", "unknown") and has_running_task(session):
         return "working"
     return session["state"]
 
 
 def activity_label(session):
-    if session["activity_state"] == "waiting" and session.get("turn_running"):
+    if working_with_question(session):
         return QUESTION_OPEN_LABEL
     return STATE_LABELS.get(session["activity_state"], session["activity_state"])
 

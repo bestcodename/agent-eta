@@ -3,7 +3,9 @@
 `agent-eta` lists every running Claude Code, Codex, dsh and local-model session on a Linux machine with its state, its
 ETA and its background tasks, and shows the usage windows of every account. Sessions waiting for an answer come first.
 Completed Codex turns stay idle even when a rejected command misses its completion hook; unanswered native questions
-show as waiting. A Plasma 6 tray widget shows the same overview, shows a session's existing terminal on click and offers account
+show as waiting. An open asynchronous question stays green in Working while its turn continues, with the label
+"working, question open". A permission request still needs attention. A Plasma 6 tray widget shows the same overview,
+shows a session's existing terminal on click and offers account
 actions such as starting a session, logging in and moving all Claude Code sessions to another account.
 New sessions from the widget use the CLI by default. **Use CLI by default** in the widget settings selects the
 Codex launch client; its account menu also offers the other client for a single launch.
@@ -77,6 +79,7 @@ node --test --test-isolation=none test_plasmoid.mjs
 The QML tests in `test_qml/` need Qt 6's `qmltestrunner` and the Plasma 6 QML modules, see
 [docs/agent-eta.md](docs/agent-eta.md#tests).
 CI reports Python test failures as GitHub annotations, including their tracebacks.
+`.gitlab-ci.yml` provides Python, JavaScript and QML test jobs for GitLab runners as well.
 
 ## Changelog and roadmap
 
