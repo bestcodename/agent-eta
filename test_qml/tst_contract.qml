@@ -58,8 +58,11 @@ Item {
 
         function test_a_question_during_a_turn_reads_as_such() {
             const mixed = root.fixture("mixed");
-            const [needs] = Logic.groupSessions(mixed, false, false);
-            const item = row(needs.sessions[0], mixed.now);
+            const working = Logic.groupSessions(mixed, false, false)[1];
+            const question = working.sessions.find(session => session.key === "codex:s-t-1");
+            verify(question);
+            compare(Logic.stateLight(question), "green");
+            const item = row(question, mixed.now);
             verify(root.texts(item).some(text => text.indexOf("working, question open (question)") >= 0),
                    root.texts(item).join(" | "));
         }

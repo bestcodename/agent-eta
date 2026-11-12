@@ -769,12 +769,35 @@ class Sessions(StateTest):
         self.hook(self.codex_event("UserPromptSubmit", transcript_path=str(rollout)))
         [session] = self.view()
         self.assertEqual((session["state"], session["waiting_for"]), ("waiting", "question"))
+        self.assertEqual((session["activity_state"], session["activity_label"], session["light"], session["section"]),
+                         ("working", eta.model.QUESTION_OPEN_LABEL, "active", 1))
         self.hook(self.codex_event("Stop", transcript_path=str(rollout)))
         answer("other-call", 0)
         answer("q1", 0)
-        self.assertEqual([s["state"] for s in self.view()], ["waiting"])
+        [session] = self.view()
+        self.assertEqual((session["activity_state"], session["light"], session["section"]),
+                         ("waiting", "attention", 0))
         answer("q1", 1)
         self.assertEqual([s["state"] for s in self.view()], ["idle"])
+
+    def test_open_async_question_does_not_hide_a_permission_wait(self):
+        rollout = self.codex / "async-permission.jsonl"
+        def append(**payload):
+            with rollout.open("a") as handle:
+                handle.write(json.dumps({"timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                         "type": "response_item", "payload": payload}) + "\n")
+        append(type="function_call", name="request_user_input_async", call_id="q1",
+               arguments=json.dumps({"questions": [{"title": "first"}]}))
+        append(type="function_call_output", call_id="q1", output='{"accepted":true}')
+        append(type="custom_tool_call", name="exec", call_id="c1")
+        self.hook(self.codex_event("PermissionRequest", transcript_path=str(rollout)))
+        [session] = self.view()
+        self.assertEqual((session["waiting_for"], session["activity_state"], session["light"], session["section"]),
+                         ("permission", "waiting", "attention", 0))
+        append(type="custom_tool_call_output", call_id="c1")
+        [session] = self.view()
+        self.assertEqual((session["waiting_for"], session["activity_state"], session["light"], session["section"]),
+                         ("question", "working", "active", 1))
 
     def test_rejected_async_question_does_not_leave_a_wait(self):
         rollout = self.codex / "async-error.jsonl"

@@ -972,9 +972,10 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
         # Synchronous questions count inside a turn; async questions also survive Stop.
         # A plan only counts once its turn has ended.
         if pending and pending[0] == "async question":
-            # The turn may go on while the question waits. It still needs you, under its own label.
-            turn_running = state == "working" and now - updated <= SESSION_STALE
-            state, since, waiting_for = "waiting", pending[1] or since, "question"
+            # A question does not block a running turn, but an unresolved permission still does.
+            if not (state == "waiting" and waiting_for == "permission"):
+                turn_running = state == "working" and now - updated <= SESSION_STALE
+                state, since, waiting_for = "waiting", pending[1] or since, "question"
         elif pending and pending[2] and pending[2] <= now:
             # The usage limit has reset, so the thread only waits for its next prompt. It has rested
             # since its failed turn ended, which is the age the Codex app shows for it.
