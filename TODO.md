@@ -201,3 +201,10 @@ priority.
     due 05:47, and the user asked twice why it showed under "needs you". Proposal: list such sessions with the
     working ones or in a group of their own with the next due time; an overdue reminder moves the session back to
     "needs you". Cover list order, the widget section and the tray badge count with tests (ca. 1 hour 30 minutes)
+36. (proposal) Expand the usage progress bar's time span across repeated quota resets, requested on
+    2026-11-12. For `n` seven-day usage periods, show a span of `n × 7 days` instead of always showing seven
+    days. Anchor the expanded timeline to the actual reset deadlines of all relevant usage limits, including
+    different accounts, reset times and window lengths, rather than multiplying nominal durations alone.
+    Define how the period count initializes, increments and persists, and keep every reset boundary and the
+    current period's usage readable. Cover differing deadlines, the first period, multiple resets and missing
+    history with tests (ca. 2 hours)
