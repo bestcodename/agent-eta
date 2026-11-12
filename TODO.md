@@ -182,3 +182,11 @@ priority.
     If that route is unavailable, explain why instead of silently opening a different account. Reuse the existing
     launch pipeline and configuration; add focused command and QML tests for defaults, overrides, directory choice
     and account isolation, plus tooltips under #32 (ca. 3 hours)
+34. (proposal) Show each agent in at most one viewer unless `"viewer_duplicates": true` in
+    `~/.config/agent-eta/config.json`. Viewers are grouped sessions (`new-session -t agents` in `Runtime.viewer`), so a
+    status-line click or an interactive `attach` (which execs a viewer without the client lookup of the widget path)
+    puts an agent on screen twice; on 2026-11-12 at 03:55 two viewers showed window `4e38018f…`, and the 11.11. crash
+    hit a duplicate viewer. Proposal: the interactive `attach` path focuses an existing local client first, and a
+    `session-window-changed` hook in the style of `Runtime.watch` switches a viewer back when it selects a window
+    another client shows, raises that client's terminal and shows a `display-message`. Cover both paths and the
+    opt-in with tests plus a real Konsole check (ca. 3 hours)
