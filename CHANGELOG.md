@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- TODO item 34 for a flaky Python test
+
+### Changed
+
+- TODO item 31 extended by the remote attach that reported success without attaching
+
 ## [2.6.1] - 2026-11-12
 
 ### Fixed
