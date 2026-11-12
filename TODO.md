@@ -195,3 +195,9 @@ priority.
     stefan-notebook ended with `FAILED (failures=1)` and four reruns passed; the failing test was not captured. On the
     next failure, record its name with `python3 -m unittest discover -s . 2>&1 | grep -E '^(FAIL|ERROR):'` and fix
     the race behind it (ca. 1 hour)
+35. (proposal) An idle session whose only open entries are `agent-eta add` reminders due in the future is listed
+    under "needs you", although it needs nothing until they are due, because a reminder alone is no activity
+    (docs/agent-eta.md, session states). On 2026-11-12 at 04:30 session d4aa188d had only reminder add-00d6b153,
+    due 05:47, and the user asked twice why it showed under "needs you". Proposal: list such sessions with the
+    working ones or in a group of their own with the next due time; an overdue reminder moves the session back to
+    "needs you". Cover list order, the widget section and the tray badge count with tests (ca. 1 hour 30 minutes)

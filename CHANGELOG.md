@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - TODO item 34 for a flaky Python test
+- TODO item 35 for idle sessions with only future reminders under "needs you"
 
 ### Changed
 
