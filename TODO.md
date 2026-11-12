@@ -29,7 +29,8 @@ priority.
 7. (next) Add `agent-eta set <id> --eta <duration> [--label …]`, which rewrites the ETA of an existing entry.
    Today `claude_post` records a background task's ETA once from its description, and `add`/`done` can only
    create or delete entries, so a revised ETA becomes a second entry beside the stale one. On 2026-10-15 a
-   Kochan watcher kept its 8-hour worst case while the Stage deploy it waited for was ten minutes out. Cover
+   Kochan watcher kept its 8-hour worst case while the Stage deploy it waited for was ten minutes out, and on
+   2026-11-12 a Jami test run whose `syncHistory` binary hung stayed overdue by more than an hour. Cover
    hook-recorded (`claude-<task>`) and `add` entries in `test_agent_eta.py`, document it in
    [docs/agent-eta.md](docs/agent-eta.md), and change the global CLAUDE.md ETA rule from "add a new entry" to
    "update with `set`" (ca. 1 Stunde)
