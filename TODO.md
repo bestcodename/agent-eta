@@ -208,3 +208,12 @@ priority.
     Define how the period count initializes, increments and persists, and keep every reset boundary and the
     current period's usage readable. Cover differing deadlines, the first period, multiple resets and missing
     history with tests (ca. 2 hours)
+37. (proposal) A Claude Code session that ended its turn while its own background task runs can show under
+    "needs you" and keep an expired turn ETA. On 2026-11-12 the user asked twice about a session whose
+    sequential test run held a live pid: it appeared under "needs you" between turns, and its turn ETA, set in an
+    earlier turn and due 19:04, was still listed at 20:59 and made the session yellow until `agent-eta turn
+    --done`. `turn_ended()` in `agent_eta_model.py` ends a turn only on `idle` or `stopped`, and `waiting` always
+    ranks first in `session_sort_key()`. Suspected but unmeasured: Claude Code reports `waiting` with
+    `waitingFor` `input needed` after a turn, not `idle`. Measure it first from `~/.claude/sessions/<pid>.json`
+    after a turn ends; if confirmed, treat `input needed` like `idle` for turn ends and for a session with a
+    running task, with tests (ca. 1 hour 30 minutes)
