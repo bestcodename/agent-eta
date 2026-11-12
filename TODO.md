@@ -156,18 +156,15 @@ priority.
     configuration categories in `plasmoid/contents/config/config.qml`; proposed sections are General, Sessions
     and Launching, Appearance, and Notifications. Preserve existing setting keys, defaults and saved values,
     and test that each section loads and saves its controls (ca. 1 hour)
-31. (next, bug) Make Codex CLI resumes visible and their viewers reliable after a tmux upgrade. On 2026-11-11,
-    `account launch codex --cli --resume` returned success for "List relevant private todos", but Konsole closed
-    before attaching. The installed tmux 3.7c client reported `open terminal failed: not a terminal` against the
-    still-running 3.5a server; a client started from that server's `/proc/<pid>/exe` attached to the same pane.
-    The resumed CLI remained absent from `list` and `attach` before its first prompt, as documented, so the widget
-    could not navigate to it. A queued resume of "Finish Proxmox handover" also expired after five minutes because
-    its desktop writer remained present. Proposal: negotiate or retain a compatible viewer client without restarting
-    active agents, associate resumed session IDs with validated managed process identities before the first prompt,
-    and report success only after an actual viewer attachment. Keep live-writer protection; explain when the desktop
-    must close instead of queuing a resume that cannot proceed. Cover mixed tmux versions, pre-prompt discovery,
-    viewer reuse and focus, closed-viewer reopening, and desktop-to-CLI recovery with regression tests and a real
-    Konsole check (ca. 4 hours)
+31. (next, bug) Make Codex CLI resumes visible. On 2026-11-11, `account launch codex --cli --resume` returned
+    success for "List relevant private todos", but Konsole closed before attaching (the mixed tmux 3.7c client
+    against the 3.5a server, fixed in 2.5.1 by running the server's own binary). The resumed CLI remained absent
+    from `list` and `attach` before its first prompt, as documented, so the widget could not navigate to it. A
+    queued resume of "Finish Proxmox handover" also expired after five minutes because its desktop writer remained
+    present. Proposal: associate resumed session IDs with validated managed process identities before the first
+    prompt, and report success only after an actual viewer attachment. Keep live-writer protection; explain when the
+    desktop must close instead of queuing a resume that cannot proceed. Cover pre-prompt discovery, closed-viewer
+    reopening and desktop-to-CLI recovery with regression tests and a real Konsole check (ca. 3 hours)
 32. (low, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize settings
     in `configGeneral.qml` and the sections proposed in #30, plus account and session context-menu actions in
     `FullRepresentation.qml`; then cover remaining controls and unclear icons, status indicators and abbreviations.

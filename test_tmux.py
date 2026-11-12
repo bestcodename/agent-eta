@@ -72,6 +72,12 @@ class RuntimeUnit(unittest.TestCase):
             self.assertIsNone(self.runtime.find(123, "old"))
             self.assertIsNone(self.runtime.pane({"server_pid": 123, "server_start": "old"}))
 
+    def test_a_viewer_falls_back_to_path_tmux_without_a_confirmed_server(self):
+        self.assertEqual(self.runtime.binary({}), "tmux")
+        with mock.patch.object(tmux, "proc_start", return_value="new"):
+            self.assertEqual(self.runtime.binary({"server_pid": 123, "server_start": "old"}), "tmux")
+        self.assertEqual(self.runtime.viewer({"session": "$1", "window": "@1"})[0], "tmux")
+
     def test_an_unconfirmed_launcher_exit_does_not_claim_cancellation(self):
         record = {"id": "a" * 32, "scope": "agent-eta-agent-a.scope", "pane": "%1", "pane_pid": 123, "pane_start": "old"}
         self.runtime.write(record)
@@ -246,7 +252,7 @@ class ServerUnit(unittest.TestCase):
         child, fd = pty.fork()
         if child == 0:
             os.environ["TERM"] = "xterm-256color"
-            argv = self.runtime.viewer(self.runtime.pane(record))
+            argv = self.runtime.viewer(self.runtime.pane(record), self.runtime.binary(record))
             try:
                 os.execvp(argv[0], argv)
             finally:
@@ -276,6 +282,16 @@ class ServerUnit(unittest.TestCase):
         self.assertIn("✳ Plan", self.tmux("display-message", "-p", "-t", self.a["pane"], "#{E:window-status-format}"))
         self.assertIn(Path(self.tmp.name).name,
                       self.tmux("display-message", "-p", "-t", self.b["pane"], "#{E:window-status-format}"))
+
+    def test_a_viewer_runs_the_binary_of_the_running_server(self):
+        binary = self.runtime.binary(self.a)
+        self.assertEqual(binary, f"/proc/{self.a['server_pid']}/exe")
+        self.assertEqual(self.runtime.viewer(self.runtime.pane(self.a), binary)[0], binary)
+        child, fd = self.view(self.a)
+        try:
+            self.assertEqual([c["window"] for c in self.runtime.clients()], [self.window(self.a)])
+        finally:
+            self.close(child, fd)
 
     def test_a_viewer_keeps_its_own_window_and_disappears_when_closed(self):
         child, fd = self.view(self.b)

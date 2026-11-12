@@ -346,11 +346,22 @@ class Runtime:
                     pass
         return sorted(found, key=lambda item: item["activity"], reverse=True)
 
-    def viewer(self, pane):
+    def binary(self, record):
+        """The running server's own executable for a viewer, else tmux from PATH.
+        A package upgrade replaces /usr/bin/tmux while the server keeps the old binary, and a
+        client of another version cannot attach ("open terminal failed: not a terminal")."""
+        pid = record.get("server_pid")
+        if pid and record.get("server_start") and proc_start(pid) == record["server_start"]:
+            executable = f"/proc/{int(pid)}/exe"
+            if os.access(executable, os.X_OK):
+                return executable
+        return "tmux"
+
+    def viewer(self, pane, binary="tmux"):
         """tmux argv for a client with its own grouped session, so each viewer keeps its own window.
         destroy-unattached removes that session again once the viewer closes."""
         name = VIEWER_PREFIX + uuid.uuid4().hex[:12]
-        return ["tmux", "-f", CONFIG, "-S", self.socket, "new-session", "-t", pane["session"], "-s", name, ";",
+        return [binary, "-f", CONFIG, "-S", self.socket, "new-session", "-t", pane["session"], "-s", name, ";",
                 "set-option", "-t", name, "destroy-unattached", "on", ";",
                 "select-window", "-t", name + ":" + pane["window"]]
 
@@ -367,13 +378,13 @@ class Runtime:
                 return {"opened": False, "pids": []}
             env = dict(os.environ)
             env.pop("TMUX", None)
-            argv = self.viewer(pane)
+            argv = self.viewer(pane, self.binary(record))
             os.execvpe(argv[0], argv, env)
         # A client that comes in over SSH has no window here, so only a local one can be focused.
         client = next((c for c in self.clients() if c["window"] == pane["window"] and not remote_client(c["pid"])), None)
         if client:
             return {"opened": False, "pids": lineage(client["pid"])}
-        open_terminal(self.viewer(pane))
+        open_terminal(self.viewer(pane, self.binary(record)))
         return {"opened": True, "pids": []}
 
 
