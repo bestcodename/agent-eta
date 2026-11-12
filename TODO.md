@@ -128,6 +128,15 @@ priority.
     3. **Managed sessions and handoff.** tmux runs on macOS, but the owned systemd scopes and `systemctl --user
        freeze` have no launchd equivalent; candidates are a process-group `SIGSTOP`/`SIGCONT` and a Terminal.app or
        iTerm2 viewer through `osascript`. These stay Linux-only until 1 and 2 run (ca. 16 hours)
+    4. **Distribution beyond this workstation.** On 2026-11-12 the skills marketplace Agensi.io offered by mail to
+       list agent-eta's skills and commands for Claude Code, Cursor, Copilot and other agents, non-exclusive and free
+       to list with 70 % of each sale. agent-eta ships no skill, command or plugin manifest today, since `install.sh`
+       links the tool and the hooks are wired by hand in `~/.claude/settings.json` and `~/.codex/hooks.json`, and the
+       public repository has no license. Proposal: a license first; then a Claude Code plugin in this repository whose
+       `hooks/hooks.json` replaces the hand wiring and whose `.claude-plugin/marketplace.json` makes it installable
+       with `/plugin marketplace add bestcodename/agent-eta`; Codex keeps its hand-wired hooks; a third-party listing
+       such as Agensi only once 1 and 2 run, because the tool is Linux- and KDE-bound until then (ca. 4 hours; the
+       license ca. 15 minutes)
 24. (low, proposal) Install tmux 3.7c from trixie-backports on stefan-desktop and stefan-notebook and add it to the
     workstation setup of [bestcodename/ai](https://github.com/bestcodename/ai). On 2026-11-11 at 17:41:45
     `tmux detach-client -t /dev/pts/5`, run against a duplicate Konsole viewer, crashed the tmux 3.5a server and all
