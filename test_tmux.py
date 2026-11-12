@@ -20,6 +20,9 @@ class RuntimeUnit(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="eta-tmux-")
         self.addCleanup(self.tmp.cleanup)
         self.runtime = tmux.Runtime(self.tmp.name)
+        patcher = mock.patch.dict(os.environ, {"AGENT_ETA_CONFIG": str(Path(self.tmp.name) / "config.json")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_exposed_or_symlinked_runtime_is_refused(self):
         root = Path(self.tmp.name) / "exposed"
@@ -78,6 +81,22 @@ class RuntimeUnit(unittest.TestCase):
             self.assertEqual(self.runtime.binary({"server_pid": 123, "server_start": "old"}), "tmux")
         self.assertEqual(self.runtime.viewer({"session": "$1", "window": "@1"})[0], "tmux")
 
+    def test_the_guard_accepts_only_viewer_sessions_and_window_ids(self):
+        for name, window in (("agents", "@1"), ("view-" + "a" * 12, "1"), ("view-x;kill-server", "@1")):
+            with self.assertRaises(tmux.TmuxError):
+                self.runtime.guard(name, window)
+
+    def test_the_guard_hook_names_this_runtime_and_config(self):
+        with mock.patch.dict(os.environ, {"AGENT_ETA_CONFIG": "/home/u/.config/agent-eta/config.json"}):
+            hook = self.runtime.guard_hook()
+            self.assertIn("AGENT_ETA_DIR=%s " % self.tmp.name, hook)
+            self.assertIn("AGENT_ETA_CONFIG=/home/u/.config/agent-eta/config.json ", hook)
+            self.assertIn("viewer-guard #{hook_session_name} #{window_id}", hook)
+        with mock.patch.dict(os.environ, {"AGENT_ETA_CONFIG": "/home/u/my config.json"}):
+            self.assertIsNone(self.runtime.guard_hook())
+            self.assertEqual(self.runtime.viewer({"session": "$1", "window": "@1"})[-3:],
+                             ["set-hook", "-gu", "session-window-changed"])
+
     def test_an_unconfirmed_launcher_exit_does_not_claim_cancellation(self):
         record = {"id": "a" * 32, "scope": "agent-eta-agent-a.scope", "pane": "%1", "pane_pid": 123, "pane_start": "old"}
         self.runtime.write(record)
@@ -118,7 +137,8 @@ class RuntimeUnit(unittest.TestCase):
         self.assertEqual(spawn.call_args.args[0][spawn.call_args.args[0].index("--") + 1:], [
             "/usr/bin/konsole", "--separate", "-e", "tmux", "-f", tmux.CONFIG, "-S", self.runtime.socket,
             "new-session", "-t", "$0", "-s", name, ";", "set-option", "-t", name, "destroy-unattached", "on", ";",
-            "select-window", "-t", name + ":@1"])
+            "select-window", "-t", name + ":@1", ";", "set-hook", "-g", "session-window-changed",
+        self.runtime.guard_hook()])
 
     def test_existing_attachment_is_reused(self):
         clients = [{"pid": 123, "tty": "/dev/pts/3", "session": "$4", "window": "@1", "activity": 42}]
@@ -162,6 +182,7 @@ class RuntimeUnit(unittest.TestCase):
     def test_interactive_attach_inside_tmux_switches_only_the_calling_viewer(self):
         with mock.patch.object(self.runtime, "pane", return_value=self.PANE), \
                 mock.patch.dict(os.environ, {"TMUX": self.runtime.socket + ",1,0"}), \
+                mock.patch.object(self.runtime, "clients", return_value=[]), \
                 mock.patch.object(self.runtime, "tmux", return_value=subprocess.CompletedProcess([], 0, "$5\n", "")) as run:
             self.assertEqual(self.runtime.attach({}, interactive=True), {"opened": False, "pids": []})
         self.assertEqual(run.call_args_list, [mock.call("display-message", "-p", "#{session_id}"),
@@ -225,6 +246,8 @@ class ServerUnit(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.runtime = tmux.Runtime(self.tmp.name)
         self.env = {name: value for name, value in os.environ.items() if name not in ("TMUX", "TMUX_PANE")}
+        self.config = Path(self.tmp.name) / "config.json"
+        self.env["AGENT_ETA_CONFIG"] = str(self.config)
         patcher = mock.patch.dict(os.environ, self.env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -270,6 +293,9 @@ class ServerUnit(unittest.TestCase):
     def windows(self):
         return self.tmux("list-windows", "-t", "agents", "-F", "#{window_id}")
 
+    def client(self, window):
+        return next((c for c in self.runtime.clients() if c["window"] == window), None)
+
     def close(self, child, fd):
         os.kill(child, signal.SIGTERM)
         os.waitpid(child, 0)
@@ -292,6 +318,38 @@ class ServerUnit(unittest.TestCase):
             self.assertEqual([c["window"] for c in self.runtime.clients()], [self.window(self.a)])
         finally:
             self.close(child, fd)
+
+    def test_an_interactive_attach_points_at_the_viewer_that_shows_the_agent(self):
+        child, fd = self.view(self.a)
+        try:
+            with mock.patch("agent_eta_konsole.qdbus", return_value=None), \
+                    mock.patch.object(tmux.os, "execvpe") as execvpe, mock.patch("sys.stderr"):
+                result = self.runtime.attach(self.a, interactive=True)
+                self.assertEqual(result["opened"], False)
+                self.assertEqual(result["pids"][0], self.client(self.window(self.a))["pid"])
+                execvpe.assert_not_called()
+                self.config.write_text('{"viewer_duplicates": true}')
+                self.runtime.attach(self.a, interactive=True)
+                execvpe.assert_called_once()
+                self.assertIn("-gu", execvpe.call_args.args[1])
+        finally:
+            self.close(child, fd)
+
+    def test_a_viewer_that_selects_an_agent_another_viewer_shows_goes_back(self):
+        a, b = self.window(self.a), self.window(self.b)
+        first, second = self.view(self.a), self.view(self.b)
+        try:
+            session = self.client(b)["session"]
+            self.tmux("select-window", "-t", session + ":" + a)
+            self.until(lambda: self.client(b) and self.client(b)["session"] == session)
+            self.assertEqual([c["window"] for c in self.runtime.clients()].count(a), 1)
+            self.config.write_text('{"viewer_duplicates": true}')
+            self.tmux("select-window", "-t", session + ":" + a)
+            time.sleep(.5)
+            self.assertEqual([c["window"] for c in self.runtime.clients()].count(a), 2)
+        finally:
+            self.close(*first)
+            self.close(*second)
 
     def test_a_viewer_keeps_its_own_window_and_disappears_when_closed(self):
         child, fd = self.view(self.b)

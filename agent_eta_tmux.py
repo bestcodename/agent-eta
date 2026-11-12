@@ -28,6 +28,9 @@ SERVICE_CONTEXT = ("INVOCATION_ID", "JOURNAL_STREAM", "SYSTEMD_EXEC_PID", "NOTIF
 # The private server's only configuration; the user's own tmux configuration is never loaded.
 CONFIG = str(Path(__file__).resolve().with_name("tmux.conf"))
 VIEWER_PREFIX = "view-"
+# The CLI the session-window-changed hook calls; see Runtime.guard.
+SCRIPT = str(Path(__file__).resolve().with_name("agent-eta"))
+PLAIN_PATH = re.compile(r"[A-Za-z0-9_./+-]+")
 
 
 class TmuxError(Exception):
@@ -70,6 +73,18 @@ def lineage(pid):
         except (OSError, ValueError, IndexError):
             break
     return found
+
+
+def config_path():
+    """The config.json this process reads, which the guard hook hands on to the CLI."""
+    import agent_eta_accounts
+    return str(agent_eta_accounts.AccountStore().config_path)
+
+
+def viewer_duplicates():
+    """Whether "viewer_duplicates": true in config.json allows one agent in several viewers."""
+    import agent_eta_accounts
+    return agent_eta_accounts.AccountStore().settings().get("viewer_duplicates") is True
 
 
 def remote_client(pid):
@@ -357,13 +372,78 @@ class Runtime:
                 return executable
         return "tmux"
 
+    def local_client(self, window, session=None):
+        """The most recently active client on this machine showing window, other than session's own.
+        A client that comes in over SSH has no window here, so it neither counts nor can be focused."""
+        return next((c for c in self.clients() if c["window"] == window and c["session"] != session
+                     and not remote_client(c["pid"])), None)
+
+    def focus(self, client):
+        """Point at a client: a tmux message in it and, under Konsole, its tab made current.
+        Raising the window needs KWin, which only the tray widget reaches (WindowJumper.qml)."""
+        self.tmux("display-message", "-c", client["tty"], "-d", "3000", "agent-eta: this viewer shows the agent",
+                  check=False)
+        import agent_eta_konsole as konsole
+        try:
+            binary = konsole.qdbus()
+            found = konsole.find_tab(binary, lineage(client["pid"])) if binary else None
+            if found:
+                konsole.select(binary, *found)
+        except konsole.Unavailable:
+            pass
+        return lineage(client["pid"])
+
+    def guard(self, name, window):
+        """The session-window-changed hook: a viewer that selects an agent another local viewer shows goes
+        back to its previous window, and the other viewer is pointed at. Returns whether it went back."""
+        if not re.fullmatch(re.escape(VIEWER_PREFIX) + r"[a-f0-9]{12}", name or "") \
+                or not re.fullmatch(r"@\d+", window or ""):
+            raise TmuxError("invalid viewer session or window")
+        if viewer_duplicates():
+            return False
+        sessions = self.tmux("list-sessions", "-F", "#{session_name}\t#{session_id}", check=False).stdout
+        session = next((line.split("\t")[1] for line in sessions.splitlines() if line.startswith(name + "\t")), None)
+        other = self.local_client(window, session)
+        if not session or not other:
+            return False
+        listed = self.tmux("list-windows", "-t", session, "-F", "#{window_last_flag}\t#{window_id}", check=False)
+        last = next((line.split("\t")[1] for line in listed.stdout.splitlines() if line.startswith("1\t")), None)
+        # Going back fires the hook again, so a previous window shown elsewhere too would bounce forever.
+        back = bool(last) and not self.local_client(last, session)
+        if back:
+            self.tmux("last-window", "-t", session, check=False)
+        for client in self.clients():
+            if client["session"] == session:
+                self.tmux("display-message", "-c", client["tty"], "-d", "3000",
+                          "agent-eta: another viewer shows this agent (%s)" % other["tty"], check=False)
+        self.focus(other)
+        return back
+
+    def guard_hook(self):
+        """session-window-changed hook for viewers, or None when a path cannot be written unquoted.
+
+        tmux counts the clients showing the window, so the CLI runs only when another client may show
+        it. AGENT_ETA_DIR makes the CLI act on this server rather than the default one, and
+        AGENT_ETA_CONFIG keeps the config this process reads, which AGENT_ETA_DIR would otherwise move."""
+        state, config = str(self.root.parent), config_path()
+        if not all(PLAIN_PATH.fullmatch(item) for item in (sys.executable, SCRIPT, state, config)):
+            return None
+        condition = "#{&&:#{m:%s*,#{hook_session_name}},#{>:#{window_active_clients},1}}" % VIEWER_PREFIX
+        command = "env AGENT_ETA_DIR=%s AGENT_ETA_CONFIG=%s %s %s viewer-guard #{hook_session_name} #{window_id}" % (
+            state, config, sys.executable, SCRIPT)
+        return "if-shell -F '%s' \"run-shell -b '%s'\"" % (condition, command)
+
     def viewer(self, pane, binary="tmux"):
         """tmux argv for a client with its own grouped session, so each viewer keeps its own window.
-        destroy-unattached removes that session again once the viewer closes."""
+        destroy-unattached removes that session again once the viewer closes. The last command installs
+        the guard hook, or removes it when duplicates are allowed, after the viewer's own window change."""
         name = VIEWER_PREFIX + uuid.uuid4().hex[:12]
+        hook = None if viewer_duplicates() else self.guard_hook()
+        install = ["set-hook", "-g", "session-window-changed", hook] if hook else \
+            ["set-hook", "-gu", "session-window-changed"]
         return [binary, "-f", CONFIG, "-S", self.socket, "new-session", "-t", pane["session"], "-s", name, ";",
                 "set-option", "-t", name, "destroy-unattached", "on", ";",
-                "select-window", "-t", name + ":" + pane["window"]]
+                "select-window", "-t", name + ":" + pane["window"], ";", *install]
 
     def attach(self, record, interactive=False):
         """Focus a viewer showing the agent, or open one of its own; other viewers keep their window."""
@@ -371,17 +451,21 @@ class Runtime:
         if not pane:
             raise TmuxError("the managed terminal has ended")
         if interactive:
-            if os.environ.get("TMUX", "").rsplit(",", 2)[0] == self.socket:
-                # Without a target tmux resolves the calling viewer's session.
-                current = self.tmux("display-message", "-p", "#{session_id}").stdout.strip()
+            inside = os.environ.get("TMUX", "").rsplit(",", 2)[0] == self.socket
+            # Without a target tmux resolves the calling viewer's session.
+            current = self.tmux("display-message", "-p", "#{session_id}").stdout.strip() if inside else None
+            other = None if viewer_duplicates() else self.local_client(pane["window"], current)
+            if other:
+                print("agent-eta: a viewer on %s already shows this agent" % other["tty"], file=sys.stderr)
+                return {"opened": False, "pids": self.focus(other)}
+            if inside:
                 self.tmux("select-window", "-t", current + ":" + pane["window"])
                 return {"opened": False, "pids": []}
             env = dict(os.environ)
             env.pop("TMUX", None)
             argv = self.viewer(pane, self.binary(record))
             os.execvpe(argv[0], argv, env)
-        # A client that comes in over SSH has no window here, so only a local one can be focused.
-        client = next((c for c in self.clients() if c["window"] == pane["window"] and not remote_client(c["pid"])), None)
+        client = self.local_client(pane["window"])
         if client:
             return {"opened": False, "pids": lineage(client["pid"])}
         open_terminal(self.viewer(pane, self.binary(record)))

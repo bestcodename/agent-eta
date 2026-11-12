@@ -56,7 +56,9 @@ A handoff refuses a folder the destination client does not trust yet, and its me
 the client there once to accept the trust question.
 
 Managed CLI rows focus the window already showing their pane, or open a window of their own. Inside a viewer, a
-click on a status-line tab switches agents.
+click on a status-line tab switches agents. An agent shows in at most one local viewer; selecting one that another
+viewer shows points at that viewer instead. `"viewer_duplicates": true` in `~/.config/agent-eta/config.json` allows
+duplicates.
 Existing desktop threads open in the app. Unmanaged CLI sessions remain visible but must be closed and resumed with
 `agent-eta account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` before cross-provider handoff.
 Resuming a session with a live writer is refused; a session that only an open ETA keeps listed has none.
