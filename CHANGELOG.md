@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- TODO item 23 extended by distribution as a Claude Code plugin and marketplace listings
+
 ## [2.6.0] - 2026-11-12
 
 ### Added
