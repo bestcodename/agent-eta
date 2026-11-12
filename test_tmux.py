@@ -188,6 +188,39 @@ class RuntimeUnit(unittest.TestCase):
         self.assertEqual(run.call_args_list, [mock.call("display-message", "-p", "#{session_id}"),
                                               mock.call("select-window", "-t", "$5:@1")])
 
+    def test_an_interactive_attach_over_ssh_opens_its_own_viewer_next_to_a_local_one(self):
+        local_viewer = [{"pid": 123, "tty": "/dev/pts/5", "session": "$4", "window": "@1", "activity": 42}]
+        for over_ssh in (True, False):
+            with self.subTest(over_ssh=over_ssh), \
+                    mock.patch.object(self.runtime, "pane", return_value=self.PANE), \
+                    mock.patch.dict(os.environ, {"TMUX": ""}), \
+                    mock.patch.object(self.runtime, "clients", return_value=local_viewer), \
+                    mock.patch.object(tmux, "remote_client", side_effect=lambda pid: over_ssh and pid == os.getpid()), \
+                    mock.patch.object(self.runtime, "focus", return_value=[123]) as focus, \
+                    mock.patch.object(tmux.os, "execvpe") as execvpe, mock.patch("sys.stderr"):
+                self.runtime.attach({}, interactive=True)
+            if over_ssh:
+                focus.assert_not_called()
+                execvpe.assert_called_once()
+                self.assertIn("select-window", execvpe.call_args.args[1])
+            else:
+                focus.assert_called_once_with(local_viewer[0])
+                execvpe.assert_not_called()
+
+    def test_the_guard_leaves_a_viewer_from_another_machine_alone(self):
+        name = "view-" + "a" * 12
+        clients = [{"pid": 50, "tty": "/dev/pts/9", "session": "$5", "window": "@1", "activity": 2},
+                   {"pid": 60, "tty": "/dev/pts/5", "session": "$3", "window": "@1", "activity": 1}]
+        listing = subprocess.CompletedProcess([], 0, name + "\t$5\n", "")
+        with mock.patch.object(self.runtime, "tmux", return_value=listing) as run, \
+                mock.patch.object(self.runtime, "clients", return_value=clients), \
+                mock.patch.object(tmux, "remote_client", side_effect=lambda pid: pid == 50), \
+                mock.patch.object(self.runtime, "focus") as focus:
+            self.assertFalse(self.runtime.guard(name, "@1"))
+        focus.assert_not_called()
+        self.assertEqual(run.call_args_list,
+                         [mock.call("list-sessions", "-F", "#{session_name}\t#{session_id}", check=False)])
+
     def test_navigation_to_an_ended_terminal_is_refused(self):
         with mock.patch.object(self.runtime, "pane", return_value=None), \
                 self.assertRaisesRegex(tmux.TmuxError, "has ended"):
