@@ -29,7 +29,8 @@ Managed CLI sessions and cross-provider handoffs require tmux and a running syst
 Install tmux with your package manager before running the installer. A private tmux server hosts agent terminals
 independently of viewers and handoff controllers. Konsole is the default viewer; `AGENT_ETA_TERMINAL_BIN` can select
 another terminal supporting `-e`. Closing the viewer leaves agents running; explicitly ending an agent stops it.
-A viewer closes once its agent ends, instead of showing another agent.
+A viewer closes once its agent ends, instead of showing another agent. Viewers run the running tmux server's own
+binary, so a tmux upgrade does not break new viewers before the server restarts.
 Each pane keeps a separate launcher so tmux's own scope tracking cannot move the agent out of its owned scope.
 The launcher clears inherited `NO_COLOR` so automation tools cannot force an interactive agent into grayscale.
 It preserves `TERM` and `COLORTERM`; explicitly supplied launcher settings still take precedence.

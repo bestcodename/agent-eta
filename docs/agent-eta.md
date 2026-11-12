@@ -394,7 +394,10 @@ Konsole is the default viewer, launched only to attach a client. `AGENT_ETA_TERM
 supporting `-e`. The viewer starts through `systemd-run --user` in a transient unit of its own, so it gets the graphical
 session's environment when the caller came in over SSH and outlives a caller that is itself a unit;
 `AGENT_ETA_SYSTEMD_RUN_BIN` replaces that binary for tests, and without systemd-run the terminal starts directly. Each viewer attaches through its own grouped session with `destroy-unattached on`, so it keeps its
-own current window and its session disappears when it closes; agents continue. Close a viewer by closing its terminal
+own current window and its session disappears when it closes; agents continue. The viewer runs the server's own
+executable `/proc/<server pid>/exe` when the record's server identity still matches (`Runtime.binary`), and tmux
+from `PATH` otherwise, because a package upgrade replaces `/usr/bin/tmux` while the server keeps running the old
+binary and a client of another version fails with `open terminal failed: not a terminal`. Close a viewer by closing its terminal
 window, never with `tmux detach-client`. In tmux 3.5a a detach destroys the viewer's `destroy-unattached` session
 while the client still points at it, and the shared server crashes with every agent in it; tmux 3.7c guards that
 access. Navigation focuses a viewer already

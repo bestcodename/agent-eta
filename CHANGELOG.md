@@ -14,6 +14,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - TODO item 33 for Claude CLI/desktop launch preferences and one-launch context-menu overrides
 - TODO item 34 for one viewer per agent unless duplicates are enabled in the config
 
+## [2.5.1] - 2026-11-12
+
+### Fixed
+
+- Viewers run the running tmux server's own binary, so they attach after a tmux upgrade before the server restarts
+
+### Changed
+
+- TODO item 31 narrowed to resume visibility and desktop recovery
+
 ## [2.5.0] - 2026-11-11
 
 ### Added
