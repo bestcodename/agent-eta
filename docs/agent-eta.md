@@ -318,10 +318,16 @@ The widget adds `--cli` by default. Its **Use CLI by default** setting switches 
 and desktop app, and the account menu offers the other client for one launch in the default or a chosen directory.
 The override leaves the saved client and directory preferences unchanged. Claude sessions always use their CLI.
 `account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` resumes a session after its existing writer has
-exited. The command refuses a live writer. `agent-eta attach claude:ID` or `codex:ID` shows its existing managed
+exited. A managed Codex resume is listed idle before its first prompt. The command refuses a live writer and
+names either the managed terminal's attach command or the reason the writer cannot be gated. A thread held by
+the desktop app must be closed there before resuming. `agent-eta attach claude:ID` or `codex:ID` shows its existing managed
 terminal, without starting a model session. In a terminal it attaches or switches; `--json` selects a pane and
 returns attachment window PIDs, opening the configured viewer when detached. Native commands receive argument arrays, not interpolated shell
-text. A missing executable, invalid directory or immediately failing launcher produces a safe action error.
+text. Local launch and detached attach return success only after a viewer attaches within five seconds. A timeout
+returns an error while the agent keeps running. A new remote viewer must appear within five seconds and its SSH
+process must remain alive for another 1.2 seconds; this detects immediate failures but does not acknowledge the
+remote terminal's rendered contents. An existing viewer returns immediately. A missing executable, invalid
+directory or immediately failing launcher produces a safe action error.
 
 Preferences live at `${XDG_CONFIG_HOME:-~/.config}/agent-eta/config.json` and cached readings at
 `${XDG_CACHE_HOME:-~/.cache}/agent-eta/accounts.json`. New files have mode 0600. Tests can override `AGENT_ETA_CONFIG`
@@ -746,6 +752,17 @@ plasmawindowed com.github.bestcodename.agenteta    # the overview in a window, w
   cookie for 30 days, so opening the root needs no token.
 - The `/goal` session of sdwa5-inventur ended at 04:47 with five `llm/retry` records of code `TIMEOUT` and a `turn/end`
   of kind `error`. agent-eta showed it under needs you as `waiting (turn failed (TIMEOUT))`.
+
+## Measured on 2026-11-13
+
+- Before this change, Konsole attached 0.36 seconds after a managed Codex resume, but the thread stayed absent
+  from `list` and `attach` before its first prompt. Starting `/bin/false` as the terminal still returned success.
+- With Codex 0.167.0-alpha.4.1, the changed launch returned after 0.51 seconds; the resumed thread was listed idle
+  at 0.63 seconds with its Codex process identity. `attach --json` returned `opened: false` with viewer PIDs.
+  The user confirmed that clicking the row brought the viewer forward.
+- A failing remote SSH attach exited after 0.33 to 0.37 seconds in three runs. The settling period is 1.2 seconds.
+  The changed remote command rejected a live test with an unresolved `notebook` hostname. A successful remote
+  attachment was not verified; desktop-to-notebook SSH failed public-key authentication.
 
 ## Measured on 2026-10-03
 

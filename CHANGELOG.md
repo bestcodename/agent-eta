@@ -7,6 +7,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-11-13
+
+### Changed
+
+- Local launch and attach wait for a viewer; remote attach checks that its SSH viewer stays running
+- Live-writer refusal gives the managed terminal's attach command or the writer's gating restriction
+
+### Fixed
+
+- A managed Codex resume is listed idle before its first prompt
+
+### Removed
+
+- TODO item 31
+
 ## [2.8.0] - 2026-11-13
 
 ### Added

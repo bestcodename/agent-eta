@@ -203,8 +203,10 @@ def spawn(command, env=None):
         raise AccountError("The account action could not be started") from None
 
 
-def launch(account, directory, login=False, cli=False, resume=None):
-    """Pass argv directly to processes; no directory or account name becomes shell code."""
+def launch(account, directory, login=False, cli=False, resume=None, started=None):
+    """Pass argv directly to processes; no directory or account name becomes shell code.
+    `started(record)` runs once a managed terminal is up and before its viewer opens, so the
+    session is known even when no viewer attaches."""
     if account["provider"] == "codex" and not login and not cli and not resume:
         from urllib.parse import urlencode
         spawn([executable("opener"), "codex://threads/new?" + urlencode({"path": directory})])
@@ -229,6 +231,8 @@ def launch(account, directory, login=False, cli=False, resume=None):
             except agent_eta_tmux.TmuxError:
                 cancelled = False
             raise AccountError(str(exc) + ("" if cancelled else "; terminal cleanup is unconfirmed")) from None
+        if started:
+            started(record)
         runtime.attach(record)
         return record
     if account["provider"] == "claude":

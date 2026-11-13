@@ -20,7 +20,7 @@ from agent_eta_accounts import AccountStore, check_worker_lock, file_lock, read_
 from agent_eta_handoff import parse_source
 from agent_eta_model import SCHEMA_VERSION
 from agent_eta_providers import AccountError
-from agent_eta_tmux import lineage, open_terminal
+from agent_eta_tmux import VIEWER_TIMEOUT, lineage, open_terminal
 
 HOST = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 THROTTLE_SECONDS = 10
@@ -29,6 +29,9 @@ CONNECT_TIMEOUT = 3
 FETCH_TIMEOUT = 8
 # Non-interactive SSH shells often lack ~/.local/bin on PATH, and the remote shell expands the tilde.
 REMOTE_CLI = "~/.local/bin/agent-eta"
+# Seconds a new remote viewer must stay up to count as attached. An ssh attach of a session the
+# other machine does not run exited after 0.33 to 0.37 s on 2026-11-13; three times that.
+REMOTE_SETTLE = 1.2
 
 
 class RemoteError(Exception):
@@ -221,7 +224,17 @@ def attach(host, source, interactive, proc="/proc"):
     if pid:
         return {"opened": False, "pids": lineage(pid)}
     open_terminal(argv)
-    return {"opened": True, "pids": []}
+    # The terminal command returns once its unit starts, and a remote attach that fails exits
+    # within a second, so only an ssh that is still up after REMOTE_SETTLE counts as opened.
+    deadline = time.monotonic() + VIEWER_TIMEOUT
+    while not pid and time.monotonic() < deadline:
+        time.sleep(0.1)
+        pid = viewer(argv, proc)
+    if pid:
+        time.sleep(REMOTE_SETTLE)
+    if not pid or not os.path.isdir(os.path.join(proc, str(pid))):
+        raise RemoteError("the remote attach ended at once; run agent-eta attach %s on %s" % (source, host))
+    return {"opened": True, "pids": lineage(pid)}
 
 
 def add_parser(sub):

@@ -28,6 +28,9 @@ SERVICE_CONTEXT = ("INVOCATION_ID", "JOURNAL_STREAM", "SYSTEMD_EXEC_PID", "NOTIF
 # The private server's only configuration; the user's own tmux configuration is never loaded.
 CONFIG = str(Path(__file__).resolve().with_name("tmux.conf"))
 VIEWER_PREFIX = "view-"
+# Seconds a new terminal gets to attach its viewer. Konsole attached 0.36 s after launch on
+# 2026-11-13; three times that is under the five-second floor kept for a cold first start.
+VIEWER_TIMEOUT = 5
 # The CLI the session-window-changed hook calls; see Runtime.guard.
 SCRIPT = str(Path(__file__).resolve().with_name("agent-eta"))
 PLAIN_PATH = re.compile(r"[A-Za-z0-9_./+-]+")
@@ -51,6 +54,19 @@ def cgroup(pid):
                     if line.startswith("0::"))
     except (OSError, ValueError, StopIteration, TypeError):
         return None
+
+
+def scope_pids(scope, root="/sys/fs/cgroup"):
+    """The pids systemd lists in a scope of the user manager; empty when it has none or is gone."""
+    try:
+        result = subprocess.run(["systemctl", "--user", "show", "-p", "ControlGroup", "--value", scope],
+                                capture_output=True, text=True, timeout=5)
+        group = result.stdout.strip()
+        if result.returncode or not group:
+            return []
+        return [int(pid) for pid in Path(root + group, "cgroup.procs").read_text().split()]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
 
 
 def group_alive(pid):
@@ -478,7 +494,21 @@ class Runtime:
         if client:
             return {"opened": False, "pids": lineage(client["pid"])}
         open_terminal(self.viewer(pane, self.binary(record)))
-        return {"opened": True, "pids": []}
+        # The terminal command returns once its unit starts, also for a terminal that dies at once,
+        # so only a client on the window counts as opened.
+        client = self.wait_for_viewer(pane["window"])
+        if not client:
+            raise TmuxError("no viewer attached within %d s; the agent keeps running" % VIEWER_TIMEOUT)
+        return {"opened": True, "pids": lineage(client["pid"])}
+
+    def wait_for_viewer(self, window, timeout=None):
+        """The local client that shows window within timeout seconds, or None."""
+        deadline = time.monotonic() + (VIEWER_TIMEOUT if timeout is None else timeout)
+        while True:
+            client = self.local_client(window)
+            if client or time.monotonic() >= deadline:
+                return client
+            time.sleep(0.1)
 
 
 def open_terminal(argv):

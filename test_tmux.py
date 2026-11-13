@@ -126,13 +126,18 @@ class RuntimeUnit(unittest.TestCase):
 
     PANE = {"session": "$0", "window": "@1", "pane": "%1", "pane_pid": 123, "pane_start": "start"}
 
+    VIEWER = {"pid": 456, "tty": "/dev/pts/7", "session": "$5", "window": "@1", "activity": 43}
+
     def test_detached_navigation_opens_only_an_attachment(self):
         with mock.patch.object(self.runtime, "pane", return_value=self.PANE), \
-                mock.patch.object(self.runtime, "clients", return_value=[]), \
+                mock.patch.object(self.runtime, "clients", side_effect=[[], [], [self.VIEWER]]), \
+                mock.patch.object(tmux, "remote_client", return_value=False), \
+                mock.patch.object(tmux, "lineage", return_value=[456, 400]), \
+                mock.patch.object(tmux.time, "sleep"), \
                 mock.patch.object(tmux.uuid, "uuid4", return_value=mock.Mock(hex="f" * 32)), \
                 mock.patch("agent_eta_providers.executable", return_value="/usr/bin/konsole"), \
                 mock.patch("agent_eta_providers.spawn") as spawn:
-            self.assertEqual(self.runtime.attach({}), {"opened": True, "pids": []})
+            self.assertEqual(self.runtime.attach({}), {"opened": True, "pids": [456, 400]})
         name = "view-" + "f" * 12
         self.assertEqual(spawn.call_args.args[0][spawn.call_args.args[0].index("--") + 1:], [
             "/usr/bin/konsole", "--separate", "-e", "tmux", "-f", tmux.CONFIG, "-S", self.runtime.socket,
@@ -150,14 +155,24 @@ class RuntimeUnit(unittest.TestCase):
         run.assert_not_called()
 
     def test_a_viewer_from_another_machine_is_not_focused_but_a_local_one_opens(self):
-        clients = [{"pid": 123, "tty": "/dev/pts/6", "session": "$4", "window": "@1", "activity": 42}]
+        remote = {"pid": 123, "tty": "/dev/pts/6", "session": "$4", "window": "@1", "activity": 42}
         with mock.patch.object(self.runtime, "pane", return_value=self.PANE), \
-                mock.patch.object(self.runtime, "clients", return_value=clients), \
-                mock.patch.object(tmux, "remote_client", return_value=True), \
+                mock.patch.object(self.runtime, "clients", side_effect=[[remote], [remote, self.VIEWER]]), \
+                mock.patch.object(tmux, "remote_client", side_effect=lambda pid: pid == 123), \
+                mock.patch.object(tmux, "lineage", return_value=[456]), \
                 mock.patch("agent_eta_providers.executable", return_value="/usr/bin/konsole"), \
                 mock.patch("agent_eta_providers.spawn") as spawn:
-            self.assertEqual(self.runtime.attach({}), {"opened": True, "pids": []})
+            self.assertEqual(self.runtime.attach({}), {"opened": True, "pids": [456]})
         spawn.assert_called_once()
+
+    def test_a_terminal_that_never_attaches_is_an_error(self):
+        with mock.patch.object(self.runtime, "pane", return_value=self.PANE), \
+                mock.patch.object(self.runtime, "clients", return_value=[]), \
+                mock.patch.object(tmux, "VIEWER_TIMEOUT", 0.2), \
+                mock.patch("agent_eta_providers.executable", return_value="/usr/bin/konsole"), \
+                mock.patch("agent_eta_providers.spawn"):
+            with self.assertRaisesRegex(tmux.TmuxError, "keeps running"):
+                self.runtime.attach({})
 
     def test_a_client_below_an_ssh_server_is_remote(self):
         comms = {10: "tmux: client", 9: "bash", 8: "sshd-session", 20: "tmux: client", 19: "konsole"}
@@ -173,9 +188,11 @@ class RuntimeUnit(unittest.TestCase):
         with mock.patch.object(self.runtime, "pane", return_value=self.PANE), \
                 mock.patch.object(self.runtime, "clients", return_value=clients), \
                 mock.patch.object(self.runtime, "tmux") as run, \
+                mock.patch.object(self.runtime, "wait_for_viewer", return_value=self.VIEWER), \
+                mock.patch.object(tmux, "lineage", return_value=[456]), \
                 mock.patch("agent_eta_providers.executable", return_value="/usr/bin/konsole"), \
                 mock.patch("agent_eta_providers.spawn") as spawn:
-            self.assertEqual(self.runtime.attach({}), {"opened": True, "pids": []})
+            self.assertEqual(self.runtime.attach({}), {"opened": True, "pids": [456]})
         run.assert_not_called()
         spawn.assert_called_once()
 
@@ -390,9 +407,12 @@ class ServerUnit(unittest.TestCase):
             self.assertEqual([c["window"] for c in self.runtime.clients()], [self.window(self.b)])
             self.assertEqual(self.tmux("display-message", "-p", "-t", "agents", "#{window_id}"), self.window(self.a))
             self.assertEqual(self.runtime.attach(self.b)["opened"], False)
+            viewer = {"pid": 456, "tty": "/dev/pts/7", "session": "$9", "window": self.window(self.a), "activity": 1}
             with mock.patch("agent_eta_providers.executable", return_value="/usr/bin/konsole"), \
+                    mock.patch.object(self.runtime, "wait_for_viewer", return_value=viewer), \
+                    mock.patch.object(tmux, "lineage", return_value=[456]), \
                     mock.patch("agent_eta_providers.spawn") as spawn:
-                self.assertEqual(self.runtime.attach(self.a), {"opened": True, "pids": []})
+                self.assertEqual(self.runtime.attach(self.a), {"opened": True, "pids": [456]})
             spawn.assert_called_once()
         finally:
             self.close(child, fd)

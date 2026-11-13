@@ -627,6 +627,25 @@ class Sessions(StateTest):
             eta.codex_event(self.dir, self.codex_event("SessionEnd"))
         self.assertEqual(eta.read_json(eta.codex_session_path(self.dir, "thread-1"))["app"]["pid"], 4242)
 
+    def test_a_launched_codex_resume_is_listed_before_its_first_prompt(self):
+        record = {"scope": "agent-eta-agent-x.scope", "cwd": "/work/shop"}
+        codex = {"provider": "codex"}
+        with mock.patch.object(eta.tmux_api, "scope_pids", return_value=[1, os.getpid()]), \
+                mock.patch.object(eta, "comm_of", side_effect=lambda pid: "codex" if pid == os.getpid() else "sh"):
+            eta.register_launch(codex, record, "r1")
+            eta.register_launch({"provider": "claude"}, record, "r2")
+            eta.register_launch(codex, record, None)
+        stored = eta.read_json(eta.codex_session_path(self.dir, "r1"))
+        self.assertEqual((stored["state"], stored["app"]["pid"], stored["cwd"]), ("idle", os.getpid(), "/work/shop"))
+        self.assertEqual([(s["id"], s["state"]) for s in self.view() if s["agent"] == "codex"], [("r1", "idle")])
+        self.assertIsNone(eta.read_json(eta.codex_session_path(self.dir, "r2")))
+
+    def test_a_launch_without_a_codex_process_records_nothing(self):
+        with mock.patch.object(eta.tmux_api, "scope_pids", return_value=[]), \
+                mock.patch.object(eta, "LAUNCH_SCAN_SECONDS", 0.2):
+            eta.register_launch({"provider": "codex"}, {"scope": "agent-eta-agent-x.scope", "cwd": "/w"}, "r1")
+        self.assertIsNone(eta.read_json(eta.codex_session_path(self.dir, "r1")))
+
     def test_session_end_from_the_desktop_app_or_for_other_threads_ends_the_thread(self):
         for source, archived, sender in (("vscode", 0, 4242), ("exec", 0, 999), ("cli", 0, 999), ("vscode", 1, 999)):
             with self.subTest(source=source, archived=archived, sender=sender):

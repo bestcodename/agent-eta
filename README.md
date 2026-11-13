@@ -58,6 +58,8 @@ agent-eta handoff claude:<session> --to codex   # continue a session's plan in C
 A handoff refuses a folder the destination client does not trust yet, and its message names the command that opens
 the client there once to accept the trust question.
 
+Managed Codex resumes are listed idle before their first prompt. Local launch and attach succeed only after a
+viewer attaches; remote attach requires its SSH viewer to stay running through a short settling period.
 Managed CLI rows focus the window already showing their pane, or open a window of their own. Inside a viewer, a
 click on a status-line tab switches agents. An agent shows in at most one local viewer; selecting one that another
 viewer shows points at that viewer instead. An attach from another machine (`--host`) always opens a viewer of its
