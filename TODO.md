@@ -17,7 +17,9 @@ priority.
 5. (next) Investigate the reported `/effort effort max` session title appearing as command-name markup.
    Reproduce it and trace the title through the native registry, transcript title, CLI and widget.
    Confirm the source before proposing a fix, then preserve the reproduction as a regression fixture
-   (ca. 1 hour).
+   (ca. 1 hour). On 2026-11-13 no current registry showed this title and no raw registry fixture was found.
+   On recurrence, capture `name`, `nameSource` and `sessionId` from the registry alongside the CLI row before
+   the native title changes; a transcript's `/effort` command alone does not establish the displayed title
 6. (low) Make *Jump to window* select the PhpStorm terminal tab a Claude Code session runs in. Today it only
    raises the project window, and PhpStorm has no action that selects a terminal tab by name, which
    `search_ide_actions "terminal"` showed on 2026-10-15. Spike the routes without a plugin in this order. First, a
@@ -53,10 +55,12 @@ priority.
 15. (low) A Claude Code session that a handoff started holds no ExitPlanMode approval, so moving it on to Codex forks
     a summary and plans again. Proposal: count such a session as approved from the completed handoff record that
     started it with an approved plan (ca. 2 hours).
-16. (next) The modal's *Log in* button did not log in on 2026-11-03, while `/login` in Claude Code worked. The
-    button runs `agent-eta account login <id>`, which spawns `claude auth login` in a separate terminal
-    (`agent_eta_providers.launch`). Reproduce from a shell and from the button, and confirm the cause before a
-    fix (ca. 1 Stunde)
+16. (next) Investigate the modal still showing *Log in* after login. The original 2026-11-03 report says
+    "shows login even after logging in"; the recorded interpretation was that the button failed while `/login`
+    worked. On 2026-11-13 the user confirmed that the account-menu login for `sri@ndcom.de` opened a terminal and
+    browser, and the native auth-status classification was authenticated. Browser authorization was not completed
+    for this check, so the reported post-login state remains unverified. On recurrence, compare native auth status,
+    account identity and the widget's cached state after login before changing the launch path (ca. 1 Stunde)
 17. (low) Add a toggle for Claude Code's claude.ai push of permission prompts and questions
     (`inputNeededNotifEnabled`, off since 2026-11-04) next to the *Notify when* checkboxes. The key lives in
     `claude/settings.json` of bestcodename/ai, so a flip shows up there as a diff, like a `/config` change.
@@ -186,3 +190,8 @@ priority.
     Define how the period count initializes, increments and persists, and keep every reset boundary and the
     current period's usage readable. Cover differing deadlines, the first period, multiple resets and missing
     history with tests (ca. 2 hours)
+38. (low, proposal) Rename the project to Agent Desk and the repository slug to `agent-desk`, requested on
+    2026-11-13. The name should cover sessions, accounts, usage limits and handoffs. Verify the GitHub repository
+    and any GitLab mirror mapping before renaming either service. Introduce `agent-desk` as the primary command
+    while retaining `agent-eta` compatibility. Update package and widget display names, repository URLs,
+    installation, hooks and external callers without losing saved settings or runtime ownership (ca. 4 hours)
