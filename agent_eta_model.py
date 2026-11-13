@@ -36,6 +36,8 @@ STATE_LABELS = {"waiting": "waiting", "idle": "idle", "working": "working", "sto
                 "unknown": "unknown"}
 # The label of a Codex thread whose turn runs on while an async question waits for its answer.
 QUESTION_OPEN_LABEL = "working, question open"
+# The label of an idle session whose only open entries are reminders not due yet.
+REMINDER_LABEL = "idle, reminder pending"
 SECTION_TITLES = ("Needs you", "Working", "Stopped until a limit resets", "Dormant")
 # The semantic light of an activity state. The widget maps these to theme colours.
 STATE_LIGHTS = {"waiting": "attention", "idle": "caution", "working": "active", "stopped": "off",
@@ -168,6 +170,14 @@ def at_rest(session):
     return session["state"] == "idle" or (session["state"] == "stopped" and not session.get("due"))
 
 
+def awaits_reminder(session):
+    """At rest with nothing running, and every open entry a reminder that is not due yet. Such a
+    session needs nothing until the first one is due, and an overdue one brings it back to Needs you."""
+    tasks = session["tasks"]
+    return (at_rest(session) and not has_running_task(session) and bool(tasks)
+            and all(task["remaining"] is not None and task["remaining"] >= 0 for task in tasks))
+
+
 def dormant(session, now):
     """Whether a session has rested so long that nobody looks at it any more. A dsh turn that
     failed waits for the next prompt, and after DORMANT_AFTER it rests like an idle session. A
@@ -181,10 +191,12 @@ def dormant(session, now):
 def session_sort_key(session):
     """By how soon a session needs you. Waiting for an answer first, then at rest with the most
     recently active first, then working by its ETA like the tasks, then stopped until a usage
-    limit resets."""
+    limit resets. An idle session that only waits for reminders ranks with the working ones by its
+    ETA, see awaits_reminder()."""
     if session["state"] == "waiting" and not working_with_question(session):
         rank = 0
-    elif session["state"] == "unknown" or (at_rest(session) and not has_running_task(session)):
+    elif session["state"] == "unknown" or (at_rest(session) and not has_running_task(session)
+                                           and not session.get("awaits_reminder")):
         rank = 1
     elif session["state"] == "stopped":
         rank = 3
@@ -213,7 +225,7 @@ def activity_state(session):
     while the state its agent reported stays in `reported_state`."""
     if working_with_question(session):
         return "working"
-    if session["state"] in ("idle", "unknown") and has_running_task(session):
+    if session["state"] in ("idle", "unknown") and (has_running_task(session) or session.get("awaits_reminder")):
         return "working"
     return session["state"]
 
@@ -221,6 +233,8 @@ def activity_state(session):
 def activity_label(session):
     if working_with_question(session):
         return QUESTION_OPEN_LABEL
+    if session.get("awaits_reminder"):
+        return REMINDER_LABEL
     return STATE_LABELS.get(session["activity_state"], session["activity_state"])
 
 
@@ -465,7 +479,8 @@ def handoff_view(session, handoffs):
             "status": status}
 
 
-def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, handoffs=None):
+def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, handoffs=None,
+                   reminders_need_you=False):
     """One snapshot from the collected inputs, none of which it changes.
 
     A task whose session is not known, such as a local run, stands as a session of its own. A
@@ -474,7 +489,9 @@ def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, h
     Codex command left without PostToolUse when its turn ended goes to `prune_tasks`. A session
     that does not work while its account has a reached usage limit counts as stopped until that
     limit resets. `turns` maps a session_key() to the turn ETA record of that session, and
-    `handoffs` a handoff source such as `codex:<thread>` to its latest handoff record.
+    `handoffs` a handoff source such as `codex:<thread>` to its latest handoff record. An idle
+    session that only waits for reminders not due yet counts as working, unless
+    `reminders_need_you` keeps it under Needs you.
     """
     sessions = copy.deepcopy(list(sessions))
     accounts = [dict(account, key="account:%s" % account["id"]) for account in copy.deepcopy(list(accounts))]
@@ -513,6 +530,7 @@ def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, h
     limit_stops(sessions, windows, now)
     for session in sessions:
         set_eta(session, turns.get(session_key(session["agent"], session)), now)
+        session["awaits_reminder"] = not reminders_need_you and awaits_reminder(session)
     sessions.sort(key=lambda session: (dormant(session, now), session_sort_key(session)))
     for session in sessions:
         session["dormant"] = dormant(session, now)
@@ -543,7 +561,8 @@ HANDOFF_TARGETS = {"claude": ("codex", "claude"), "codex": ("claude",)}
 
 def labels():
     """The one label table every surface reads its words from."""
-    return {"states": dict(STATE_LABELS), "question_open": QUESTION_OPEN_LABEL, "sections": list(SECTION_TITLES),
+    return {"states": dict(STATE_LABELS), "question_open": QUESTION_OPEN_LABEL,
+            "reminder_pending": REMINDER_LABEL, "sections": list(SECTION_TITLES),
             "dormant_after": DORMANT_AFTER}
 
 

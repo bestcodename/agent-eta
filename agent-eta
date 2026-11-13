@@ -13,10 +13,11 @@ dsh's own session logs, without an ETA. See docs/agent-eta.md.
         flat task list instead. Dead entries are pruned.
 
     agent-eta hook
-        Hook entry point for Claude Code (PostToolUse on Bash) and Codex (PreToolUse and
-        PostToolUse on Bash, plus UserPromptSubmit, PermissionRequest, Stop and
-        Interrupt for the thread state). Reads the hook payload on stdin, always exits 0
-        and never prints, so it can neither block nor alter a tool call.
+        Hook entry point for Claude Code (PostToolUse on Bash, plus Stop to end the turn
+        ETA) and Codex (PreToolUse and PostToolUse on Bash, plus UserPromptSubmit,
+        PermissionRequest, Stop and Interrupt for the thread state). Reads the hook payload
+        on stdin, always exits 0 and never prints, so it can neither block nor alter a tool
+        call.
 
     agent-eta turn --eta DUR [--label TEXT]
     agent-eta turn --done
@@ -1222,7 +1223,8 @@ def snapshot(directory, now, tasks=None, usage=None, accounts=()):
         session["gate_reason"] = handoff_gate(session, sessions)[2] if session["agent"] in ("claude", "codex") else None
     result = model.build_snapshot(now=now, sessions=sessions, tasks=list(tasks) + dsh_tasks,
                                   usage=usage_view(now) if usage is None else usage, accounts=accounts,
-                                  turns=turns, handoffs=handoff_records())
+                                  turns=turns, handoffs=handoff_records(),
+                                  reminders_need_you=reminders_need_you())
     for task_id in result.prune_tasks:
         remove(entry_path(directory, task_id))
     return result
@@ -1505,6 +1507,17 @@ def claude_post(directory, payload):
     return "recorded"
 
 
+def claude_stop(directory):
+    """A Claude Code turn ended, so its turn ETA ends with it, whatever the registry reports
+    meanwhile. With a background shell running, Claude Code 2.1.323 reports `shell` rather than
+    `idle` between turns (measured 2026-11-13), so turn_ended() alone kept a turn ETA alive.
+    Codex does the same through TURN_ENDS."""
+    agent, session = current_session()
+    if agent != "claude" or session_key(agent, session) is None:
+        return "no-session"
+    return "turn-cleared" if remove(turn_path(directory, agent, session)) else "no-turn"
+
+
 def codex_pre(directory, payload):
     use_id = payload.get("tool_use_id")
     if not use_id:
@@ -1601,6 +1614,13 @@ def codex_end_holder(thread):
     return None
 
 
+def reminders_need_you():
+    """Whether `"reminder_sessions": "needs_you"` in the agent-eta config keeps an idle session whose
+    only entries are reminders not due yet under Needs you. Any other value, `working` by default,
+    lists it with the working sessions."""
+    return accounts_api.AccountStore().settings().get("reminder_sessions") == "needs_you"
+
+
 def handoff_trigger_settings():
     """The Codex limit trigger's settings from the agent-eta config, over its defaults."""
     raw = accounts_api.AccountStore().settings().get("codex_handoff")
@@ -1670,6 +1690,8 @@ def handle_hook(directory, payload):
     if is_codex(payload):
         return "codex", event, codex_event(directory, payload)
     if claude_env():
+        if event == "Stop":
+            return "claude", event, claude_stop(directory)
         if payload.get("tool_name") != "Bash":
             return "claude", event, "not-bash"
         if event == "PostToolUse":

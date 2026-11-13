@@ -62,6 +62,8 @@ Managed CLI rows focus the window already showing their pane, or open a window o
 click on a status-line tab switches agents. An agent shows in at most one local viewer; selecting one that another
 viewer shows points at that viewer instead. An attach from another machine (`--host`) always opens a viewer of its
 own. `"viewer_duplicates": true` in `~/.config/agent-eta/config.json` allows duplicates.
+An idle session whose only open entries are reminders not due yet is listed with the working sessions;
+`"reminder_sessions": "needs_you"` in the same file keeps it under Needs you.
 Existing desktop threads open in the app. Unmanaged CLI sessions remain visible but must be closed and resumed with
 `agent-eta account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` before cross-provider handoff.
 Resuming a session with a live writer is refused; a session that only an open ETA keeps listed has none.

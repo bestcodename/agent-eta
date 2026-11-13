@@ -66,7 +66,10 @@ priority.
     sessions as soon as one waits, otherwise to idle plus overdue, and leaves out dormant sessions and those in
     state `unknown`. So the badge never counts all sessions and switches meaning with the light. Next time it looks
     wrong, save `agent-eta list --json` and a screenshot of the badge and popup, then decide whether the count
-    or the expectation is off. Fix with a regression case in `test_model.py` (ca. 1 Stunde)
+    or the expectation is off. The same snapshot settles a Claude Code session shown under Needs you between
+    turns while its background task ran (2026-11-12, not reproduced on 2.1.323 on 2026-11-13, where the registry
+    reported `shell` and the session stayed in Working). Fix with a regression case in `test_model.py`
+    (ca. 1 Stunde)
 19. (low, bug) A remote viewer that agent-eta did not open with its own argv is never focused. `viewer()` in
     `agent_eta_remote.py` compares every argument after `ssh` exactly against
     `ssh -t HOST ~/.local/bin/agent-eta attach SOURCE`. On 2026-11-05 a Konsole on stefan-desktop, opened at 16:16:20
@@ -188,12 +191,6 @@ priority.
     stefan-notebook ended with `FAILED (failures=1)` and four reruns passed; the failing test was not captured. On the
     next failure, record its name with `python3 -m unittest discover -s . 2>&1 | grep -E '^(FAIL|ERROR):'` and fix
     the race behind it (ca. 1 hour)
-35. (proposal) An idle session whose only open entries are `agent-eta add` reminders due in the future is listed
-    under "needs you", although it needs nothing until they are due, because a reminder alone is no activity
-    (docs/agent-eta.md, session states). On 2026-11-12 at 04:30 session d4aa188d had only reminder add-00d6b153,
-    due 05:47, and the user asked twice why it showed under "needs you". Proposal: list such sessions with the
-    working ones or in a group of their own with the next due time; an overdue reminder moves the session back to
-    "needs you". Cover list order, the widget section and the tray badge count with tests (ca. 1 hour 30 minutes)
 36. (proposal) Expand the usage progress bar's time span across repeated quota resets, requested on
     2026-11-12. For `n` seven-day usage periods, show a span of `n × 7 days` instead of always showing seven
     days. Anchor the expanded timeline to the actual reset deadlines of all relevant usage limits, including
@@ -201,12 +198,3 @@ priority.
     Define how the period count initializes, increments and persists, and keep every reset boundary and the
     current period's usage readable. Cover differing deadlines, the first period, multiple resets and missing
     history with tests (ca. 2 hours)
-37. (proposal) A Claude Code session that ended its turn while its own background task runs can show under
-    "needs you" and keep an expired turn ETA. On 2026-11-12 the user asked twice about a session whose
-    sequential test run held a live pid: it appeared under "needs you" between turns, and its turn ETA, set in an
-    earlier turn and due 19:04, was still listed at 20:59 and made the session yellow until `agent-eta turn
-    --done`. `turn_ended()` in `agent_eta_model.py` ends a turn only on `idle` or `stopped`, and `waiting` always
-    ranks first in `session_sort_key()`. Suspected but unmeasured: Claude Code reports `waiting` with
-    `waitingFor` `input needed` after a turn, not `idle`. Measure it first from `~/.claude/sessions/<pid>.json`
-    after a turn ends; if confirmed, treat `input needed` like `idle` for turn ends and for a session with a
-    running task, with tests (ca. 1 hour 30 minutes)

@@ -3,6 +3,7 @@
   "labels": {
     "dormant_after": 7200,
     "question_open": "working, question open",
+    "reminder_pending": "idle, reminder pending",
     "sections": [
       "Needs you",
       "Working",
@@ -135,6 +136,7 @@
       "activity_label": "working",
       "activity_state": "working",
       "agent": "claude",
+      "awaits_reminder": false,
       "cwd": "/work",
       "dormant": false,
       "due": 1760000030,
@@ -171,6 +173,7 @@
       "activity_label": "working",
       "activity_state": "working",
       "agent": "claude",
+      "awaits_reminder": false,
       "cwd": "/work",
       "dormant": false,
       "due": null,

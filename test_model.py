@@ -99,10 +99,47 @@ class Activity(unittest.TestCase):
         snap = build(sessions=[owner, other], tasks=[task("wait", holder=None, owner=dict(owner, id="s-old"))])
         self.assertEqual([t["id"] for t in by_key(snap)["claude:100"]["tasks"]], ["wait"])
 
-    def test_an_idle_owner_with_only_a_manual_wait_stays_idle(self):
+    def test_an_idle_owner_with_an_overdue_reminder_needs_you(self):
         owner = session(state="idle")
-        [found] = build(sessions=[owner], tasks=[task("wait", holder=None, owner=owner)]).sessions
+        snap = build(sessions=[owner], tasks=[task("wait", holder=None, owner=owner, started=NOW - 900)])
+        [found] = snap.sessions
         self.assertEqual((found["activity_state"], found["section"], found["light"]), ("idle", 0, "caution"))
+        self.assertEqual(snap.summary["badge_count"], 1)
+
+    def test_an_idle_owner_with_only_future_reminders_works_until_one_is_due(self):
+        owner = session(state="idle")
+        snap = build(sessions=[owner], tasks=[task("wait", holder=None, owner=owner, started=NOW)])
+        [found] = snap.sessions
+        self.assertEqual((found["activity_state"], found["section"], found["light"], found["activity_label"]),
+                         ("working", 1, "active", model.REMINDER_LABEL))
+        self.assertEqual((found["reported_state"], found["awaits_reminder"]), ("idle", True))
+        self.assertEqual((snap.summary["badge_count"], snap.summary["idle"]), (0, 0))
+
+    def test_reminders_need_you_keeps_the_old_place(self):
+        owner = session(state="idle")
+        snap = build(sessions=[owner], tasks=[task("wait", holder=None, owner=owner, started=NOW)],
+                     reminders_need_you=True)
+        [found] = snap.sessions
+        self.assertEqual((found["activity_state"], found["section"], found["light"]), ("idle", 0, "caution"))
+        self.assertEqual(snap.summary["badge_count"], 1)
+
+    def test_a_reminder_session_sorts_among_working_by_its_eta(self):
+        resting = session(pid=100, state="idle")
+        busy = session(pid=200, state="working")
+        snap = build(sessions=[busy, resting],
+                     tasks=[task("wait", holder=None, owner=resting, started=NOW, eta=300),
+                            task("job", owner=busy, started=NOW, eta=1200)])
+        self.assertEqual([(s["key"], s["section"]) for s in snap.sessions], [("claude:100", 1), ("claude:200", 1)])
+
+    def test_one_overdue_or_open_ended_reminder_brings_the_session_back(self):
+        for late in (task("late", holder=None, started=NOW - 900), task("open", holder=None, eta=None)):
+            with self.subTest(late=late["id"]):
+                owner = session(state="idle")
+                late["session"] = {"id": owner["id"], "pid": owner["pid"]}
+                late["agent"] = "claude"
+                [found] = build(sessions=[owner], tasks=[task("soon", holder=None, owner=owner, started=NOW),
+                                                         late]).sessions
+                self.assertEqual((found["activity_state"], found["section"]), ("idle", 0))
 
     def test_a_pair_task_older_than_a_finished_turn_is_pruned(self):
         owner = session(agent="codex", pid="t-1", state="idle", since=NOW - 10)
@@ -309,6 +346,7 @@ class Contract(unittest.TestCase):
         for key in ("labels", "summary", "sections", "usage_groups", "notification_signals", "accounts"):
             self.assertIn(key, data)
         self.assertEqual(data["labels"]["dormant_after"], model.DORMANT_AFTER)
+        self.assertEqual(data["labels"]["reminder_pending"], model.REMINDER_LABEL)
         self.assertTrue(all(isinstance(s["tasks"], list) and "pids" in s for s in data["sessions"]))
         known = {s["key"] for s in data["sessions"]}
         self.assertTrue(all(key in known for section in data["sections"] for key in section["session_keys"]))

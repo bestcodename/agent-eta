@@ -58,8 +58,10 @@ The FOR column says how long a session has been in its state. The order follows 
 **waiting** means it needs you for a permission prompt, a question dialog or another dialog, and those sessions come
 first. **idle** sessions follow, most recently active first, because each of them waits for your next prompt.
 **working** sessions come next, overdue ones first, then by remaining time and then those without an ETA. An idle
-session that still has a verified background task running counts as working. A manual reminder alone does not
-establish activity. Without a live owner or holder it appears as **unknown** in the non-working group, keeping its
+session that still has a verified background task running counts as working. An idle session whose only open
+entries are reminders not due yet is listed with the working sessions as "idle, reminder pending", and the first
+overdue or open-ended reminder brings it back. `"reminder_sessions": "needs_you"` in `config.json` keeps it under
+Needs you. A reminder alone does not establish activity otherwise. Without a live owner or holder it appears as **unknown** in the non-working group, keeping its
 label, deadline and Mark done action. It contributes no working count, tray activity or progress indicator. A **stopped** Codex thread ended its turn with an
 error, and the reason stands in brackets. When the reason is a usage limit, REMAINING and DUE count down to the reset
 of the exhausted window, and the thread comes last, because nothing can be done before the reset. Once the reset has
@@ -127,7 +129,9 @@ and the web app that TODO.md proposes. Since 0.67.0 it carries what the widget w
 
 **Claude Code** writes the state of every session to `~/.claude/sessions/<pid>.json` itself, as `status` with
 `statusUpdatedAt`, and `waitingFor` while it waits. agent-eta maps `busy` and `shell` to working, `waiting` to waiting
-and `idle` to idle, and shows `waitingFor` in brackets. No hook is involved, so every running session is listed,
+and `idle` to idle, and shows `waitingFor` in brackets. Between turns, Claude Code 2.1.323 reports `shell` rather
+than `idle` while a background shell runs (measured 2026-11-13), so the session stays working until the shell
+ends. No hook is involved, so every running session is listed,
 including the ones started before agent-eta existed.
 
 With at least two accounts in the registry of [claude-account](https://github.com/bestcodename/ai/blob/main/docs/claude-account.md), agent-eta reads the `sessions/` and
@@ -178,8 +182,9 @@ anyone works in, so it is never listed, and its hook record is removed whenever 
 in that directory but has a row in the `threads` table is an ordinary thread and stays listed.
 
 **Turn ETAs** live in `turns/`. `agent-eta turn --eta 20m --label "…"` records one for the calling session, and `agent-eta
-turn --done` clears it. It ends on its own once the session goes idle or stops, and for Codex `UserPromptSubmit`, `Stop` and
-`Interrupt` delete it as well.
+turn --done` clears it. It ends on its own once the session goes idle or stops. The Claude Code `Stop` hook deletes it at the turn's
+end, because the registry reports `shell` instead of `idle` while a background shell runs, and for Codex
+`UserPromptSubmit`, `Stop` and `Interrupt` delete it as well.
 
 **dsh** (`@deepseek-ai/dsh`, here as `dsh web` through `ollama launch dsh`) needs no hook and no config change, because
 it logs every session itself. Each session is a folder
@@ -335,7 +340,7 @@ and `list --json` publishes it as contract schema 1, which the widget validates 
 | Key | Content |
 |---|---|
 | `schema_version` | `1`. A listing without it makes the widget report "agent-eta CLI too old, update it" |
-| `labels` | the state and section labels and `dormant_after` in seconds |
+| `labels` | the state and section labels, `question_open`, `reminder_pending` and `dormant_after` in seconds |
 | `sessions` | every session with `key`, `reported_state` as its agent reported it, `activity_state` as it effectively is, `activity_label`, `light` (`attention`, `caution`, `active`, `off`), `dormant`, `section`, its ETA fields, its task ids and `handoff`; a session of a remote host also has `host`, and its `tmux` navigation carries that `host` |
 | `tasks`, `usage`, `accounts` | the tasks, usage windows and accounts, each with a `key` |
 | `summary` | the counts per state, `light`, `badge_count`, `status` and `progress_session_key` for the tray icon |
@@ -344,7 +349,8 @@ and `list --json` publishes it as contract schema 1, which the widget validates 
 
 Keys are `claude:<pid>`, `codex:<thread>`, `task:<id>`, `window:<agent>:<minutes>`, `account:<id>` and
 `usage:<agent>`, and a remote host's session and task keys and task ids start with `remote:<host>/`. An idle session that owns verified background work is working, while a reminder without a holder
-proves nothing. A Codex turn that runs on while an async question waits stays green in Working and reads
+proves nothing. An idle session whose only entries are reminders not due yet has `awaits_reminder` set, works with
+the label from `labels.reminder_pending` and stays out of `badge_count`, unless `reminder_sessions` says `needs_you`. A Codex turn that runs on while an async question waits stays green in Working and reads
 "working, question open". It contributes to the working count, with no waiting badge or notification; after the turn
 ends, the unanswered question contributes to Needs you instead. Permission waits stay red.
 The widget sends a notification only between two valid listings, for a rising signal with `notify_on_new` or for a
@@ -549,7 +555,7 @@ systemctl --user restart plasma-plasmashell.service
 
 The hooks are wired by hand, because Codex skips a new hook until it is trusted in its own settings.
 
-- `~/.claude/settings.json` gets a `PostToolUse` group with the matcher `Bash` and the command
+- `~/.claude/settings.json` gets a `PostToolUse` group with the matcher `Bash` and a `Stop` hook, both with the command
   `/home/stefanr/.local/bin/agent-eta hook`, as shown in [claude-code-config.md](https://github.com/bestcodename/ai/blob/main/docs/claude-code-config.md).
 - `~/.codex/hooks.json` gets a `PreToolUse` and a `PostToolUse` group, each with the matcher `Bash` and the same command,
   and one more group without a matcher for each of `UserPromptSubmit`, `Stop`, `PermissionRequest`, `Interrupt`
@@ -633,7 +639,8 @@ and what the hook did. The command text never goes there. The log rotates at 256
   A dot in the orb's colours marks each session's
   state, red waiting, yellow idle or overdue, green working and grey stopped or unknown. An idle session with a
   verified running background task counts as working for the dot and the orb. A holderless `agent-eta add` reminder
-  does not establish activity by itself. The line below the title says how long the
+  does not establish activity by itself, but a session whose reminders are all still ahead shows green as "idle,
+  reminder pending" until one is due. The line below the title says how long the
   state has lasted and when it began, as in `idle for 1h 5m (17:25)`. The dot replaced play and pause icons in 0.71.0,
   because those read as buttons that start or stop the session. The usage windows follow, with one bar per window that
   fills with the used share. A tick marks the elapsed share of the window, so a fill past the tick runs out before the
@@ -761,7 +768,8 @@ plasmawindowed com.github.bestcodename.agenteta    # the overview in a window, w
   sleep within a second of its end, and the list was empty when the last one finished.
 - Claude Code 2.1.288 writes `status` as `busy`, `shell`, `waiting` or `idle`, with `waitingFor` while it waits. The
   binary names `input needed`, `dialog open`, `worker request` and `sandbox request` as reasons, and a permission or
-  question dialog brings its own. `shell` was measured on a session whose foreground Bash command was running.
+  question dialog brings its own. `shell` was measured on a session whose foreground Bash command was running, and on 2.1.323
+  between turns while a background shell ran (2026-11-13).
 - The Codex 0.159.2 binary names the hook events `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`,
   `PostCompact`, `SessionStart`, `SessionEnd`, `SubagentStart`, `SubagentStop` and `Interrupt`, besides
   `UserPromptSubmit` and `Stop`. `config.toml` keys hook trust as `<file>:<event>:<group>:<hook>`.
