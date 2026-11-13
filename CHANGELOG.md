@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.9.2] - 2026-11-13
+
+### Fixed
+
+- Readers in another PID namespace cannot prune shared host sessions, tasks or turn ETAs
+- Codex rows remain registered when sandbox commands attempt a listing
+
+## [2.9.1] - 2026-11-13
+
 ### Added
 
 - TODO item 38 proposes renaming the project and repository to Agent Desk
@@ -14,6 +23,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - TODO items 5 and 16 record title and login reproduction limits measured on 2026-11-13
+
+### Fixed
+
+- Remote navigation recognizes existing SSH viewers using PATH or an absolute path for the remote CLI
+- Remote attachment documentation reflects pre-prompt listing of managed Codex resumes
+
+### Removed
+
+- TODO item 19
 
 ## [2.9.0] - 2026-11-13
 

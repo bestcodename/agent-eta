@@ -12,6 +12,8 @@ Codex launch client; its account menu also offers the other client for a single 
 `agent-eta handoff` moves a session between Claude Code and Codex with its plan, by hand or at a usage limit.
 
 Hooks and the agents' own session registries fill the list, so an agent only has to write down the ETA it states anyway.
+Run process-aware listing on the host. A sandbox with a different PID namespace is refused before it can delete
+host session records; explicit `add` and `done` commands remain usable inside the sandbox.
 
 ## Install
 
@@ -64,6 +66,7 @@ Managed CLI rows focus the window already showing their pane, or open a window o
 click on a status-line tab switches agents. An agent shows in at most one local viewer; selecting one that another
 viewer shows points at that viewer instead. An attach from another machine (`--host`) always opens a viewer of its
 own. `"viewer_duplicates": true` in `~/.config/agent-eta/config.json` allows duplicates.
+Remote navigation reuses matching SSH viewers opened manually with `agent-eta` on PATH or through a full path.
 An idle session whose only open entries are reminders not due yet is listed with the working sessions;
 `"reminder_sessions": "needs_you"` in the same file keeps it under Needs you.
 Existing desktop threads open in the app. Unmanaged CLI sessions remain visible but must be closed and resumed with

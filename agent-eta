@@ -56,7 +56,9 @@ dsh's own session logs, without an ETA. See docs/agent-eta.md.
 
 Session and task state lives in /tmp/agent-eta-<uid>, overridable with AGENT_ETA_DIR. /tmp is the only
 directory that both the Codex sandbox and the host can write, and the files may vanish at
-reboot, because every session they describe does too.
+reboot, because every session they describe does too. Process-aware readers must share the runtime's
+PID namespace; sandbox readers are refused before they can prune host records. Explicit add/done
+writes remain available inside the sandbox.
 
 Every entry names a holder, which is how the reader decides on its own whether the task
 still runs, so a forgotten `done` does not leave a ghost behind:
@@ -400,6 +402,34 @@ def state_dir():
     return path
 
 
+def require_process_view(directory):
+    """Only the runtime's PID namespace may collect and prune process-backed state.
+
+    Sandbox commands share /tmp with the host but cannot see its PIDs. Explicit add/done writes
+    remain usable there. A separate AGENT_ETA_DIR can host an isolated runtime for tests.
+    """
+    path = os.path.join(directory, ".pid-namespace")
+    try:
+        namespace = os.readlink("/proc/self/ns/pid")
+        if not os.path.exists(path):
+            # Legacy host state has no marker yet. In the measured Codex sandbox PID 1 is Codex,
+            # so it must not claim the shared default runtime before the host's first poll.
+            default = "/tmp/agent-eta-%d" % os.getuid()
+            if os.path.realpath(directory) == os.path.realpath(default) and comm_of(1) == "codex":
+                raise StateDirError("host state is unavailable in this PID namespace; run agent-eta list on the host")
+            try:
+                with open(path, "x", encoding="utf-8") as handle:
+                    handle.write(namespace + "\n")
+            except FileExistsError:
+                pass
+        with open(path, encoding="utf-8") as handle:
+            expected = handle.read().strip()
+    except OSError:
+        raise StateDirError("cannot verify the runtime's PID namespace; run agent-eta list on the host") from None
+    if expected != namespace:
+        raise StateDirError("state belongs to another PID namespace; run agent-eta list on the host")
+
+
 def entry_path(directory, entry_id):
     return os.path.join(directory, entry_id + ".json")
 
@@ -492,6 +522,7 @@ def alive(entry, path, now):
 
 def load_entries(directory, now, prune=True):
     """Every live entry with its path. Dead and unreadable entries are deleted."""
+    require_process_view(directory)
     found = []
     for name in sorted(os.listdir(directory)):
         if not name.endswith(".json") or name.startswith("."):
@@ -943,6 +974,7 @@ def codex_sessions(directory, now, names, prune=True, threads=None):
     thread is left out but keeps its record, so it comes back once it is unarchived. The sub-agent
     Codex consolidates its memories in is no session and is dropped along with its record.
     """
+    require_process_view(directory)
     found = []
     for path in json_files(os.path.join(directory, "sessions")):
         record = read_json(path)
@@ -1155,6 +1187,7 @@ def turn_path(directory, agent, session):
 def load_turns(directory, now, sessions, prune=True):
     """The turn ETA of every session by session key. A turn whose session went idle or
     stopped is over."""
+    require_process_view(directory)
     by_key = {session_key(s["agent"], s): s for s in sessions}
     found = {}
     for path in json_files(os.path.join(directory, "turns")):
@@ -1217,6 +1250,7 @@ def collect_sessions(directory, now):
 def snapshot(directory, now, tasks=None, usage=None, accounts=()):
     """The model snapshot of everything running. A Codex command left without PostToolUse when its
     turn ended is deleted here."""
+    require_process_view(directory)
     tasks = collect_tasks(directory, now) if tasks is None else tasks
     sessions, dsh_tasks, turns = collect_sessions(directory, now)
     for session in sessions:
@@ -1434,6 +1468,7 @@ def session_json(session):
 def cmd_list(args):
     now = time.time()
     directory = state_dir()
+    require_process_view(directory)
     store = accounts_api.AccountStore()
     account_data = store.snapshot(claude_usage() + codex_usage(), now)
     store.maybe_refresh(os.path.realpath(__file__), now)
