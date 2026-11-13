@@ -159,6 +159,49 @@ export function windowTicks(minutes) {
     return Array.from({length: count - 1}, (_, index) => (index + 1) / count);
 }
 
+// Absolute times for a usage axis, anchored to its recorded deadline. Calendar days use local
+// midnight, including 23/25-hour DST days; shorter windows mark elapsed real hours on the local clock.
+export function windowTimeMarks(window) {
+    const minutes = window && window.minutes;
+    const end = window && window.resets_at;
+    if (!Number.isFinite(minutes) || minutes <= 0 || !Number.isFinite(end) || end <= 0) return [];
+    const start = end - minutes * 60;
+    if (!Number.isFinite(new Date(start * 1000).getTime()) || !Number.isFinite(new Date(end * 1000).getTime())) return [];
+    const days = minutes > 1440;
+    const marks = [{at: start, fraction: 0, days}];
+    const next = new Date(start * 1000);
+    if (days) next.setHours(24, 0, 0, 0);
+    else next.setMinutes(0, 0, 0);
+    let at = next.getTime() / 1000;
+    if (!days) at += 3600;
+    // The current supported limits are five hours and seven days. Bound malformed/extreme inputs.
+    for (let count = 0; at < end && count < 64; count++) {
+        if (at > start) marks.push({at, fraction: (at - start) / (end - start), days});
+        if (days) {
+            next.setDate(next.getDate() + 1);
+            at = next.getTime() / 1000;
+        } else at += 3600;
+    }
+    return marks.concat([{at: end, fraction: 1, days}]);
+}
+
+// Fit measured label widths without overlap or clipping. Keep the actual start and reset first;
+// add interior labels only when they fit between those endpoints. All tick positions stay exact.
+export function fitTimeLabels(marks, width, gap) {
+    if (!Number.isFinite(width) || width <= 0 || marks.length < 2) return [];
+    const positioned = marks.map(mark => Object.assign({}, mark, {
+        x: Math.max(0, Math.min(width - mark.width, width * mark.fraction - mark.width / 2))}));
+    const first = positioned[0], last = positioned[positioned.length - 1];
+    if (last.width > width) return [];
+    const fitted = first.width + gap <= last.x ? [first] : [];
+    for (const mark of positioned.slice(1, -1)) {
+        const previous = fitted[fitted.length - 1];
+        if (mark.x >= (previous ? previous.x + previous.width + gap : 0)
+                && mark.x + mark.width + gap <= last.x) fitted.push(mark);
+    }
+    return fitted.concat([last]);
+}
+
 export function percent(value) {
     return value === null || value === undefined ? "?" : `${Math.round(value)}%`;
 }

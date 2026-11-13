@@ -146,6 +146,7 @@ PlasmaExtras.Representation {
                     now: full.now
                     fade: Plasmoid.configuration.blendYellow ? Plasmoid.configuration.blendWidth / 100 : 0
                     yellow: Plasmoid.configuration.yellowWidth / 100
+                    timeLabels: Plasmoid.configuration.showUsageTimeLabels
                     onAccountActionRequested: (action, account) => root.accountAction(action, account)
                     onMenuRequested: (account, item, x, y) => accountMenu.show(account, item, x, y)
                 }

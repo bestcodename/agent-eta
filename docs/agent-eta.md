@@ -694,17 +694,19 @@ and what the hook did. The command text never goes there. The log rotates at 256
   state has lasted and when it began, as in `idle for 1h 5m (17:25)`. The dot replaced play and pause icons in 0.71.0,
   because those read as buttons that start or stop the session. The usage windows follow, with one bar per window that
   fills with the used share. A tick marks the elapsed share of the window, so a fill past the tick runs out before the
-  reset. Thinner and fainter ticks mark every hour of the 5-hour window and every day of the 7-day one, counted from
-  the window's start, so the elapsed tick steps onto one of them at each full hour or day. The fill comes in traffic-light bands. With `d` as the share by which the usage runs past the tick and `k` as
+  reset. Faint ticks mark local hours of the 5-hour window and local calendar days of the 7-day one. Their positions
+  derive from each recorded reset and window length, including daylight-saving transitions. Labels below the bar
+  show local hours or weekdays, with full dates and timezone names on hover. Start and reset labels take priority;
+  interior labels thin out according to measured font widths. Unknown deadlines have no time labels. The default-on
+  **Time labels on usage bars** setting hides labels independently of the usage block. Reset text sits above the bar,
+  leaving its full width for the timeline. The fill comes in traffic-light bands. With `d` as the share by which the usage runs past the tick and `k` as
   the half-width of the yellow band, it is green up to `k·d` below the tick, yellow from there to `k·d` above it and red
   over the rest up to the usage. `k` is a setting, 66% by default. At 80% usage with the tick at 50% and `k` at 1/3,
   the bar is green up to 40%, yellow up to 60% and red up to 80%. Usage at or below the tick stays green throughout. A
   reached limit is yellow up to the tick and red from there, and a window without a known reset keeps one colour, red
   when reached and green otherwise. The yellow band of a bar that is not reached fades into green and red by default,
-  over a share of each half of the band that the settings set, so 100% leaves pure yellow only at the tick. The bands
-  are painted on a `Canvas` as separate rectangles, because `QGradient` drops a second stop at the position of an
-  earlier one and a hard edge needs two. Each band runs on to the end of the fill and the next one paints over it, so
-  two antialiased edges never meet on the same pixel and leave the track showing through between them.
+  over a configurable share of each half, so 100% leaves pure yellow only at the tick. Overlapping `Canvas`
+  rectangles preserve hard edges and avoid gaps that gradients or adjacent antialiased edges can leave.
   Every reset carries its countdown, as in `56% · resets in 49m (18:30)`. The line under an account's name, beside the
   freshness of its reading, holds its highest used share and the reset that comes first among its windows, in the
   same form, and an account whose limit is reached reads `blocked · resets in 12h 13m (24:00)` with the reset that
