@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-11-13
+
+### Fixed
+
+- Completed Codex command tasks disappear during active turns when their PostToolUse cleanup was missed
+- Native completion reconciliation preserves active tasks and manual reminders
+
 ## [2.10.0] - 2026-11-13
 
 ### Added

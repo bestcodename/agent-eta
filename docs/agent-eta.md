@@ -351,6 +351,13 @@ then the desktop bundle at `/usr/lib/chatgpt/resources/codex`.
 
 ### The list contract
 
+Before building a snapshot, the collector reconciles pair-held Codex command tasks against their own thread's
+native rollout. An `event_msg` with `item_completed`, a `CommandExecution` item, the exact command ID and status
+`completed` or `failed` proves that a missed PostToolUse task has ended, even while its turn continues.
+The reader streams the rollout because an old missed completion can lie outside the normal transcript tail.
+Missing, unreadable or malformed evidence preserves the task. PID and lock holders and manual reminders keep
+their existing lifecycle. The existing end-of-turn cleanup remains a fallback for pair tasks.
+
 Process-aware collectors record their runtime's PID namespace in `.pid-namespace` under the state directory.
 A reader from a different namespace fails before collecting or pruning sessions, tasks or turn ETAs. Run `list`
 on the host; `add` and `done` remain available inside the Codex sandbox. An isolated runtime can use its own

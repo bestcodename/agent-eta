@@ -1249,9 +1249,14 @@ def collect_sessions(directory, now):
 
 def snapshot(directory, now, tasks=None, usage=None, accounts=()):
     """The model snapshot of everything running. A Codex command left without PostToolUse when its
-    turn ended is deleted here."""
+    native execution or turn ended is deleted here."""
     require_process_view(directory)
     tasks = collect_tasks(directory, now) if tasks is None else tasks
+    from agent_eta_commands import finished_tasks
+    finished = finished_tasks(directory, tasks, codex_rollout)
+    for task_id in finished:
+        remove(entry_path(directory, task_id))
+    tasks = [task for task in tasks if task["id"] not in finished]
     sessions, dsh_tasks, turns = collect_sessions(directory, now)
     for session in sessions:
         session["gate_reason"] = handoff_gate(session, sessions)[2] if session["agent"] in ("claude", "codex") else None
