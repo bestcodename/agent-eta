@@ -1479,6 +1479,10 @@ def cmd_list(args):
     store.maybe_refresh(os.path.realpath(__file__), now)
     # The snapshot also deletes tasks that ended unseen, so --tasks builds it as well.
     result = snapshot(directory, now, usage=account_data["usage"], accounts=account_data["accounts"])
+    # Diagnostics also cover a source that has already disappeared from the session list.
+    for record in handoff_records().values():
+        if record.get("recovery_required"):
+            print("agent-eta handoff: " + record["error"], file=sys.stderr)
     tasks = list(result.tasks)
     if args.json:
         found = model.listing(result, session_json)
@@ -1943,7 +1947,7 @@ def handoff_inspect(source):
     return None
 
 
-def handoff_batch(agent, target, account):
+def handoff_batch(agent, target, account, account_directory=None):
     """Move every session of `agent` that can be paused to `target`, detached, logging into the handoff
     folder. Each source is reported separately in the log and in its own record."""
     sources = ["%s:%s" % (s["agent"], s["id"]) for s in snapshot(state_dir(), time.time()).sessions
@@ -1953,11 +1957,13 @@ def handoff_batch(agent, target, account):
     command = [sys.executable, os.path.realpath(__file__), "handoff"] + sources + ["--to", target]
     if account and target == "claude":
         command += ["--account", account]
+    elif account_directory and target == "claude":
+        command += ["--account-directory", account_directory]
     spawn_logged(command, os.path.join(handoff_api.handoff_root(), time.strftime("batch-%Y%m%d-%H%M%S.log")))
 
 
 def cmd_handoff(args):
-    env = handoff_api.Env(handoff_inspect, claude_accounts)
+    env = handoff_api.Env(handoff_inspect, claude_accounts, account_directory=getattr(args, "account_directory", None))
     return handoff_api.run(args.sources, args.to, account=args.account, plan_path=args.plan, wait=args.wait,
                            dry_run=args.dry_run, env=env)
 

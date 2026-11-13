@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-11-13
+
+### Added
+
+- Read-only interrupted handoff reporting with recovery instructions and blocked repeat moves
+- Explicit Claude account directory selection for cross-provider handoffs
+- Isolated SIGKILL regression coverage with real tmux scopes and fake providers
+
+### Fixed
+
+- Unnamed account-menu destinations retain their selected directory through trust, launch and registration
+- Source pause uncertainty is persisted before freezing and cleared after confirmed recovery or retirement
+
 ## [2.10.1] - 2026-11-13
 
 ### Fixed

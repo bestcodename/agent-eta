@@ -272,6 +272,13 @@ class Actions(Isolated):
         accounts.account_action(args, lambda *call: moved.append(call))
         self.assertEqual(moved, [("claude", "codex", None), ("codex", "claude", "private")])
 
+    def test_unnamed_claude_account_batch_keeps_the_clicked_directory(self):
+        moved = mock.Mock()
+        args = self.args("handoff", "claude:default", source="codex")
+        account = self.store.find("claude:default")
+        accounts.account_action(args, moved)
+        moved.assert_called_once_with("codex", "claude", None, account_directory=account["directory"])
+
     def test_claude_launch_uses_managed_tmux_and_native_login_stays_native(self):
         self.registered()
         account = self.store.find("claude:work")

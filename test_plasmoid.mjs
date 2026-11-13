@@ -389,6 +389,8 @@ test("rows show a pending or failed handoff and forget a completed one", () => {
     assert.equal(logic.handoffText(at("launched")), "handoff to Codex pending");
     assert.equal(logic.handoffText(at("failed", "did not register")), "handoff to Codex failed: did not register");
     assert.equal(logic.handoffText(at("completed")), "");
+    assert.equal(logic.handoffText(at("interrupted", "Confirm the destination has stopped")),
+        "handoff to Codex interrupted: Confirm the destination has stopped");
     assert.match(logic.detailLine(at("waiting"), 0), /handoff to Codex pending$/);
 });
 

@@ -318,6 +318,13 @@ SCENARIOS = {"empty": lambda: build(), "mixed": mixed, "signals-before": before,
 
 
 class Contract(unittest.TestCase):
+    def test_unresolved_handoff_disables_a_second_move_and_keeps_recovery_instructions(self):
+        record = {"id": "h1", "target": "codex", "state": "interrupted", "recovery_required": True,
+                  "error": "Confirm the destination has stopped before running resume_source"}
+        view = model.handoff_view(session(id="s1"), {"claude:s1": record})
+        self.assertFalse(view["available"])
+        self.assertEqual(view["reason"], record["error"])
+        self.assertEqual(view["status"]["state"], "interrupted")
     def test_handoff_availability_comes_from_the_gate_and_the_latest_record(self):
         sessions = [{"agent": "claude", "id": "s1", "pid": 1, "name": "a", "state": "idle", "since": NOW, "cwd": "/w"},
                     {"agent": "codex", "id": "t1", "name": "b", "state": "idle", "since": NOW, "cwd": "/w",

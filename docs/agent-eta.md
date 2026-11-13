@@ -505,6 +505,13 @@ launcher process group and stops the complete agent scope. Only confirmed cancel
 unconfirmed, `status.json` records `source_paused`, the destination identity and `resume_source`. Inspect and stop
 the destination before using that recovery command. A repeated request refuses unresolved ownership. Never stop
 the shared server to cancel one handoff. SIGKILL of the controller still requires this manual recovery.
+The next listing checks whether the controller still holds its per-source lock. An abandoned prepared or launched
+record, or an unresolved paused source, is shown as `interrupted` with the record path and recovery instructions.
+The probe is read-only and makes no inference about destination cancellation from controller death. It never thaws
+or stops either process. Unknown lock ownership preserves the recorded status. The CLI also emits a diagnostic
+on stderr if the source no longer has a session row. The widget shows the recovery error and disables another
+handoff for that source. Pausing uncertainty is persisted before the freeze, so SIGKILL during that call cannot
+leave a new record claiming that ownership is resolved. A repeated request refuses unfinished ownership.
 
 Local Claude-account moves keep the existing account/transcript migration code and use its
 `CLAUDE_HANDOFF_TERMINAL` extension to call the tmux adapter. A move to another host runs the same adapter there as
@@ -527,6 +534,11 @@ start with "this CLI has no complete local package", measured on 2026-10-20. Nei
 configuration. Without `--account`, the Claude Code account is the first eligible one from `claude-account targets
 --json`, and otherwise the only registered one. A lock per source and the records make a repeated request report the
 earlier move.
+`--account-directory DIR` explicitly selects an existing local Claude account by its configuration directory,
+including an unnamed account. It is mutually exclusive with `--account` and bypasses eligible-account selection.
+Account-menu batches supply it for unnamed destinations. The same directory controls trust checks, the launch's
+`CLAUDE_CONFIG_DIR` and native registration checks. A missing or ambiguous directory is refused before pausing.
+Claude-to-Claude transcript migration still requires a registered account name through `--account`.
 
 Neither client starts unattended in a folder it does not trust yet. Each shows its trust question and waits, and the
 move would end in the registration timeout. The handoff therefore reads the destination's own record before it pauses
