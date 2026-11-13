@@ -120,17 +120,17 @@ priority.
 27. (low) Install Qt 6's `qmltestrunner` on stefan-desktop and add it to the workstation setup of
     [bestcodename/ai](https://github.com/bestcodename/ai). `test_qml.Qml.test_widget_qml` is skipped here on
     2026-11-11 for lack of it, so widget changes are only tested on the notebook (ca. 15 Minuten)
-29. (low, proposal) Audit user-facing defaults and make useful behavior configurable through the existing widget
+29. (next, proposal) Audit user-facing defaults and make useful behavior configurable through the existing widget
     settings and CLI configuration, requested on 2026-11-11. New widget sessions already have a CLI/desktop default
     and a one-launch menu override. Review session-click behavior, terminal and IDE commands, session visibility,
     notification rules and the model, effort and permission settings in #21. Reuse native client settings and
     existing environment overrides; keep process ownership and live-writer checks mandatory. Propose the remaining
     options and their implementation effort after this audit (ca. 2 hours)
-30. (low, proposal) Split widget configuration into sections, requested on 2026-11-11. Use Plasma's existing
+30. (next, proposal) Split widget configuration into sections, requested on 2026-11-11. Use Plasma's existing
     configuration categories in `plasmoid/contents/config/config.qml`; proposed sections are General, Sessions
     and Launching, Appearance, and Notifications. Preserve existing setting keys, defaults and saved values,
     and test that each section loads and saves its controls (ca. 1 hour)
-32. (low, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize settings
+32. (next, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize settings
     in `configGeneral.qml` and the sections proposed in #30, plus account and session context-menu actions in
     `FullRepresentation.qml`; then cover remaining controls and unclear icons, status indicators and abbreviations.
     Explain purpose, effect or disabled state instead of repeating labels. Keep essential information visible and
@@ -182,3 +182,10 @@ priority.
        (`loginctl show-session <id> -p Type -p LockedHint -p IdleHint`), read locally and over the existing BatchMode
        SSH; an ambiguous result falls back to the default, and `DISPLAY` is never forced on another host
        (ca. 2 hours)
+41. (proposal) Close the gaps between the Codex and Claude Code integrations, requested on 2026-11-13. Known
+    gaps are filed as #2 (Codex process match), #15 (handoff without ExitPlanMode approval), #22 (desktop Codex thread
+    drops out) and #33 (Claude lacks the CLI/desktop launch default), and docs/agent-eta.md names more: Claude Code
+    background agents and Monitor tasks are not recorded, a Codex thread shows only after its first hook, the Claude
+    desktop app opens no specific session, and Codex has no plan-mode flag or command description. Proposal: a parity
+    table per feature and provider in docs/agent-eta.md, each gap closed in agent-eta or marked as an upstream limit
+    with its evidence, and closable gaps filed or joined to the items above (ca. 2 hours for the table)
