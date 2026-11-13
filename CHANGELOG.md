@@ -7,14 +7,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-11-13
+
 ### Added
 
+- `agent-eta set` gives a recorded entry a new ETA
 - TODO item 34 for a flaky Python test
 - TODO item 35 for idle sessions with only future reminders under "needs you"
 
 ### Changed
 
 - TODO item 31 extended by the remote attach that reported success without attaching
+
+### Removed
+
+- TODO item 7
 
 ## [2.6.2] - 2026-11-12
 

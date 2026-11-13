@@ -26,14 +26,6 @@ priority.
    `run_inspection_kts` through the PhpStorm MCP server calling `contentManager.setSelectedContent`. Third,
    `ActivateTerminalToolWindow` through MCP, which shows the terminal but not the tab. A plugin is the last
    resort (spike ca. 2 Stunden)
-7. (next) Add `agent-eta set <id> --eta <duration> [--label …]`, which rewrites the ETA of an existing entry.
-   Today `claude_post` records a background task's ETA once from its description, and `add`/`done` can only
-   create or delete entries, so a revised ETA becomes a second entry beside the stale one. On 2026-10-15 a
-   Kochan watcher kept its 8-hour worst case while the Stage deploy it waited for was ten minutes out, and on
-   2026-11-12 a Jami test run whose `syncHistory` binary hung stayed overdue by more than an hour. Cover
-   hook-recorded (`claude-<task>`) and `add` entries in `test_agent_eta.py`, document it in
-   [docs/agent-eta.md](docs/agent-eta.md), and change the global CLAUDE.md ETA rule from "add a new entry" to
-   "update with `set`" (ca. 1 Stunde)
 8. Add a UI setting, enabled by default, for time labels on the Agent ETA modal's usage progress bars.
    Show weekdays for the 7-day bars and hours for the 5-hour bars, aligned with each window's start and
    reset time in the local timezone. Keep the labels readable at the modal's supported widths.

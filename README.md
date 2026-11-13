@@ -42,6 +42,7 @@ It preserves `TERM` and `COLORTERM`; explicitly supplied launcher settings still
 ```sh
 agent-eta                          # sessions, their tasks and the usage windows
 agent-eta add --eta 10m --label "Run the test suite"
+agent-eta set <id> --eta 30m       # a revised ETA replaces the old one
 agent-eta done <id>
 agent-eta turn --eta 20m --label "Long refactor"
 agent-eta list --json --all        # what the widget reads, contract schema 1
