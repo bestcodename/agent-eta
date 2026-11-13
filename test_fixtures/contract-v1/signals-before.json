@@ -248,6 +248,10 @@
       "agent": "codex",
       "ahead": true,
       "elapsed": 99.66666666666667,
+      "exhaustion": {
+        "at": null,
+        "state": "unavailable"
+      },
       "key": "window:codex:300",
       "minutes": 300,
       "pace": 0.3333333333333286,

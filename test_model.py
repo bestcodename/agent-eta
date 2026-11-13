@@ -232,6 +232,53 @@ class Eta(unittest.TestCase):
         self.assertEqual([len(s["session_keys"]) for s in snap.sections], [2, 1, 1, 0])
 
 
+class QuotaExhaustion(unittest.TestCase):
+    def estimate(self, now=NOW, **fields):
+        reading = {"used": 80, "minutes": 300, "resets_at": NOW + 4 * 3600,
+                   "seen_at": NOW, "usage_status": "current"}
+        reading.update(fields)
+        return model.quota_exhaustion(reading, now)
+
+    def test_average_rate_uses_the_reading_time_and_does_not_drift_between_polls(self):
+        expected = {"state": "before_reset", "at": NOW + 900}
+        self.assertEqual(self.estimate(), expected)
+        self.assertEqual(self.estimate(now=NOW + 60), expected)
+        self.assertEqual(self.estimate(now=NOW + 1000), expected)
+        # At the previous sample, 80 percent was used over 30 minutes rather than one hour.
+        self.assertEqual(self.estimate(seen_at=NOW - 1800), {"state": "before_reset", "at": NOW - 1350})
+
+    def test_zero_usage_no_elapsed_time_and_exhaustion_are_explicit(self):
+        self.assertEqual(self.estimate(used=0), {"state": "no_usage", "at": None})
+        self.assertEqual(self.estimate(resets_at=NOW + 5 * 3600), {"state": "insufficient", "at": None})
+        for used in (100, 101):
+            self.assertEqual(self.estimate(used=used), {"state": "exhausted", "at": None})
+
+    def test_reset_before_or_at_exhaustion_means_quota_is_estimated_to_last(self):
+        for used in (20, 10, 1e-300):
+            self.assertEqual(self.estimate(used=used), {"state": "until_reset", "at": None})
+        self.assertEqual(self.estimate(used=21)["state"], "before_reset")
+
+    def test_stale_or_missing_readings_never_get_a_projection(self):
+        self.assertEqual(self.estimate(usage_status="stale"), {"state": "stale", "at": None})
+        self.assertEqual(self.estimate(used=100, usage_status="stale")["state"], "stale")
+        cases = [{"usage_status": None}, {"used": None}, {"used": -1}, {"used": float("nan")},
+                 {"minutes": 0}, {"minutes": True}, {"resets_at": None}, {"resets_at": NOW},
+                 {"resets_at": float("inf")}, {"seen_at": None}, {"seen_at": NOW + 1}, {"seen_at": NOW - 4000}]
+        for fields in cases:
+            with self.subTest(fields=fields):
+                self.assertEqual(self.estimate(**fields), {"state": "unavailable", "at": None})
+
+    def test_each_window_has_an_independent_estimate_without_mutating_inputs(self):
+        windows = [{"agent": "codex", "used": 80, "minutes": 300, "resets_at": NOW + 4 * 3600,
+                    "seen_at": NOW, "usage_status": "current"},
+                   {"agent": "codex", "used": 10, "minutes": 10080, "resets_at": NOW + 6 * 86400,
+                    "seen_at": NOW, "usage_status": "current"}]
+        before = copy.deepcopy(windows)
+        result = model.usage_view(NOW, windows)
+        self.assertEqual([w["exhaustion"]["state"] for w in result], ["before_reset", "until_reset"])
+        self.assertEqual(windows, before)
+
+
 class Usage(unittest.TestCase):
     def test_groups_put_open_agents_before_blocked_ones_and_keep_unread_accounts(self):
         snap = build(usage=[window("claude", used=100.0, resets_in=600), window("codex", minutes=10080, resets_in=9000),

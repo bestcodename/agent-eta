@@ -89,10 +89,12 @@ Item {
             return [{tag: "minimum", width: 380}, {tag: "normal", width: 500}, {tag: "wide", width: 900}];
         }
         function test_usage_rows_at_popup_widths(data) {
-            const row = createTemporaryObject(rowComponent, root, {width: data.width, now: end - 3600, group: {
-                agent: "codex", account: null, reached: false, used: 40, resetBy: null,
-                windows: [{minutes: 300, resets_at: end, used: 40, elapsed: 80, remaining: 3600},
-                          {minutes: 10080, resets_at: end + 86400, used: 40, elapsed: 80, remaining: 90000}]}});
+            const row = createTemporaryObject(rowComponent, root, {width: data.width, now: end - 14400, group: {
+                agent: "codex", account: null, reached: false, used: 80, resetBy: null,
+                windows: [{minutes: 300, resets_at: end, used: 80, elapsed: 20, remaining: 14400,
+                           exhaustion: {state: "before_reset", at: end - 13500}},
+                          {minutes: 10080, resets_at: end + 86400, used: 40, elapsed: 83.33, remaining: 100800,
+                           exhaustion: {state: "until_reset", at: null}}]}});
             verify(row);
             waitForRendering(row);
             const axes = root.named(row, "usageTimeAxis");
@@ -103,6 +105,28 @@ Item {
                 verify(root.named(axis, "usageTimeLabel").length >= 2);
             }
             grabImage(row).save("/tmp/agent-eta-usage-labels-" + data.tag + ".png");
+        }
+
+        function test_estimates_stay_separate_from_resets_data() {
+            return ["before_reset", "until_reset", "stale", "no_usage", "insufficient", "exhausted", "unavailable"]
+                .map(state => ({tag: state, state: state}));
+        }
+        function test_estimates_stay_separate_from_resets(data) {
+            const window = {minutes: 300, resets_at: end, used: 80, elapsed: 20, remaining: 14400,
+                            exhaustion: {state: data.state, at: end - 13500}};
+            const row = createTemporaryObject(rowComponent, root, {width: 380, now: end - 14400, group: {
+                agent: "codex", account: null, reached: false, used: 80, resetBy: null, windows: [window]}});
+            verify(row);
+            waitForRendering(row);
+            const estimate = root.named(row, "usageExhaustion")[0];
+            const reset = root.named(row, "usageReset")[0];
+            verify(estimate);
+            verify(reset);
+            compare(estimate.text, Logic.exhaustionText(window, end - 14400));
+            verify(reset.text.indexOf("resets") >= 0);
+            verify(estimate.text !== reset.text);
+            verify(estimate.paintedWidth <= estimate.width + 1);
+            verify(estimate.implicitHeight > 0);
         }
     }
 }

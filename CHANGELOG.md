@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-11-13
+
+### Added
+
+- Per-window quota exhaustion estimates at the latest current reading's average rate
+- Explicit outcomes for reset-first projections, zero usage, missing history, exhausted quotas and stale readings
+- Additive usage exhaustion fields in contract schema 1 and model, formatting and QML regression coverage
+
 ## [2.12.0] - 2026-11-13
 
 ### Added

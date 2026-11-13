@@ -9,7 +9,8 @@ import "../code/logic.mjs" as Logic
 // One agent's usage windows. Each bar fills with the used share, and its tick marks the share of
 // the window that has passed, so a fill past the tick runs out before the reset. Fainter ticks from
 // windowTimeMarks() mark local hours or calendar days from the actual reset deadline. Optional labels
-// beneath each bar thin themselves to fit, and unknown deadlines have no labels. The fill comes in
+// beneath each bar thin themselves to fit, and unknown deadlines have no labels.
+// Each window also shows the model's average-rate exhaustion estimate, separate from its reset. The fill comes in
 // traffic-light bands from usageBands() in logic.mjs, green below the tick, yellow around it and
 // red where the usage runs far ahead of the time, `yellow` sets the half-width
 // of the yellow band and `fade` blends it. Every reset
@@ -93,6 +94,7 @@ ColumnLayout {
                     opacity: 0.7
                 }
                 PlasmaComponents3.Label {
+                    objectName: "usageReset"
                     Layout.fillWidth: true
                     horizontalAlignment: Text.AlignRight
                     text: modelData.remaining === null || modelData.remaining === undefined
@@ -117,6 +119,15 @@ ColumnLayout {
                 Layout.fillWidth: true
                 visible: usageRow.timeLabels && marks.length > 0
                 marks: timeMarks
+            }
+            PlasmaComponents3.Label {
+                objectName: "usageExhaustion"
+                Layout.fillWidth: true
+                text: Logic.exhaustionText(modelData, usageRow.now)
+                wrapMode: Text.Wrap
+                font: Kirigami.Theme.smallFont
+                textFormat: Text.PlainText
+                opacity: 0.8
             }
         }
     }

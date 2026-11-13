@@ -15,6 +15,8 @@ the source automatically. Confirm the destination has stopped before using the r
 Account-menu handoffs preserve the selected Claude directory even when the account has no registered name.
 Usage bars show local hours for five-hour windows and weekdays for seven-day windows, anchored to each reset.
 **Time labels on usage bars** is enabled by default. Labels adapt to the bar width and can be hidden in settings.
+Each usage window also shows estimated exhaustion at its current average rate, separately from its reset.
+Stale readings have no estimate; windows projected to last until reset say so.
 
 Hooks and the agents' own session registries fill the list, so an agent only has to write down the ETA it states anyway.
 Run process-aware listing on the host. A sandbox with a different PID namespace is refused before it can delete

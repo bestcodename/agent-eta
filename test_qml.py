@@ -39,6 +39,7 @@ class Qml(unittest.TestCase):
         self.assertIn("Runner::test_a_late_answer_never_reaches_the_next_run", result.stdout)
         self.assertIn("Usage::test_time_label_setting_loads_and_saves", result.stdout)
         self.assertIn("Usage::test_usage_rows_at_popup_widths", result.stdout)
+        self.assertIn("Usage::test_estimates_stay_separate_from_resets", result.stdout)
 
 
 if __name__ == "__main__":

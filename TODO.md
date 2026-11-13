@@ -28,13 +28,6 @@ priority.
    `run_inspection_kts` through the PhpStorm MCP server calling `contentManager.setSelectedContent`. Third,
    `ActivateTerminalToolWindow` through MCP, which shows the terminal but not the tab. A plugin is the last
    resort (spike ca. 2 Stunden)
-9. Show an estimated quota exhaustion time for each usage progress bar in the Agent ETA modal, or at least
-   for each account. Derive the average consumption rate from the quota already used and the elapsed time
-   in the current window. Estimate the remaining time as `(100 - usedPercent) / (usedPercent / elapsedTime)`.
-   Prefer a separate estimate per window; an account summary should use the earliest projected exhaustion.
-   Label the result as an estimate at the current average rate and distinguish it from the reset time.
-   Handle zero usage, zero elapsed time, missing or stale readings, and exhausted quotas explicitly.
-   If the window resets before projected exhaustion, show that the quota is estimated to last until reset.
 12. (low) Show a privacy-reduced Agent ETA summary on the locked screen if a supported route keeps it simple. Proposed
     content: counts per state, the nearest ETA and usage percentages with reset times, with no session titles,
     labels, paths, prompts or account names. Candidate routes on Plasma 6.3.6, none tested yet, are an MPRIS player,

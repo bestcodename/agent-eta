@@ -391,6 +391,21 @@ test("usage groups resolve agent-eta's window and account keys", () => {
     assert.equal(logic.accountStatus({auth_state: "logged_out"}, NOW), "Not logged in");
 });
 
+test("exhaustion estimates stay distinct from resets and handle unavailable rates", () => {
+    const at = new Date("2026-11-13T08:24:00+01:00").getTime() / 1000;
+    const text = (state, time = null, now = at - 3600) => logic.exhaustionText({exhaustion: {state, at: time}}, now);
+    assert.equal(text("before_reset", at), "Estimated exhaustion in 1h 0m (08:24) at current average rate.");
+    assert.match(text("before_reset", at, at + 60), /^Estimated exhaustion time passed .*average rate/);
+    assert.equal(text("until_reset"), "Estimated to last until reset at current average rate.");
+    assert.equal(text("exhausted"), "Quota exhausted.");
+    assert.equal(text("no_usage"), "No usage yet. No exhaustion estimate.");
+    assert.equal(text("insufficient"), "No estimate yet. More history needed.");
+    assert.equal(text("stale"), "No estimate. Reading is stale.");
+    for (const value of [null, {}, {exhaustion: {state: "before_reset", at: NaN}}]) {
+        assert.equal(logic.exhaustionText(value, at), "No estimate. No current reading.");
+    }
+});
+
 test("signals notify a new wait, an ETA that ran over and a reset limit, once each", () => {
     const before = fixture("signals-before");
     const after = fixture("signals-after");

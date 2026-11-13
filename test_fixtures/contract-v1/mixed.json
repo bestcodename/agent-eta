@@ -698,6 +698,10 @@
       "agent": "claude",
       "ahead": false,
       "elapsed": 83.33333333333334,
+      "exhaustion": {
+        "at": null,
+        "state": "unavailable"
+      },
       "key": "window:claude:300",
       "minutes": 300,
       "pace": -28.333333333333343,
@@ -711,6 +715,10 @@
       "agent": "claude",
       "ahead": false,
       "elapsed": 33.86243386243386,
+      "exhaustion": {
+        "at": null,
+        "state": "unavailable"
+      },
       "key": "window:claude:10080",
       "minutes": 10080,
       "pace": -13.86243386243386,
@@ -724,6 +732,10 @@
       "agent": "claude/work",
       "ahead": false,
       "elapsed": 50.0,
+      "exhaustion": {
+        "at": null,
+        "state": "unavailable"
+      },
       "key": "window:claude/work:300",
       "minutes": 300,
       "pace": -20.0,
@@ -737,6 +749,10 @@
       "agent": "codex",
       "ahead": true,
       "elapsed": 93.33333333333333,
+      "exhaustion": {
+        "at": null,
+        "state": "unavailable"
+      },
       "key": "window:codex:300",
       "minutes": 300,
       "pace": 6.666666666666671,
@@ -750,6 +766,10 @@
       "agent": "codex",
       "ahead": true,
       "elapsed": 50.39682539682539,
+      "exhaustion": {
+        "at": null,
+        "state": "unavailable"
+      },
       "key": "window:codex:10080",
       "minutes": 10080,
       "pace": 19.603174603174608,
