@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.9.2] - 2026-11-13
+
+### Fixed
+
+- Readers in another PID namespace cannot prune shared host sessions, tasks or turn ETAs
+- Codex rows remain registered when sandbox commands attempt a listing
+
 ## [2.9.1] - 2026-11-13
 
 ### Added

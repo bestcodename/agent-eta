@@ -12,6 +12,8 @@ Codex launch client; its account menu also offers the other client for a single 
 `agent-eta handoff` moves a session between Claude Code and Codex with its plan, by hand or at a usage limit.
 
 Hooks and the agents' own session registries fill the list, so an agent only has to write down the ETA it states anyway.
+Run process-aware listing on the host. A sandbox with a different PID namespace is refused before it can delete
+host session records; explicit `add` and `done` commands remain usable inside the sandbox.
 
 ## Install
 

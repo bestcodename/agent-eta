@@ -195,7 +195,7 @@ class Holders(StateTest):
         self.put("reused", holder={"type": "pid", "pid": os.getpid(), "start": str(int(start) + 1)})
         self.put("dead", holder={"type": "pid", "pid": self.dead_pid(), "start": "1"})
         self.assertEqual(self.ids(), ["live"])
-        self.assertEqual(sorted(os.listdir(self.dir)), ["live.json"])
+        self.assertEqual(sorted(os.listdir(self.dir)), [".pid-namespace", "live.json"])
 
     def test_lock_holder(self):
         entry = eta.make_entry("locked", "other", "x", 60, {"type": "lock"}, "run")
@@ -220,7 +220,7 @@ class Holders(StateTest):
         pathlib.Path(self.dir, "broken.json").write_text("{half")
         pathlib.Path(self.dir, "list.json").write_text("[]")
         self.assertEqual(self.ids(), [])
-        self.assertEqual(os.listdir(self.dir), [])
+        self.assertEqual(os.listdir(self.dir), [".pid-namespace"])
 
     def test_state_dir_must_be_a_directory(self):
         blocker = self.root / "file"
@@ -239,7 +239,7 @@ class Commands(StateTest):
         tasks = json.loads(done.stdout)["tasks"]
         self.assertEqual([t["label"] for t in tasks], ["probe"])
         self.assertEqual(tasks[0]["holder"], {"type": "lock"})
-        self.assertEqual(os.listdir(self.dir), [])
+        self.assertEqual(os.listdir(self.dir), [".pid-namespace"])
 
     def test_run_passes_the_exit_code_through(self):
         self.assertEqual(self.cli("run", "--eta", "1m", "--", sys.executable, "-c",
@@ -431,6 +431,51 @@ class Hooks(StateTest):
 
 
 class Sessions(StateTest):
+    def test_foreign_pid_namespace_cannot_collect_or_prune_shared_records(self):
+        marker = pathlib.Path(self.dir, ".pid-namespace")
+        marker.write_text("pid:[foreign]\n")
+        self.put("background", holder={"type": "pid", "pid": 2147483647})
+        path = eta.codex_session_path(self.dir, "foreign-thread")
+        eta.write_atomic(path, {"id": "foreign-thread", "updated": int(time.time()),
+                                "app": {"pid": 2147483647, "start": "foreign"}})
+        before = {p: p.read_bytes() for p in pathlib.Path(self.dir).rglob("*.json")}
+        collectors = (lambda: eta.snapshot(self.dir, time.time()),
+                      lambda: eta.load_entries(self.dir, time.time()),
+                      lambda: eta.codex_sessions(self.dir, time.time(), {}, threads={}),
+                      lambda: eta.load_turns(self.dir, time.time(), []))
+        for collect in collectors:
+            with self.subTest(collect=collect), self.assertRaisesRegex(eta.StateDirError, "PID namespace"):
+                collect()
+            self.assertEqual({p: p.read_bytes() for p in pathlib.Path(self.dir).rglob("*.json")}, before)
+        result = self.cli("list", "--json")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("PID namespace", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_own_pid_namespace_still_prunes_ended_tasks(self):
+        marker = pathlib.Path(self.dir, ".pid-namespace")
+        marker.write_text(os.readlink("/proc/self/ns/pid") + "\n")
+        self.put("ended", holder={"type": "pid", "pid": 2147483647})
+        self.assertEqual(eta.load_entries(self.dir, time.time()), [])
+        self.assertFalse(pathlib.Path(self.dir, "ended.json").exists())
+
+    def test_codex_pid_one_cannot_claim_legacy_default_runtime(self):
+        with mock.patch.object(eta.os.path, "realpath", return_value="/host-state"), \
+                mock.patch.object(eta, "comm_of", return_value="codex"), \
+                self.assertRaisesRegex(eta.StateDirError, "PID namespace"):
+            eta.require_process_view(self.dir)
+        self.assertFalse(pathlib.Path(self.dir, ".pid-namespace").exists())
+
+    def test_explicit_add_and_done_work_from_a_foreign_pid_namespace(self):
+        pathlib.Path(self.dir, ".pid-namespace").write_text("pid:[foreign]\n")
+        added = self.cli("add", "--eta", "5m", "--label", "sandbox wait")
+        self.assertEqual(added.returncode, 0, added.stderr)
+        task = pathlib.Path(self.dir, added.stdout.strip() + ".json")
+        self.assertTrue(task.exists())
+        done = self.cli("done", added.stdout.strip())
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertFalse(task.exists())
+
     def register(self, pid=None, status="busy", since=None, **fields):
         """A Claude Code registry record for a live pid, as Claude Code 2.1.288 writes it."""
         pid = os.getpid() if pid is None else pid
