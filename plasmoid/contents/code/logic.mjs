@@ -388,6 +388,24 @@ function known(window) {
     return !!window && window.remaining !== null && window.remaining !== undefined;
 }
 
+// Display the model's projection separately from native reset times. Older listings remain readable.
+export function exhaustionText(window, now) {
+    const estimate = window && window.exhaustion;
+    switch (estimate && estimate.state) {
+    case "before_reset":
+        if (!Number.isFinite(estimate.at)) return "No estimate. No current reading.";
+        return estimate.at > now
+            ? `Estimated exhaustion ${resetText(estimate.at, now)} at current average rate.`
+            : `Estimated exhaustion time passed (${formatClock(estimate.at, now)}, average rate).`;
+    case "until_reset": return "Estimated to last until reset at current average rate.";
+    case "exhausted": return "Quota exhausted.";
+    case "no_usage": return "No usage yet. No exhaustion estimate.";
+    case "insufficient": return "No estimate yet. More history needed.";
+    case "stale": return "No estimate. Reading is stale.";
+    default: return "No estimate. No current reading.";
+    }
+}
+
 // Authentication and missing readings describe accounts, not inferred session states.
 export function accountStatus(account, now) {
     if (!account) return "";

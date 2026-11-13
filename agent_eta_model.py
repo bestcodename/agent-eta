@@ -12,6 +12,7 @@ Codex turn left without PostToolUse come back in `Snapshot.prune_tasks`, and the
 """
 
 import copy
+import math
 from dataclasses import dataclass
 
 # An entry without a live holder expires once it is overdue by its own length, but never
@@ -286,6 +287,39 @@ def window_key(window):
     return "window:%s:%s" % (window["agent"], window["minutes"])
 
 
+def quota_exhaustion(window, now):
+    """A per-window projection at the average rate when its latest current reading was taken.
+
+    Cached usage must not appear to slow down as the clock advances. Native freshness
+    classification controls eligibility; the reading must belong to this window.
+    This is a projection, never an activity signal or a replacement for the reset.
+    """
+    result = {"state": "unavailable", "at": None}
+    used, minutes, reset, seen = (window.get(key) for key in ("used", "minutes", "resets_at", "seen_at"))
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+           for value in (used, minutes, reset, seen)):
+        return result
+    if used < 0 or minutes <= 0 or reset <= now or seen > now:
+        return result
+    if window.get("usage_status") != "current":
+        result["state"] = "stale" if window.get("usage_status") == "stale" else "unavailable"
+        return result
+    elapsed = seen - (reset - minutes * 60)
+    if elapsed < 0:
+        return result
+    if used >= 100:
+        result["state"] = "exhausted"
+    elif used == 0:
+        result["state"] = "no_usage"
+    elif elapsed == 0:
+        result["state"] = "insufficient"
+    elif used * minutes * 60 <= 100 * elapsed:
+        result["state"] = "until_reset"
+    else:
+        result.update(state="before_reset", at=math.ceil(seen + (100 - used) * elapsed / used))
+    return result
+
+
 def usage_view(now, windows):
     """Every usage window, copied, with the share of it that has passed, both in percent, how far
     the usage runs ahead of the time in percentage points, the time left until its reset and
@@ -303,6 +337,7 @@ def usage_view(now, windows):
             window["used"] = window["elapsed"] = window["pace"] = window["remaining"] = None
         window["ahead"] = window["pace"] is not None and window["pace"] > 0
         window["reached"] = window["used"] is not None and window["used"] >= 100
+        window["exhaustion"] = quota_exhaustion(window, now)
         window["key"] = window_key(window)
         found.append(window)
     return found

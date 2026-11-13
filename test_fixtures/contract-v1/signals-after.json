@@ -313,6 +313,10 @@
       "agent": "codex",
       "ahead": false,
       "elapsed": null,
+      "exhaustion": {
+        "at": null,
+        "state": "unavailable"
+      },
       "key": "window:codex:300",
       "minutes": 300,
       "pace": null,

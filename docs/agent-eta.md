@@ -373,7 +373,7 @@ and `list --json` publishes it as contract schema 1, which the widget validates 
 | `schema_version` | `1`. A listing without it makes the widget report "agent-eta CLI too old, update it" |
 | `labels` | the state and section labels, `question_open`, `reminder_pending` and `dormant_after` in seconds |
 | `sessions` | every session with `key`, `reported_state` as its agent reported it, `activity_state` as it effectively is, `activity_label`, `light` (`attention`, `caution`, `active`, `off`), `dormant`, `section`, its ETA fields, its task ids and `handoff`; a session of a remote host also has `host`, and its `tmux` navigation carries that `host` |
-| `tasks`, `usage`, `accounts` | the tasks, usage windows and accounts, each with a `key` |
+| `tasks`, `usage`, `accounts` | the tasks, usage windows and accounts, each with a `key`; usage windows include `exhaustion` with a `state` and projected epoch `at`, or null when no timestamp applies |
 | `summary` | the counts per state, `light`, `badge_count`, `status` and `progress_session_key` for the tray icon |
 | `sections`, `usage_groups` | the display order, as lists of keys |
 | `notification_signals` | one signal per waiting, overdue or reset condition, with `key`, `kind`, `entity_key`, `active`, `edge`, `notify_on_new`, `dedupe_key` and `message_params` |
@@ -690,11 +690,9 @@ and what the hook did. The command text never goes there. The log rotates at 256
   state, red waiting, yellow idle or overdue, green working and grey stopped or unknown. An idle session with a
   verified running background task counts as working for the dot and the orb. A holderless `agent-eta add` reminder
   does not establish activity by itself, but a session whose reminders are all still ahead shows green as "idle,
-  reminder pending" until one is due. The line below the title says how long the
-  state has lasted and when it began, as in `idle for 1h 5m (17:25)`. The dot replaced play and pause icons in 0.71.0,
-  because those read as buttons that start or stop the session. The usage windows follow, with one bar per window that
-  fills with the used share. A tick marks the elapsed share of the window, so a fill past the tick runs out before the
-  reset. Faint ticks mark local hours of the 5-hour window and local calendar days of the 7-day one. Their positions
+  reminder pending" until one is due. The line below the title shows its state age and start, as in `idle for 1h 5m (17:25)`.
+  Usage windows follow, with a bar filled to the used share and a tick at the elapsed share. Usage beyond the tick
+  runs ahead of time. Faint ticks mark local hours of the 5-hour window and local calendar days of the 7-day one. Their positions
   derive from each recorded reset and window length, including daylight-saving transitions. Labels below the bar
   show local hours or weekdays, with full dates and timezone names on hover. Start and reset labels take priority;
   interior labels thin out according to measured font widths. Unknown deadlines have no time labels. The default-on
@@ -705,12 +703,14 @@ and what the hook did. The command text never goes there. The log rotates at 256
   the bar is green up to 40%, yellow up to 60% and red up to 80%. Usage at or below the tick stays green throughout. A
   reached limit is yellow up to the tick and red from there, and a window without a known reset keeps one colour, red
   when reached and green otherwise. The yellow band of a bar that is not reached fades into green and red by default,
-  over a configurable share of each half, so 100% leaves pure yellow only at the tick. Overlapping `Canvas`
-  rectangles preserve hard edges and avoid gaps that gradients or adjacent antialiased edges can leave.
+  over a configurable share of each half, so 100% leaves pure yellow only at the tick. Overlapping rectangles preserve hard edges without gaps.
   Every reset carries its countdown, as in `56% · resets in 49m (18:30)`. The line under an account's name, beside the
   freshness of its reading, holds its highest used share and the reset that comes first among its windows, in the
   same form, and an account whose limit is reached reads `blocked · resets in 12h 13m (24:00)` with the reset that
   ends the block.
+  Each window separately estimates exhaustion at the average rate since its inferred start (`resets_at - minutes * 60`).
+  The calculation uses its latest current `seen_at`, so cached readings do not appear to slow down between polls.
+  A projection at or beyond reset reads "Estimated to last until reset". Zero usage, no elapsed time, exhausted quotas, stale readings and missing data have explicit states. A passed projection remains an estimate.
 - **Account rows** remain visible without usage windows. They show authentication and reading freshness. Logged-out
   accounts offer Login and Remove controls. A left or right click anywhere on an account's row opens its menu, with
   **New session in the default directory**, **New session in…**, **Set default directory…**, **Log in** and, for a
