@@ -74,14 +74,6 @@ priority.
     turns while its background task ran (2026-11-12, not reproduced on 2.1.323 on 2026-11-13, where the registry
     reported `shell` and the session stayed in Working). Fix with a regression case in `test_model.py`
     (ca. 1 Stunde)
-19. (low, bug) A remote viewer that agent-eta did not open with its own argv is never focused. `viewer()` in
-    `agent_eta_remote.py` compares every argument after `ssh` exactly against
-    `ssh -t HOST ~/.local/bin/agent-eta attach SOURCE`. On 2026-11-05 a Konsole on stefan-desktop, opened at 16:16:20
-    before 2.3.0 was installed there, ran `ssh -t notebook /home/stefanr/.local/bin/agent-eta attach claude:<id>`, and
-    the lookup returned no viewer for it, so a click opens a new terminal instead. A viewer opened by hand with the
-    documented `ssh -t HOST agent-eta attach claude:<session>` misses the same way. Proposal: compare the CLI
-    argument by its basename too, with a case in `test_remote.py` (ca. 30 Minuten)
-
 20. (low, proposal) Rename sessions from agent-eta, requested on 2026-11-05. Names are only read today, from
     Claude Code's `custom-title` or `ai-title` and Codex's thread name (see [docs/agent-eta.md](docs/agent-eta.md)).
     1. **`agent-eta rename <session> <name>`** plus a row action in the widget. It renames the session in its agent,

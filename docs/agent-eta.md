@@ -441,9 +441,8 @@ so their values do not enter command arguments. Inspect the host journal with `j
 the runtime's recorded service name.
 
 `agent-eta attach` also works from another machine as `ssh -t HOST agent-eta attach claude:<session>`, which opens a
-viewer of its own there without moving or pausing the agent. A Codex thread is listed, and can be attached this way,
-only after its first prompt in the CLI, because Codex has no SessionStart hook. Until then
-`agent_eta_tmux.Runtime().attach(record, interactive=True)` opens it by its tmux record id. A launch from a plain SSH
+viewer of its own there without moving or pausing the agent. A managed Codex resume is listed before its first
+prompt; unmanaged Codex sessions still need a prompt's hook to register them. A launch from a plain SSH
 shell copies that shell's environment into a new tmux server, so it lacks `DISPLAY` and the SSH agent. Running
 `eval "$(systemctl --user show-environment | sed "s/^/export /")"` before `agent-eta account launch` gives it the
 graphical session's environment.
@@ -465,9 +464,10 @@ cache as an error. BatchMode needs the key in an agent, and plasmashell has the 
 
 `agent-eta attach SOURCE --host HOST` validates both, because ssh hands its arguments to the remote shell as one
 string. From a terminal it runs `ssh -t HOST ~/.local/bin/agent-eta attach SOURCE` in place. With `--json` it looks for
-a process of the user that runs that command, with `ssh` matched by its basename because Konsole resolves it to
-`/usr/bin/ssh`, and reports the pids of it and its ancestors, so the widget
-raises its terminal. Otherwise it opens a terminal running that command. A viewer started by hand with other ssh
+a process of the user that runs that command. Both `ssh` and the remote `agent-eta` executable match by basename,
+so the documented `ssh -t HOST agent-eta attach SOURCE` and absolute CLI paths reuse an existing viewer too.
+The SSH option, host, action and session ID must still match exactly. It reports the pids of it and its ancestors,
+so the widget raises its terminal. Otherwise it opens a terminal running that command. A viewer started by hand with other ssh
 arguments is not found.
 
 Interactive pane launchers discard inherited `NO_COLOR` from automation tools while preserving `TERM` and

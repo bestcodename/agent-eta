@@ -214,6 +214,33 @@ class AttachTest(unittest.TestCase):
         self.fake_process(os.getpid(), ["/usr/bin/ssh"] + self.argv[1:])
         self.assertEqual(remote.attach("desktop", "codex:t1", False, proc=str(self.proc))["opened"], False)
 
+    def test_a_manual_viewer_accepts_the_cli_on_path_or_at_an_absolute_path(self):
+        for cli in ("agent-eta", "/home/stefanr/.local/bin/agent-eta", "~/.local/bin/agent-eta"):
+            with self.subTest(cli=cli), mock.patch.object(remote, "open_terminal") as open_terminal:
+                path = self.proc / str(os.getpid())
+                path.mkdir(exist_ok=True)
+                argv = ["/usr/bin/ssh", "-t", "desktop", cli, "attach", "codex:t1"]
+                (path / "cmdline").write_bytes(b"".join(a.encode() + b"\0" for a in argv))
+                self.assertEqual(remote.attach("desktop", "codex:t1", False, proc=str(self.proc)),
+                                 {"opened": False, "pids": lineage(os.getpid())})
+                open_terminal.assert_not_called()
+
+    def test_a_manual_viewer_still_requires_the_same_ssh_host_command_and_source(self):
+        changed = ((0, "/usr/bin/not-ssh"), (1, "-T"), (2, "other-host"),
+                   (3, "/home/stefanr/.local/bin/not-agent-eta"), (4, "list"), (5, "codex:other"))
+        candidates = []
+        for index, value in changed:
+            argv = list(self.argv)
+            argv[index] = value
+            candidates.append(argv)
+        candidates.extend(([], self.argv[:3], self.argv + ["--json"]))
+        for argv in candidates:
+            with self.subTest(argv=argv):
+                path = self.proc / str(os.getpid())
+                path.mkdir(exist_ok=True)
+                (path / "cmdline").write_bytes(b"".join(a.encode() + b"\0" for a in argv))
+                self.assertIsNone(remote.viewer(self.argv, proc=str(self.proc)))
+
     def open_viewer(self, argv):
         """A terminal whose ssh shows up as a process after its start returned."""
         self.opened = argv

@@ -193,8 +193,8 @@ def merge(listing, cache, now):
 
 
 def viewer(argv, proc="/proc"):
-    """The pid of a process of this user that runs argv. A terminal resolves argv[0] through PATH, as
-    Konsole runs `ssh` as `/usr/bin/ssh`, so only its basename counts."""
+    """The pid of this user's SSH viewer. Match ssh and the remote CLI by basename so viewers
+    opened by hand through PATH or an absolute CLI path count too. Other arguments stay exact."""
     wanted = [arg.encode() for arg in argv]
     uid = os.getuid()
     for name in os.listdir(proc):
@@ -206,7 +206,10 @@ def viewer(argv, proc="/proc"):
                 continue
             with open(os.path.join(base, "cmdline"), "rb") as handle:
                 found = handle.read().split(b"\0")[:-1]
-            if found[1:] == wanted[1:] and found and os.path.basename(found[0]) == wanted[0]:
+            if (len(found) == len(wanted) == 6
+                    and os.path.basename(found[0]) == os.path.basename(wanted[0])
+                    and os.path.basename(found[3]) == os.path.basename(wanted[3])
+                    and found[1:3] == wanted[1:3] and found[4:] == wanted[4:]):
                 return int(name)
         except OSError:
             continue
