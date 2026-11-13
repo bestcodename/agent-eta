@@ -7,6 +7,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-11-13
+
+### Added
+
+- `reminder_sessions` setting in config.json
+- `labels.reminder_pending` and the session field `awaits_reminder` in `list --json`
+
+### Changed
+
+- An idle session whose only entries are future reminders is listed with the working sessions
+- TODO item 18 extended by the Needs you report of TODO item 37
+
+### Fixed
+
+- A Claude Code turn ETA ends at the turn's Stop hook
+
+### Removed
+
+- TODO items 35 and 37
+
 ## [2.7.0] - 2026-11-13
 
 ### Added

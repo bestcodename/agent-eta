@@ -546,12 +546,18 @@ class Sessions(StateTest):
         self.assertEqual(self.cli("done", entry["id"]).returncode, 0)
         self.assertEqual(self.ids(), ["keep"])
 
-    def test_idle_owner_with_only_a_manual_wait_stays_in_nonworking_group(self):
+    def test_idle_owner_with_only_a_future_reminder_works_unless_configured_otherwise(self):
         owner = self.register(status="idle")
         self.put("ci-wait", agent="claude", eta=600,
                  session={"id": owner["sessionId"], "pid": owner["pid"]})
         [session] = self.view()
-        self.assertEqual((session["state"], eta.section(session)), ("idle", 0))
+        self.assertEqual((session["state"], session["section"], session["activity_label"]),
+                         ("idle", 1, "idle, reminder pending"))
+        config = self.root / "config.json"
+        config.write_text(json.dumps({"reminder_sessions": "needs_you"}))
+        with unittest.mock.patch.dict(os.environ, {"AGENT_ETA_CONFIG": str(config)}):
+            [session] = self.view()
+        self.assertEqual((session["activity_state"], session["section"]), ("idle", 0))
 
     def test_codex_session_end_preserves_manual_wait_without_inventing_work(self):
         self.hook(self.codex_event("UserPromptSubmit"))
@@ -781,7 +787,7 @@ class Sessions(StateTest):
                 self.hook(self.codex_event("UserPromptSubmit"))
                 self.hook(self.codex_event("PreToolUse", tool_name="Bash", tool_use_id="rejected",
                                            tool_input={"command": "rejected command"}))
-                self.put("manual", agent="codex", eta=600, session={"id": "thread-1"})
+                self.put("manual", agent="codex", eta=600, session={"id": "thread-1"}, now=time.time() - 900)
                 self.hook(self.codex_event(event))
                 [session] = self.view(time.time() + 11)
                 self.assertEqual((session["state"], eta.section(session)), ("idle", 0))
@@ -1175,6 +1181,21 @@ class Sessions(StateTest):
         [session] = self.view()
         self.assertEqual((session["due"], session["turn_label"]), (None, None))
         self.assertEqual(os.listdir(os.path.join(self.dir, "turns")), [])
+
+    def test_claude_stop_hook_ends_the_turn_eta_while_the_registry_says_shell(self):
+        """Claude Code 2.1.323 reports `shell` between turns while a background shell runs."""
+        self.register(status="shell", since=time.time() - 5)
+        env = dict(self.env, CLAUDECODE="1", CLAUDE_PID=str(os.getpid()))
+        self.assertEqual(self.cli("turn", "--eta", "20m", env=env).returncode, 0)
+        self.assertEqual([s["eta_source"] for s in self.view()], ["turn"])
+        stop = {"hook_event_name": "Stop", "session_id": "s-%d" % os.getpid(),
+                "transcript_path": "/x/.claude/projects/p/s.jsonl"}
+        self.hook(stop, env=env)
+        self.assertEqual([s["eta_source"] for s in self.view()], [None])
+        self.assertEqual(os.listdir(os.path.join(self.dir, "turns")), [])
+        self.hook(stop, env=env)
+        actions = [line.split("\t")[-1] for line in pathlib.Path(self.dir, "hook.log").read_text().splitlines()]
+        self.assertEqual(actions, ["turn-cleared", "no-turn"])
 
     def test_codex_turn_eta_ends_with_stop(self):
         self.hook(self.codex_event("UserPromptSubmit"))
