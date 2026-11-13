@@ -49,6 +49,7 @@ agent-eta done <id>
 agent-eta turn --eta 20m --label "Long refactor"
 agent-eta list --json --all        # what the widget reads, contract schema 1
 agent-eta account launch claude:NAME --directory /trusted/project
+agent-eta account launch claude:NAME --cli --model opus --effort max --permission-mode plan --prompt 'Review this project'
 agent-eta account launch codex --cli --directory /trusted/project
 agent-eta attach claude:<session>   # show the existing managed terminal
 ssh -t HOST agent-eta attach claude:<session>   # the same from another machine
@@ -73,6 +74,11 @@ Existing desktop threads open in the app. Unmanaged CLI sessions remain visible 
 `agent-eta account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` before cross-provider handoff.
 Resuming a session with a live writer is refused; a session that only an open ETA keeps listed has none.
 Existing clients are never moved into tmux.
+
+Claude launches accept `--model`, `--effort`, `--permission-mode` and `--prompt`, including with `--resume`.
+These options apply to that launch and keep the chosen account and managed terminal. Omitted settings use native
+defaults. Use this route for takeover sessions instead of hand-written Konsole commands. Codex rejects these
+Claude-only options.
 
 The hooks for Claude Code and Codex, every command and the widget are described in
 [docs/agent-eta.md](docs/agent-eta.md).

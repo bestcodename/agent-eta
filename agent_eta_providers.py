@@ -203,10 +203,19 @@ def spawn(command, env=None):
         raise AccountError("The account action could not be started") from None
 
 
-def launch(account, directory, login=False, cli=False, resume=None, started=None):
+def launch(account, directory, login=False, cli=False, resume=None, started=None,
+           model=None, effort=None, permission_mode=None, prompt=None):
     """Pass argv directly to processes; no directory or account name becomes shell code.
     `started(record)` runs once a managed terminal is up and before its viewer opens, so the
-    session is known even when no viewer attaches."""
+    session is known even when no viewer attaches. Claude settings apply to this launch;
+    omitted values retain native defaults. A prompt follows -- so it cannot become an option."""
+    settings = {"--model": model, "--effort": effort, "--permission-mode": permission_mode}
+    if prompt is not None or any(value is not None for value in settings.values()):
+        if login or account["provider"] != "claude":
+            raise AccountError("Model, effort, permission mode and prompt options require a Claude session launch")
+        if any(not isinstance(value, str) or not value.strip() or "\0" in value
+               for value in (*settings.values(), prompt) if value is not None):
+            raise AccountError("Claude launch options must be nonempty text without NUL characters")
     if account["provider"] == "codex" and not login and not cli and not resume:
         from urllib.parse import urlencode
         spawn([executable("opener"), "codex://threads/new?" + urlencode({"path": directory})])
@@ -214,7 +223,13 @@ def launch(account, directory, login=False, cli=False, resume=None, started=None
     if not login:
         import agent_eta_tmux
         if account["provider"] == "claude":
-            command, _ = claude_command(account, ["--resume", resume] if resume else [])
+            arguments = ["--resume", resume] if resume else []
+            for option, value in settings.items():
+                if value is not None:
+                    arguments.append(option + "=" + value)
+            if prompt is not None:
+                arguments.extend(["--", prompt])
+            command, _ = claude_command(account, arguments)
             environment = {"CLAUDE_CONFIG_DIR": account["directory"]}
         else:
             binary = executable("codex")

@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-11-13
+
+### Added
+
+- Managed Claude launches accept model, effort, permission mode and a first prompt, including when resuming
+- Launch regression tests cover registered and primary accounts, literal prompts and live-writer refusal
+
 ## [2.9.2] - 2026-11-13
 
 ### Fixed

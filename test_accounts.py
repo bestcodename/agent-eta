@@ -295,6 +295,73 @@ class Actions(Isolated):
         self.assertEqual(runtime.return_value.start.call_args.args[0],
                          [providers.DESKTOP_CODEX, "--no-daemon", "-C", str(self.root), "resume", "thread"])
 
+    def test_claude_launch_settings_and_prompt_survive_parser_wrapper_and_shell(self):
+        import agent_eta_tmux
+        self.registered(("work",))
+        parser = argparse.ArgumentParser()
+        accounts.add_parser(parser.add_subparsers(dest="command"))
+        prompt = "--help\nReview 'quotes', $(touch SHOULD_NOT_EXIST) and `commands`. ü"
+        # Run the actual managed launcher with a recording client, never a model session.
+        client = self.root / "client"
+        client.write_text("#!/usr/bin/python3\nimport json, os, sys\n"
+                          "print(json.dumps([sys.argv[1:], os.environ.get('CLAUDE_CONFIG_DIR')]))\n")
+        client.chmod(0o700)
+        for identifier in ("claude:work", "claude:default"):
+            if identifier == "claude:default":
+                self.registry.unlink()
+            for resume in ([], ["--resume", "session-id"]):
+                with self.subTest(identifier=identifier, resume=resume):
+                    args = parser.parse_args(["account", "launch", identifier, "--cli", *resume,
+                                              "--model", "opus", "--effort", "max",
+                                              "--permission-mode", "plan", "--prompt", prompt])
+                    with mock.patch.object(providers, "executable", return_value=str(client)), \
+                            mock.patch("agent_eta_tmux.Runtime") as runtime:
+                        accounts.account_action(args, inspect=lambda source: None)
+                    call = runtime.return_value.start.call_args
+                    script = self.root / "launch.sh"
+                    script.write_text(agent_eta_tmux.launcher(call.args[0], call.kwargs["environment"]))
+                    result = subprocess.run(["/bin/sh", str(script)], cwd=self.root,
+                                            capture_output=True, text=True, check=True)
+                    actual, config = json.loads(result.stdout)
+                    prefix = ["run", "work"] if identifier == "claude:work" else []
+                    self.assertEqual(actual, prefix + resume + ["--model=opus", "--effort=max",
+                                                              "--permission-mode=plan", "--", prompt])
+                    self.assertEqual(config, self.store.find(identifier)["directory"])
+                    self.assertFalse((self.root / "SHOULD_NOT_EXIST").exists())
+                    runtime.return_value.attach.assert_called_once()
+
+    def test_claude_settings_are_optional_and_prompt_is_not_required(self):
+        self.registered(("work",))
+        with mock.patch.object(providers, "executable", return_value="/fake/claude-account"), \
+                mock.patch("agent_eta_tmux.Runtime") as runtime:
+            accounts.account_action(self.args("launch", "claude:work", model="sonnet"))
+        self.assertEqual(runtime.return_value.start.call_args.args[0],
+                         ["/fake/claude-account", "run", "work", "--model=sonnet"])
+
+    def test_claude_launch_options_reject_other_actions_and_invalid_text_before_spawn(self):
+        with mock.patch.object(providers, "spawn") as spawn, mock.patch("agent_eta_tmux.Runtime") as runtime:
+            for option in ("model", "effort", "permission_mode", "prompt"):
+                for cli in (False, True):
+                    with self.subTest(option=option, cli=cli), self.assertRaisesRegex(
+                            providers.AccountError, "require a Claude session launch"):
+                        providers.launch(self.store.find("codex"), str(self.root), cli=cli, **{option: "value"})
+            account = {"provider": "claude"}
+            with self.assertRaises(providers.AccountError):
+                providers.launch(account, str(self.root), login=True, prompt="hello")
+            for value in ("", " ", "bad\0text"):
+                with self.subTest(value=value), self.assertRaises(providers.AccountError):
+                    providers.launch(account, str(self.root), model=value)
+        spawn.assert_not_called()
+        runtime.assert_not_called()
+
+    def test_claude_settings_do_not_bypass_live_writer_refusal(self):
+        self.registered(("work",))
+        with mock.patch.object(accounts, "launch") as launch, self.assertRaisesRegex(
+                providers.AccountError, "live writer"):
+            accounts.account_action(self.args("launch", "claude:work", resume="busy", model="opus", prompt="go"),
+                                    inspect=lambda source: {"pid": 123})
+        launch.assert_not_called()
+
     def test_a_resume_is_registered_before_its_viewer_even_when_none_attaches(self):
         import agent_eta_tmux
         calls = []
