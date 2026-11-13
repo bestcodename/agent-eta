@@ -46,12 +46,6 @@ priority.
     screen that renders the summary; or a user-level override of the shell's lockscreen QML, which Plasma updates can
     break. Drop the item if every route needs patched system files or a privileged helper. Evaluate the routes first
     (ca. 1 hour).
-13. (low) Two handoff cases stay open. A handoff killed with SIGKILL while its source is frozen leaves it frozen;
-    `status.json` names `systemctl --user thaw` in `resume_source`, but nothing runs it. An account row's batch to a
-    Claude account without a registered name passes no `--account`, so `choose_account()` may pick another eligible
-    account than the clicked one. Proposal: report dead handoffs with recovery instructions on the next
-    `agent-eta list`, requiring confirmed destination cancellation before any thaw, and pass the account directory
-    to the batch (ca. 2 hours).
 15. (low) A Claude Code session that a handoff started holds no ExitPlanMode approval, so moving it on to Codex forks
     a summary and plans again. Proposal: count such a session as approved from the completed handoff record that
     started it with an approved plan (ca. 2 hours).

@@ -219,6 +219,35 @@ class ManagedHandoff(unittest.TestCase):
         self.assertIsNone(tmux.proc_start(self.read("destination.json")["pid"]))
         self.assert_source_live_and_thawed()
 
+    def test_sigkill_reports_recovery_without_thawing_or_cancelling(self):
+        self.env["AGENT_ETA_HANDOFF_REGISTER_TIMEOUT"] = "30"
+        silent = self.root / "silent"
+        silent.write_text(PROVIDER.replace("if os.environ.get('FAKE_REGISTER','yes') == 'yes':", "if False:"))
+        silent.chmod(0o700)
+        self.env["AGENT_ETA_CODEX_BIN"] = str(silent)
+        process = subprocess.Popen(self.command(), env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            destination = self.wait_destination(process)
+            process.kill()
+            process.communicate(timeout=5)
+            persisted = handoff.records(str(self.root / "handoff"))[0]
+            self.assertTrue(persisted["source_paused"])
+            listed = subprocess.run([sys.executable, str(HERE / "agent-eta"), "list", "--json", "--local"],
+                                    env=self.env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(listed.returncode, 0, listed.stderr)
+            source = next(row for row in json.loads(listed.stdout)["sessions"] if row["id"] == self.source_id)
+            self.assertEqual(source["handoff"]["status"]["state"], "interrupted")
+            self.assertFalse(source["handoff"]["available"])
+            self.assertIn("Confirm destination", listed.stderr)
+            state = subprocess.run(["systemctl", "--user", "show", "-P", "FreezerState",
+                                    self.source_terminal["scope"]], capture_output=True, text=True)
+            self.assertEqual(state.stdout.strip(), "frozen")
+            self.assertEqual(tmux.proc_start(destination["pid"]), destination["start"])
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=5)
+
     def test_last_pane_exit_collects_the_server_service(self):
         self.assertTrue(self.runtime.stop(self.source_terminal["id"]))
         self.wait(lambda: subprocess.run(["systemctl", "--user", "is-active", "--quiet", self.runtime.unit], capture_output=True).returncode != 0)

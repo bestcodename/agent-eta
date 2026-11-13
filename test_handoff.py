@@ -157,6 +157,42 @@ class Base(unittest.TestCase):
 
 
 class TerminalLaunch(Base):
+    def test_explicit_directory_bypasses_eligible_account_selection(self):
+        env = StubEnv({}, {("claude-account", "targets"): (0, json.dumps(
+            {"targets": [{"name": "other", "eligible": True}]}))})
+        selected = os.path.join(self.tmp, "selected account")
+        env.accounts = lambda: [(None, selected), ("other", "/other")]
+        env.account_directory = selected
+        self.assertIsNone(handoff.choose_account("claude", None, env))
+        self.assertEqual(env.ran, [])
+        record = {"target": "claude", "account": None, "account_directory": selected,
+                  "command": ["claude", "go"], "cwd": self.repo,
+                  "source_terminal": {"session": "$2"}, "destination_id": "a" * 32}
+        with mock.patch.object(handoff.agent_eta_tmux, "Runtime") as runtime, \
+                mock.patch.object(handoff.agent_eta_providers, "executable", return_value="/fake/claude"):
+            handoff.Env.open_destination(env, record)
+        self.assertEqual(runtime.return_value.start.call_args.kwargs["environment"], {"CLAUDE_CONFIG_DIR": selected})
+
+    def test_explicit_account_directory_must_still_belong_to_the_inventory(self):
+        env = StubEnv({})
+        env.account_directory = "/missing"
+        for target, name in (("claude", None), ("claude", "work"), ("codex", None)):
+            with self.subTest(target=target, name=name), self.assertRaises(handoff.HandoffError):
+                handoff.choose_account(target, name, env)
+
+    def test_explicit_directory_registration_ignores_the_other_account(self):
+        selected, other = os.path.join(self.tmp, "selected"), os.path.join(self.tmp, "other")
+        env = handoff.Env(None, lambda: [(None, selected), ("other", other)], account_directory=selected)
+        record = {"target": "claude", "account": None, "account_directory": selected, "session_id": "session"}
+        write(os.path.join(other, "sessions", "123.json"), json.dumps({"sessionId": "session"}))
+        with mock.patch.object(env, "registered_process", return_value=True) as registered, \
+                mock.patch.object(env, "proc_start", return_value="start"):
+            self.assertFalse(env.registered(record))
+            registered.assert_not_called()
+            write(os.path.join(selected, "sessions", "456.json"), json.dumps({"sessionId": "session"}))
+            self.assertTrue(env.registered(record))
+            registered.assert_called_once_with(record, 456, "start", "session")
+
     def test_destination_uses_the_source_session_and_explicit_account(self):
         env = handoff.Env(None, lambda: [("work", "/account")])
         record = {"target": "claude", "account": "work", "command": ["claude", "go"],
@@ -649,6 +685,14 @@ class Trust(Base):
         self.assertIn("not registered", self.trust("claude", "other", self.repo))
         single = handoff.Env(lambda source: None, lambda: [(None, self.second)])
         self.assertIsNone(single.trust("claude", "second", self.repo))
+
+    def test_unnamed_explicit_directory_uses_its_own_trust_record(self):
+        self.claude(os.path.join(self.home, ".claude.json"), {self.repo: True})
+        self.claude(os.path.join(self.second, ".claude.json"), {self.repo: False})
+        env = handoff.Env(None, lambda: [(None, self.second)], account_directory=self.second)
+        self.assertIsNotNone(env.trust("claude", None, self.repo))
+        self.claude(os.path.join(self.second, ".claude.json"), {self.repo: True})
+        self.assertIsNone(env.trust("claude", None, self.repo))
 
     def test_claude_walks_up_to_the_repository_and_its_main_checkout(self):
         state = os.path.join(self.home, ".claude.json")

@@ -475,6 +475,8 @@ def handoff_view(session, handoffs):
     record = handoffs.get("%s:%s" % (session["agent"], session["id"]))
     status = {key: record.get(key) for key in ("id", "state", "target", "error")} if record else None
     reason = session.get("gate_reason")
+    if record and record.get("recovery_required"):
+        reason = record["error"]
     return {"available": not reason, "reason": reason, "targets": list(HANDOFF_TARGETS[session["agent"]]),
             "status": status}
 

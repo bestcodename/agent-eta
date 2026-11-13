@@ -263,8 +263,9 @@ def handoff_here(store, account):
 
 
 def account_action(args, batch=None, inspect=None, launched=None):
-    """`batch(agent, target, account_name)` moves every available session of `agent` across providers,
-    which only agent-eta itself can, since it collects the sessions. `launched(account, record, resume)`
+    """`batch(agent, target, account_name, account_directory=None)` moves available sessions across providers.
+    An unnamed Claude target passes its exact directory instead of invoking automatic account selection.
+    Only agent-eta itself collects the sessions. `launched(account, record, resume)`
     runs for a managed terminal right after it starts, before its viewer opens."""
     store = AccountStore()
     action = args.account_action
@@ -306,7 +307,10 @@ def account_action(args, batch=None, inspect=None, launched=None):
             elif batch is None:
                 raise AccountError("Sessions cannot move between providers here")
             else:
-                batch(source, account["provider"], account["name"] if account["registered"] else None)
+                if account["provider"] == "claude" and not account["registered"]:
+                    batch(source, "claude", None, account_directory=account["directory"])
+                else:
+                    batch(source, account["provider"], account["name"] if account["registered"] else None)
         elif action == "remove":
             if account["provider"] == "codex":
                 store.configure(lambda data: data.update(codex_disabled=True))

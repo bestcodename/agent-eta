@@ -230,7 +230,7 @@ export function handoffText(session) {
     if (HANDOFF_PENDING.includes(status.state)) {
         return `handoff to ${target} pending`;
     }
-    if (status.state === "failed" || status.state === "cancelled") {
+    if (["failed", "cancelled", "interrupted"].includes(status.state)) {
         return `handoff to ${target} ${status.state}` + (status.error ? `: ${status.error}` : "");
     }
     return "";

@@ -10,6 +10,9 @@ actions such as starting a session, logging in and moving all Claude Code sessio
 New sessions from the widget use the CLI by default. **Use CLI by default** in the widget settings selects the
 Codex launch client; its account menu also offers the other client for a single launch.
 `agent-eta handoff` moves a session between Claude Code and Codex with its plan, by hand or at a usage limit.
+If its controller dies, the next listing reports interrupted ownership and recovery instructions. It never thaws
+the source automatically. Confirm the destination has stopped before using the recorded recovery command.
+Account-menu handoffs preserve the selected Claude directory even when the account has no registered name.
 
 Hooks and the agents' own session registries fill the list, so an agent only has to write down the ETA it states anyway.
 Run process-aware listing on the host. A sandbox with a different PID namespace is refused before it can delete

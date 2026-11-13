@@ -358,9 +358,12 @@ def records(root=None):
 
 
 def latest_by_source(root=None):
+    from agent_eta_recovery import recovery_view
+    root = root or handoff_root()
     found = {}
     for record in records(root):
-        found.setdefault(record["source"], record)
+        if record["source"] not in found:
+            found[record["source"]] = recovery_view(record, root)
     return found
 
 
@@ -390,12 +393,13 @@ class SourceLock:
 class Env:
     """What a handoff needs from the system. agent-eta passes collectors for `inspect` and `accounts`."""
 
-    def __init__(self, inspect, accounts, out=print):
+    def __init__(self, inspect, accounts, out=print, account_directory=None):
         # inspect(source) -> {"state", "waiting_for", "running", "pid", "proc_start", "gate", "cwd",
         #                     "account", "transcript", "rollout"} of a live session, or None.
         self.inspect = inspect
         # accounts() -> [(name, directory)] of the registered Claude accounts.
         self.accounts = accounts
+        self.account_directory = account_directory
         self.out = out
 
     def run(self, argv, timeout=60, cwd=None):
@@ -467,7 +471,7 @@ class Env:
         if handoff["target"] == "claude":
             command[0] = agent_eta_providers.executable(command[0])
             directories = dict(self.accounts())
-            directory = directories.get(handoff["account"]) or directories.get(None)
+            directory = handoff.get("account_directory") or directories.get(handoff["account"]) or directories.get(None)
             if directory:
                 environment["CLAUDE_CONFIG_DIR"] = directory
         else:
@@ -497,17 +501,22 @@ class Env:
         """Whether the destination of a launched handoff has shown up."""
         if handoff["target"] == "claude":
             for name, directory in self.accounts():
+                if handoff.get("account_directory") and os.path.realpath(directory) != handoff["account_directory"]:
+                    continue
                 if handoff["account"] and name and name != handoff["account"]:
                     continue
-                for entry in os.scandir(os.path.join(directory, "sessions")) if os.path.isdir(
-                        os.path.join(directory, "sessions")) else []:
-                    if not entry.name.endswith(".json") or not entry.name[:-5].isdigit():
-                        continue
-                    data = read_config(entry.path, json.load) or {}
-                    pid = int(entry.name[:-5])
-                    if data.get("sessionId") == handoff["session_id"] and self.registered_process(
-                            handoff, pid, self.proc_start(pid), handoff["session_id"]):
-                        return True
+                sessions = os.path.join(directory, "sessions")
+                if not os.path.isdir(sessions):
+                    continue
+                with os.scandir(sessions) as entries:
+                    for entry in entries:
+                        if not entry.name.endswith(".json") or not entry.name[:-5].isdigit():
+                            continue
+                        data = read_config(entry.path, json.load) or {}
+                        pid = int(entry.name[:-5])
+                        if data.get("sessionId") == handoff["session_id"] and self.registered_process(
+                                handoff, pid, self.proc_start(pid), handoff["session_id"]):
+                            return True
             return False
         root = os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "sessions")
         for folder, _, files in os.walk(root):
@@ -546,11 +555,11 @@ class Env:
         if target == "claude":
             # A single registration keeps no name, so it stands for any account, as in registered().
             directories = dict(self.accounts())
-            directory = directories.get(account) or (directories.get(None) if len(directories) == 1 else None)
+            directory = self.account_directory or directories.get(account) or (directories.get(None) if len(directories) == 1 else None)
             if account and not directory:
                 return "Claude Code account %s is not registered" % account
             primary = os.path.expanduser("~/.claude")
-            if account is None or os.path.realpath(directory) == os.path.realpath(primary):
+            if not directory or os.path.realpath(directory) == os.path.realpath(primary):
                 path = primary + ".json"
             else:
                 path = os.path.join(directory, ".claude.json")
@@ -651,6 +660,15 @@ def resolve_plan(source, session, plan_path, env):
 def choose_account(target, account, env):
     """The Claude account to start in: the one named, else the first eligible one `claude-account targets`
     lists, else the only registered one."""
+    if env.account_directory is not None:
+        if target != "claude" or account:
+            raise HandoffError("--account-directory requires a Claude destination without --account")
+        directory = os.path.realpath(os.path.expanduser(env.account_directory))
+        matches = [(name, path) for name, path in env.accounts() if os.path.realpath(path) == directory]
+        if len(matches) != 1:
+            raise HandoffError("the selected Claude account directory is unavailable or ambiguous")
+        env.account_directory = directory
+        return matches[0][0]
     if target != "claude" or account:
         return account
     result = env.run(["claude-account", "targets", "--json"], timeout=60)
@@ -690,6 +708,8 @@ def prepare(source, target, account, plan_path, env, root, dry_run=False):
                "created": int(now), "state": "prepared",
                "session_id": str(uuid.uuid4()) if target == "claude" else None, "launched": None}
     handoff.update(source_terminal=managed, source_scope=managed["scope"])
+    if env.account_directory:
+        handoff["account_directory"] = env.account_directory
     handoff["resume_source"] = "systemctl --user thaw %s" % scope(handoff)
     folder = os.path.join(root, handoff["id"])
     text = snapshot(handoff, plan, env, folder)
@@ -756,7 +776,9 @@ def transfer(handoff, session, plan, env, root, wait):
             confirmed = env.cancel_destination(handoff)
             handoff["destination_cancelled"] = confirmed
             if confirmed:
-                if not env.resume(scope(handoff)):
+                resumed = env.resume(scope(handoff))
+                handoff["source_paused"] = not resumed
+                if not resumed:
                     handoff["error"] = str(handoff.get("error") or "") + "; the source is still frozen, run resume_source"
             else:
                 handoff["source_paused"] = True
@@ -782,6 +804,9 @@ def gated_transfer(handoff, session, plan, env, folder, root, wait):
             return False
         if safe(current):
             try:
+                # Persist uncertainty before freeze, including a SIGKILL between freeze and its return.
+                handoff["source_paused"] = True
+                write_record(folder, handoff)
                 env.pause(unit, pid, start)
             except HandoffError as exc:
                 handoff.update(state="failed", error=str(exc))
@@ -792,6 +817,8 @@ def gated_transfer(handoff, session, plan, env, folder, root, wait):
                 break
             if not env.resume(unit):
                 raise HandoffError("the source cannot be thawed after it turned busy")
+            handoff["source_paused"] = False
+            write_record(folder, handoff)
         if env.now() >= deadline:
             handoff.update(state="waiting", error="no safe boundary within %d s; nothing was changed" % wait)
             write_record(folder, handoff)
@@ -822,7 +849,7 @@ def gated_transfer(handoff, session, plan, env, folder, root, wait):
     env.select_destination(handoff)
     if not env.retire_source(handoff, again):
         raise HandoffError("the source process or pane could not be retired")
-    handoff.update(state="completed", error=None)
+    handoff.update(state="completed", error=None, source_paused=False)
     write_record(folder, handoff)
     return True
 
@@ -844,6 +871,8 @@ def delegate_claude(source, account, wait, env, session):
 
 def handoff_one(text, target, account, plan_path, wait, dry_run, env, root):
     source = parse_source(text)
+    if source[0] == "claude" and target == "claude" and env.account_directory is not None:
+        raise HandoffError("Claude-to-Claude migration requires a registered destination name with --account")
     if dry_run:
         if source[0] == "claude" and target == "claude":
             return {"source": text, "delegate": ["claude-account", "handoff", "…", account or "?", "--only", source[1]]}
@@ -851,7 +880,7 @@ def handoff_one(text, target, account, plan_path, wait, dry_run, env, root):
         return dict(handoff, plan=text)
     with SourceLock(root, source):
         previous = latest_by_source(root).get(text)
-        if previous and (previous.get("source_paused") or previous.get("state") == "launched"):
+        if previous and (previous.get("source_paused") or previous.get("state") in ("prepared", "launched", "interrupted")):
             raise HandoffError("the previous handoff has unresolved ownership; inspect %s and confirm the "
                                "destination has stopped before running resume_source" % previous["id"])
         if previous and previous.get("state") in SETTLED:
@@ -905,7 +934,9 @@ def add_parser(sub):
     parser = sub.add_parser("handoff", help="hand sessions over to Claude Code or Codex with their plan")
     parser.add_argument("sources", nargs="+", metavar="SOURCE", help="claude:<session> or codex:<thread>")
     parser.add_argument("--to", required=True, choices=("claude", "codex"))
-    parser.add_argument("--account", help="the Claude account to start in")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--account", help="the Claude account to start in")
+    selection.add_argument("--account-directory", help="the exact local Claude account directory to start in")
     parser.add_argument("--plan", help="the plan file to continue, instead of the source's own")
     parser.add_argument("--wait", type=int, default=1800, help="seconds to wait for a safe boundary")
     parser.add_argument("--dry-run", action="store_true", help="print what would happen and change nothing")
