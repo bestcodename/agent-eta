@@ -85,15 +85,6 @@ priority.
        is skipped rather than interrupted, and the answer must not land in the session's own work as a turn of
        substance. Delivering the prompt needs the same input route as 1, through Konsole, tmux or dsh
        (ca. 4 Stunden)
-21. (low, proposal) `agent-eta account launch --cli` cannot carry a session's settings or a first prompt, so
-    sessions still start outside managed tmux. On 2026-11-06 four sessions on stefan-desktop were moved into managed
-    tmux by an ad-hoc script that wrote `claude-account run … --resume ID --model … --effort … --permission-mode …`
-    into a tabs file for `agent-eta account-tabs`, because `account launch --resume` drops the model, effort and
-    mode. The same day a takeover session started the Docmost driver from a hand-written
-    `konsole --tabs-from-file`, which left it unmanaged and unreachable from the other machine's widget. Proposal:
-    `account launch` takes `--model`, `--effort`, `--permission-mode` and an optional first prompt and passes them
-    to `claude_command()` in `agent_eta_providers.py`, with cases in `test_accounts.py`; the takeover routine then
-    starts its session through it (ca. 2 Stunden)
 22. (low, proposal) A desktop Codex thread drops out of the list while the desktop app is closed. Since 2.4.1 a
     `codex exec resume` of a desktop thread keeps it listed through the app's app-server, but with the app closed
     the exec's `SessionEnd` still removes it. On 2026-11-06 the thread "Deploy Docmost on Proxmox", which a Claude

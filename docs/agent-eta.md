@@ -317,6 +317,19 @@ Claude launches through its account wrapper in a managed tmux window. Codex open
 The widget adds `--cli` by default. Its **Use CLI by default** setting switches new Codex sessions between the CLI
 and desktop app, and the account menu offers the other client for one launch in the default or a chosen directory.
 The override leaves the saved client and directory preferences unchanged. Claude sessions always use their CLI.
+For Claude, `launch` also accepts `--model MODEL`, `--effort LEVEL`, `--permission-mode MODE` and `--prompt TEXT`.
+They work for both new and resumed sessions. Omitted settings use Claude's native defaults; no account preference
+is rewritten. Effort levels are `low`, `medium`, `high`, `xhigh` and `max`. Permission modes are `acceptEdits`,
+`auto`, `bypassPermissions`, `manual`, `dontAsk` and `plan`; the selected native client enforces their availability.
+The prompt is one literal argument after the native option terminator, including leading dashes, quotes and newlines.
+Codex launches reject these options before starting a process. Login does not accept them.
+Start takeover sessions through this managed route instead of generating Konsole tabs:
+
+```sh
+agent-eta account launch claude:work --cli --directory /trusted/project \
+  --resume SESSION_ID --model opus --effort max --permission-mode plan --prompt 'Continue the approved work'
+```
+
 `account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` resumes a session after its existing writer has
 exited. A managed Codex resume is listed idle before its first prompt. The command refuses a live writer and
 names either the managed terminal's attach command or the reason the writer cannot be gated. A thread held by
@@ -337,6 +350,13 @@ disables automatic workers. `AGENT_ETA_CODEX_BIN`, `CLAUDE_BIN`, `AGENT_ETA_CLAU
 then the desktop bundle at `/usr/lib/chatgpt/resources/codex`.
 
 ### The list contract
+
+Before building a snapshot, the collector reconciles pair-held Codex command tasks against their own thread's
+native rollout. An `event_msg` with `item_completed`, a `CommandExecution` item, the exact command ID and status
+`completed` or `failed` proves that a missed PostToolUse task has ended, even while its turn continues.
+The reader streams the rollout because an old missed completion can lie outside the normal transcript tail.
+Missing, unreadable or malformed evidence preserves the task. PID and lock holders and manual reminders keep
+their existing lifecycle. The existing end-of-turn cleanup remains a fallback for pair tasks.
 
 Process-aware collectors record their runtime's PID namespace in `.pid-namespace` under the state directory.
 A reader from a different namespace fails before collecting or pruning sessions, tasks or turn ETAs. Run `list`
