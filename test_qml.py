@@ -37,6 +37,8 @@ class Qml(unittest.TestCase):
         self.assertIn("WindowJumper::test_konsole_tab_titles_pick_the_window", result.stdout)
         self.assertIn("Contract::test_a_question_during_a_turn_reads_as_such", result.stdout)
         self.assertIn("Runner::test_a_late_answer_never_reaches_the_next_run", result.stdout)
+        self.assertIn("Usage::test_time_label_setting_loads_and_saves", result.stdout)
+        self.assertIn("Usage::test_usage_rows_at_popup_widths", result.stdout)
 
 
 if __name__ == "__main__":

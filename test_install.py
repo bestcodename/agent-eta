@@ -10,12 +10,20 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 _HERE = pathlib.Path(__file__).resolve().parent
 _ID = "com.github.bestcodename.agenteta"
 
 
 class Install(unittest.TestCase):
+    def test_usage_time_labels_default_to_enabled(self):
+        config = ET.parse(_HERE / "plasmoid/contents/config/main.xml")
+        namespace = {"cfg": "http://www.kde.org/standards/kcfg/1.0"}
+        entry = config.find(".//cfg:entry[@name='showUsageTimeLabels']", namespace)
+        self.assertEqual(entry.attrib["type"], "Bool")
+        self.assertEqual(entry.find("cfg:default", namespace).text, "true")
+
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp)

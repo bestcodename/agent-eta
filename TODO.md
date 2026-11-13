@@ -28,9 +28,6 @@ priority.
    `run_inspection_kts` through the PhpStorm MCP server calling `contentManager.setSelectedContent`. Third,
    `ActivateTerminalToolWindow` through MCP, which shows the terminal but not the tab. A plugin is the last
    resort (spike ca. 2 Stunden)
-8. Add a UI setting, enabled by default, for time labels on the Agent ETA modal's usage progress bars.
-   Show weekdays for the 7-day bars and hours for the 5-hour bars, aligned with each window's start and
-   reset time in the local timezone. Keep the labels readable at the modal's supported widths.
 9. Show an estimated quota exhaustion time for each usage progress bar in the Agent ETA modal, or at least
    for each account. Derive the average consumption rate from the quota already used and the elapsed time
    in the current window. Estimate the remaining time as `(100 - usedPercent) / (usedPercent / elapsedTime)`.

@@ -19,6 +19,9 @@
     <entry name="showUsage" type="Bool">
       <default>true</default>
     </entry>
+    <entry name="showUsageTimeLabels" type="Bool">
+      <default>true</default>
+    </entry>
     <entry name="launchInCli" type="Bool">
       <default>true</default>
     </entry>

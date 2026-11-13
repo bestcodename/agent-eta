@@ -10,6 +10,7 @@ KCM.SimpleKCM {
     property alias cfg_pollClosed: pollClosed.value
     property alias cfg_pollOpen: pollOpen.value
     property alias cfg_showUsage: showUsage.checked
+    property alias cfg_showUsageTimeLabels: showUsageTimeLabels.checked
     property alias cfg_launchInCli: launchInCli.checked
     property alias cfg_yellowWidth: yellowWidth.value
     property alias cfg_blendYellow: blendYellow.checked
@@ -22,6 +23,7 @@ KCM.SimpleKCM {
     property int cfg_pollClosedDefault
     property int cfg_pollOpenDefault
     property bool cfg_showUsageDefault
+    property bool cfg_showUsageTimeLabelsDefault
     property bool cfg_launchInCliDefault
     property int cfg_yellowWidthDefault
     property bool cfg_blendYellowDefault
@@ -53,6 +55,17 @@ KCM.SimpleKCM {
             id: showUsage
             Kirigami.FormData.label: i18nc("@title:group", "Show:")
             text: i18nc("@option:check", "Usage windows")
+        }
+        QQC2.CheckBox {
+            id: showUsageTimeLabels
+            objectName: "showUsageTimeLabels"
+            enabled: showUsage.checked
+            text: i18nc("@option:check", "Time labels on usage bars")
+            QQC2.ToolTip.text: enabled
+                ? i18n("Show local hours or weekdays along each usage window. Labels adapt to the available width.")
+                : i18n("Enable usage windows to change their time labels.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            Accessible.description: QQC2.ToolTip.text
         }
         QQC2.CheckBox {
             id: launchInCli

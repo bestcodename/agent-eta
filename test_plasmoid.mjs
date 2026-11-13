@@ -84,6 +84,58 @@ test("usage bars get a faint tick at every hour or day of the window", () => {
     }
 });
 
+test("usage time marks use exact deadlines and local clock boundaries", () => {
+    const end = new Date("2026-11-13T08:24:00+01:00").getTime() / 1000;
+    const marks = logic.windowTimeMarks({minutes: 300, resets_at: end});
+    assert.equal(marks[0].at, end - 5 * 3600);
+    assert.equal(marks.at(-1).at, end);
+    assert.deepEqual(marks.slice(1, -1).map(mark => new Date(mark.at * 1000).getHours()), [4, 5, 6, 7, 8]);
+    for (const mark of marks.slice(1, -1)) {
+        assert.equal(new Date(mark.at * 1000).getMinutes(), 0);
+        assert.equal(mark.fraction, (mark.at - marks[0].at) / (end - marks[0].at));
+    }
+    assert.notDeepEqual(marks, logic.windowTimeMarks({minutes: 300, resets_at: end + 1800}));
+    const days = logic.windowTimeMarks({minutes: 10080, resets_at: end});
+    assert.equal(days[0].at, end - 7 * 86400);
+    assert.ok(days.every(mark => mark.days));
+    assert.ok(days.slice(1, -1).every(mark => new Date(mark.at * 1000).getHours() === 0));
+    for (const window of [null, {}, {minutes: 300}, {minutes: 0, resets_at: end},
+                          {minutes: 300, resets_at: NaN}, {minutes: 300, resets_at: Infinity}]) {
+        assert.deepEqual(logic.windowTimeMarks(window), []);
+    }
+});
+
+test("usage axes retain real elapsed hours and calendar days across daylight saving", () => {
+    const spring = logic.windowTimeMarks({minutes: 300,
+        resets_at: new Date("2026-03-29T04:30:00+02:00").getTime() / 1000});
+    assert.deepEqual(spring.slice(1, -1).map(mark => new Date(mark.at * 1000).getHours()), [23, 0, 1, 3, 4]);
+    const fall = logic.windowTimeMarks({minutes: 300,
+        resets_at: new Date("2026-10-25T04:30:00+01:00").getTime() / 1000});
+    assert.deepEqual(fall.slice(1, -1).map(mark => new Date(mark.at * 1000).getHours()), [1, 2, 2, 3, 4]);
+    for (let index = 2; index < fall.length - 1; index++) assert.equal(fall[index].at - fall[index - 1].at, 3600);
+    const days = logic.windowTimeMarks({minutes: 10080,
+        resets_at: new Date("2026-03-31T12:00:00+02:00").getTime() / 1000}).slice(1, -1);
+    assert.ok(days.some((mark, index) => index && mark.at - days[index - 1].at === 23 * 3600));
+    assert.ok(days.every(mark => new Date(mark.at * 1000).getHours() === 0));
+});
+
+test("usage labels fit measured text at narrow widths without moving time marks", () => {
+    const marks = Array.from({length: 9}, (_, index) => ({at: index, fraction: index / 8, width: 30}));
+    for (const width of [20, 30, 60, 100, 200, 400, 800]) {
+        const labels = logic.fitTimeLabels(marks, width, 6);
+        for (let index = 0; index < labels.length; index++) {
+            assert.ok(labels[index].x >= 0);
+            assert.ok(labels[index].x + labels[index].width <= width);
+            if (index) assert.ok(labels[index].x >= labels[index - 1].x + labels[index - 1].width + 6);
+        }
+        if (labels.length) assert.equal(labels.at(-1).at, 8);
+        if (width >= 66) assert.equal(labels[0].at, 0);
+    }
+    assert.equal(logic.fitTimeLabels(marks, 800, 6).length, marks.length);
+    assert.deepEqual(logic.fitTimeLabels([], 400, 6), []);
+    assert.deepEqual(logic.fitTimeLabels(marks, NaN, 6), []);
+});
+
 test("rows say what is left, what ran over and where the session stands", () => {
     assert.equal(logic.etaText({due: NOW + 600, remaining: 600}, NOW), "10m left");
     assert.equal(logic.etaText({due: NOW - 180, remaining: -180}, NOW), "3m over");

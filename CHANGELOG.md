@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-11-13
+
+### Added
+
+- Default-on usage time labels with local hours and weekdays anchored to each window's reset
+- Width-aware label thinning, full-date tooltips and daylight-saving-aware clock boundaries
+- QML coverage for responsive usage rows, setting bindings and missing deadlines
+
+### Changed
+
+- Usage reset text sits above full-width bars
+
 ## [2.11.1] - 2026-11-13
 
 ### Fixed
