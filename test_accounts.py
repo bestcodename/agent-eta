@@ -295,11 +295,32 @@ class Actions(Isolated):
         self.assertEqual(runtime.return_value.start.call_args.args[0],
                          [providers.DESKTOP_CODEX, "--no-daemon", "-C", str(self.root), "resume", "thread"])
 
+    def test_a_resume_is_registered_before_its_viewer_even_when_none_attaches(self):
+        import agent_eta_tmux
+        calls = []
+        args = self.args("launch", resume="r1", cli=True)
+        with mock.patch.object(providers, "executable", return_value="/fake/codex"), \
+                mock.patch("agent_eta_tmux.Runtime") as runtime:
+            runtime.return_value.start.return_value = {"scope": "s"}
+            runtime.return_value.attach.side_effect = lambda record: (
+                calls.append("attach"), (_ for _ in ()).throw(agent_eta_tmux.TmuxError("no viewer")))
+            with self.assertRaises(agent_eta_tmux.TmuxError):
+                accounts.account_action(args, inspect=lambda source: None,
+                                        launched=lambda account, record, resume: calls.append(
+                                            ("launched", account["id"], record, resume)))
+        self.assertEqual(calls, [("launched", "codex", {"scope": "s"}, "r1"), "attach"])
+
     def test_resume_refuses_a_live_writer_before_starting_anything(self):
         args = self.args("launch", resume="thread", cli=True)
-        with mock.patch.object(accounts, "launch") as launch, self.assertRaisesRegex(providers.AccountError, "live writer"):
-            accounts.account_action(args, inspect=lambda source: {"pid": 123})
-        launch.assert_not_called()
+        cases = (({"gate": 123, "gate_reason": None}, "agent-eta attach codex:thread"),
+                 ({"gate": None, "gate_reason": "desktop chats cannot be gated"},
+                  r"live writer \(desktop chats cannot be gated\)"),
+                 ({"pid": 123}, r"live writer \(a process of its own\)"))
+        for writer, message in cases:
+            with self.subTest(message), mock.patch.object(accounts, "launch") as launch, \
+                    self.assertRaisesRegex(providers.AccountError, message):
+                accounts.account_action(args, inspect=lambda source: writer)
+            launch.assert_not_called()
 
     def test_codex_launch_encodes_the_directory_and_login_uses_the_native_cli(self):
         from urllib.parse import parse_qs, urlparse

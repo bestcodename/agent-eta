@@ -1614,6 +1614,27 @@ def codex_end_holder(thread):
     return None
 
 
+LAUNCH_SCAN_SECONDS = 5
+
+
+def register_launch(account, record, resume):
+    """List a Codex thread that `account launch --cli --resume` started, idle, before its first prompt.
+    Codex runs no hook until then, so the thread would stay missing from `list` and `attach`. The holder
+    is the codex process in the launch's scope, the process the first hook names as well."""
+    if account["provider"] != "codex" or not resume:
+        return
+    deadline = time.monotonic() + LAUNCH_SCAN_SECONDS
+    while True:
+        pid = next((pid for pid in tmux_api.scope_pids(record["scope"]) if comm_of(pid) == "codex"), None)
+        if pid or time.monotonic() >= deadline:
+            break
+        time.sleep(0.1)
+    start = proc_start(pid) if pid else None
+    if start:
+        codex_state(state_dir(), {"session_id": resume, "cwd": record.get("cwd")}, "idle",
+                    holder={"pid": pid, "start": start})
+
+
 def reminders_need_you():
     """Whether `"reminder_sessions": "needs_you"` in the agent-eta config keeps an idle session whose
     only entries are reminders not due yet under Needs you. Any other value, `working` by default,
@@ -1999,7 +2020,7 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done,
                 "set": cmd_set, "turn": cmd_turn, "handoff": cmd_handoff,
-                "account": lambda args: accounts_api.account_action(args, handoff_batch, handoff_inspect),
+                "account": lambda args: accounts_api.account_action(args, handoff_batch, handoff_inspect, register_launch),
                 "tab": konsole_api.tab_action, "attach": cmd_attach, "viewer-guard": cmd_viewer_guard, "remote": remote_api.remote_action,
                 "account-tabs": cmd_account_tabs}
     try:

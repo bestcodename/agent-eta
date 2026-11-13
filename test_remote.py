@@ -7,6 +7,7 @@ A fake `ssh` first on PATH stands in for the remote host, so no test opens a con
 import copy
 import json
 import os
+import shutil
 import pathlib
 import tempfile
 import time
@@ -213,14 +214,31 @@ class AttachTest(unittest.TestCase):
         self.fake_process(os.getpid(), ["/usr/bin/ssh"] + self.argv[1:])
         self.assertEqual(remote.attach("desktop", "codex:t1", False, proc=str(self.proc))["opened"], False)
 
+    def open_viewer(self, argv):
+        """A terminal whose ssh shows up as a process after its start returned."""
+        self.opened = argv
+        self.fake_process(os.getpid(), argv)
+
     def test_without_a_viewer_a_terminal_runs_the_remote_attach(self):
-        self.fake_process(os.getpid(), self.argv[:-1] + ["codex:other"])
-        self.assertEqual(remote.attach("desktop", "codex:t1", False, proc=str(self.proc)), {"opened": True, "pids": []})
-        for _ in range(50):
-            if self.recorded.exists():
-                break
-            time.sleep(0.05)
-        self.assertEqual(self.recorded.read_text().split("\n")[:-1], ["-e"] + self.argv)
+        self.fake_process(1, self.argv[:-1] + ["codex:other"])
+        with mock.patch.object(remote, "open_terminal", side_effect=self.open_viewer), \
+                mock.patch.object(remote, "REMOTE_SETTLE", 0):
+            result = remote.attach("desktop", "codex:t1", False, proc=str(self.proc))
+        self.assertEqual(result, {"opened": True, "pids": lineage(os.getpid())})
+        self.assertEqual(self.opened, self.argv)
+
+    def test_a_remote_attach_that_never_shows_or_ends_at_once_is_an_error(self):
+        def gone(seconds):
+            shutil.rmtree(self.proc / str(os.getpid()), ignore_errors=True)
+
+        cases = (("never shows", lambda argv: None, None),
+                 ("ends at once", self.open_viewer, gone))
+        for name, opener, sleep in cases:
+            with self.subTest(name), mock.patch.object(remote, "open_terminal", side_effect=opener), \
+                    mock.patch.object(remote, "VIEWER_TIMEOUT", 0.2), \
+                    mock.patch.object(remote.time, "sleep", side_effect=sleep), \
+                    self.assertRaisesRegex(remote.RemoteError, "ended at once"):
+                remote.attach("desktop", "codex:t1", False, proc=str(self.proc))
 
     def test_source_and_host_are_validated_before_ssh_sees_them(self):
         with self.assertRaises(handoff.HandoffError):

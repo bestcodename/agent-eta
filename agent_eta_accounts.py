@@ -262,9 +262,10 @@ def handoff_here(store, account):
                              env=account_environment())
 
 
-def account_action(args, batch=None, inspect=None):
+def account_action(args, batch=None, inspect=None, launched=None):
     """`batch(agent, target, account_name)` moves every available session of `agent` across providers,
-    which only agent-eta itself can, since it collects the sessions."""
+    which only agent-eta itself can, since it collects the sessions. `launched(account, record, resume)`
+    runs for a managed terminal right after it starts, before its viewer opens."""
     store = AccountStore()
     action = args.account_action
     if action == "enable":
@@ -277,9 +278,16 @@ def account_action(args, batch=None, inspect=None):
             chosen = getattr(args, "directory", None)
             directory = valid_directory(account["default_directory"] if chosen is None else chosen)
             resume = getattr(args, "resume", None)
-            if resume and inspect and inspect((account["provider"], resume)) is not None:
-                raise AccountError("This session still has a live writer. Attach to it or close it before resuming.")
+            writer = inspect((account["provider"], resume)) if resume and inspect else None
+            if writer is not None:
+                if writer.get("gate"):
+                    raise AccountError("This session runs in a managed terminal. Show it with agent-eta attach %s:%s."
+                                       % (account["provider"], resume))
+                raise AccountError("This session still has a live writer (%s). Close it there before resuming."
+                                   % (writer.get("gate_reason") or "a process of its own"))
             options = {"cli": getattr(args, "cli", False), "resume": resume} if action == "launch" else {}
+            if action == "launch" and launched:
+                options["started"] = lambda record: launched(account, record, resume)
             launch(account, directory, login=action == "login", **options)
         elif action == "default-directory":
             if args.directory is None:
