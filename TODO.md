@@ -102,8 +102,10 @@ priority.
        public repository has no license. Proposal: a license first; then a Claude Code plugin in this repository whose
        `hooks/hooks.json` replaces the hand wiring and whose `.claude-plugin/marketplace.json` makes it installable
        with `/plugin marketplace add bestcodename/agent-eta`; Codex keeps its hand-wired hooks; a third-party listing
-       such as Agensi only once 1 and 2 run, because the tool is Linux- and KDE-bound until then (ca. 4 hours; the
-       license ca. 15 minutes)
+       such as Agensi only once 1 and 2 run, because the tool is Linux- and KDE-bound until then. Before listing,
+       survey the other marketplaces for skills and plugins and record for each the share of a sale that goes to the
+       author and to the platform, requested on 2026-11-13 (ca. 4 hours; the license ca. 15 minutes; the survey
+       ca. 1 hour)
 24. (low, proposal) Install tmux 3.7c from trixie-backports on stefan-desktop and stefan-notebook and add it to the
     workstation setup of [bestcodename/ai](https://github.com/bestcodename/ai). On 2026-11-11 at 17:41:45
     `tmux detach-client -t /dev/pts/5`, run against a duplicate Konsole viewer, crashed the tmux 3.5a server and all
@@ -153,8 +155,30 @@ priority.
     Define how the period count initializes, increments and persists, and keep every reset boundary and the
     current period's usage readable. Cover differing deadlines, the first period, multiple resets and missing
     history with tests (ca. 2 hours)
+37. (proposal) Add configurable usage thresholds for visibly marking accounts as blocked in the Agent ETA
+    modal, requested on 2026-11-12. An account intentionally left at 99% while another account is used can
+    otherwise look usable throughout the remaining quota window. Reuse the widget settings and allow separate
+    cutoffs for short and weekly usage windows. Mark the account visibly blocked when any applicable window
+    reaches its configured cutoff, and show which window triggered it and when that window resets. Explain in
+    a tooltip that the configured cutoff was reached, distinct from a provider-reported hard limit. Re-evaluate
+    the display after settings changes, fresh usage readings and resets; preserve unknown or stale usage states.
+    Cover threshold boundaries, multiple windows, saved settings and reset handling with tests (ca. 2 hours)
 38. (low, proposal) Rename the project to Agent Desk and the repository slug to `agent-desk`, requested on
     2026-11-13. The name should cover sessions, accounts, usage limits and handoffs. Verify the GitHub repository
     and any GitLab mirror mapping before renaming either service. Introduce `agent-desk` as the primary command
     while retaining `agent-eta` compatibility. Update package and widget display names, repository URLs,
     installation, hooks and external callers without losing saved settings or runtime ownership (ca. 4 hours)
+39. (proposal) Collapsible subtask bars in active session rows, requested on 2026-11-13. `SessionRow.qml` shows a
+    `TaskRow` for every entry of `session.taskItems`. A widget setting chooses what a collapsed row keeps: all subtask
+    bars, the longest and the earliest ETA, only the longest, or only the earliest; a click expands the row to all
+    bars. Default all, placed in the Appearance section of #30; test each mode, equal ETAs and a single entry
+    (ca. 1 hour)
+40. (proposal) Open sessions on the device the user is using, requested on 2026-11-13. A click opens or raises a
+    viewer on the machine whose widget was clicked, and a remote session opens through `ssh -t HOST agent-eta attach`
+    (docs/agent-eta.md, Remote hosts).
+    1. **Default device setting.** This machine, a host from `remote_hosts` or automatic, for new launches and for
+       attach; stored in `config.json` and the widget settings, default this machine (ca. 1 hour)
+    2. **Automatic detection.** The current device is the one whose graphical session is unlocked and not idle
+       (`loginctl show-session <id> -p Type -p LockedHint -p IdleHint`), read locally and over the existing BatchMode
+       SSH; an ambiguous result falls back to the default, and `DISPLAY` is never forced on another host
+       (ca. 2 hours)
