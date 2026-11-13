@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- TODO: proposals 37, 39 and 40; marketplace survey joins item 23
+- TODO: proposal 41 on Codex and Claude Code parity; items 29, 30 and 32 raised to next
+
 ## [2.13.0] - 2026-11-13
 
 ### Added
