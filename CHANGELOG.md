@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- TODO item 38 proposes renaming the project and repository to Agent Desk
+
+### Changed
+
+- TODO items 5 and 16 record title and login reproduction limits measured on 2026-11-13
+
 ## [2.9.0] - 2026-11-13
 
 ### Changed
