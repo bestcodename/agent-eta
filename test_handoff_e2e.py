@@ -252,11 +252,27 @@ class ManagedHandoff(unittest.TestCase):
         self.assertTrue(self.runtime.stop(self.source_terminal["id"]))
         self.wait(lambda: subprocess.run(["systemctl", "--user", "is-active", "--quiet", self.runtime.unit], capture_output=True).returncode != 0)
 
+    def test_find_sweeps_a_naturally_ended_terminal_and_keeps_the_live_source(self):
+        ended = self.runtime.start(["sleep", "0.5"], self.repo)
+        self.owned.append(ended["id"])
+        path = self.runtime.root / (ended["id"] + ".json")
+        self.wait(lambda: tmux.proc_start(ended["pane_pid"]) != ended["pane_start"])
+
+        def swept():
+            found = self.runtime.find(self.source["pid"], self.source["start"])
+            return found and found["id"] == self.source_terminal["id"] and not path.exists()
+        self.wait(swept)
+        self.assertFalse((self.runtime.root / ended["id"]).exists())
+        self.assertTrue((self.runtime.root / (self.source_terminal["id"] + ".json")).exists())
+        self.assertTrue((self.runtime.root / self.source_terminal["id"] / "launch.sh").exists())
+
     def test_frozen_source_is_retired_without_resuming_it(self):
         subprocess.run(["systemctl", "--user", "freeze", self.source_terminal["scope"]], check=True, capture_output=True)
         self.assertTrue(self.runtime.stop(self.source_terminal["id"]))
         self.assertIsNone(tmux.proc_start(self.source["pid"]))
         self.assertIsNone(self.runtime.pane(self.source_terminal))
+        self.assertFalse((self.runtime.root / (self.source_terminal["id"] + ".json")).exists())
+        self.assertFalse((self.runtime.root / self.source_terminal["id"]).exists())
 
     def test_tmux_moving_the_launcher_cannot_move_the_agent(self):
         self.assertNotEqual(self.source["pid"], self.source_terminal["pane_pid"])

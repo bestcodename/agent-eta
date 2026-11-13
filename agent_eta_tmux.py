@@ -229,11 +229,8 @@ class Runtime:
         if not re.fullmatch(r"[a-f0-9]{32}", identifier):
             raise TmuxError("invalid managed terminal ID")
         scope = "agent-eta-agent-" + identifier + ".scope"
-        folder = protected(self.root / identifier)
-        script = folder / "launch.sh"
+        script = self.root / identifier / "launch.sh"
         adapter = account_environment()["CLAUDE_HANDOFF_TERMINAL"]
-        script.write_text(launcher(argv, dict(environment or {}, CLAUDE_HANDOFF_TERMINAL=adapter)))
-        script.chmod(0o700)
         command = ["systemd-run", "--user", "--scope", "--collect", "--quiet", "--expand-environment=no", "--unit=" + scope,
                    "--", "/bin/sh", str(script)]
         # tmux can asynchronously move its pane leader into a tmux-spawn scope.
@@ -242,6 +239,9 @@ class Runtime:
         record = {"id": identifier, "scope": scope, "cwd": str(cwd), "created": time.time()}
         with (self.root / "host.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            protected(script.parent)
+            script.write_text(launcher(argv, dict(environment or {}, CLAUDE_HANDOFF_TERMINAL=adapter)))
+            script.chmod(0o700)
             sessions = self.tmux("list-sessions", "-F", "#{session_id}", check=False)
             existing = sessions.stdout.splitlines() if sessions.returncode == 0 else []
             if existing:
@@ -292,18 +292,73 @@ class Runtime:
         self.tmux("set-option", "-w", "-t", window, "remain-on-exit", "on")
         self.tmux("set-hook", "-w", "-t", window, "pane-died", close)
 
+    def prune(self, record):
+        """Remove only a proven-ended terminal's record and known launcher file.
+
+        Share start()'s lock so a pre-launch intent cannot disappear before its
+        scope starts. Unknown probes and foreign PID namespaces retain all files.
+        """
+        if not isinstance(record, dict):
+            return False
+        identifier = record.get("id")
+        if not isinstance(identifier, str) or not re.fullmatch(r"[a-f0-9]{32}", identifier):
+            return False
+        if record.get("scope") != "agent-eta-agent-" + identifier + ".scope":
+            return False
+        try:
+            marker = self.root.parent / ".pid-namespace"
+            if marker.exists():
+                if marker.read_text().strip() != os.readlink("/proc/self/ns/pid"):
+                    return False
+            elif self.root.parent == Path(f"/tmp/agent-eta-{os.getuid()}"):
+                return False
+            with (self.root / "host.lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if self.read(identifier) != record or self.pane(record):
+                    return False
+                pid, start = record.get("pane_pid"), record.get("pane_start")
+                if not pid or not start:
+                    return False
+                current = proc_start(pid)
+                if current == start or (current is None and group_alive(pid)):
+                    return False
+                state = self.run(["systemctl", "--user", "show", "-p", "LoadState", "-p", "ActiveState",
+                                  "-p", "ControlGroup", record["scope"]], check=False, timeout=5)
+                fields = dict(line.split("=", 1) for line in state.stdout.splitlines() if "=" in line)
+                if (fields.get("LoadState") not in ("loaded", "not-found")
+                        or fields.get("ActiveState") not in ("inactive", "failed")
+                        or fields.get("ControlGroup") != ""
+                        or (state.returncode and fields.get("LoadState") != "not-found")):
+                    return False
+                folder = self.root / identifier
+                if folder.is_symlink():
+                    return False
+                if folder.exists():
+                    if any(path.name != "launch.sh" for path in folder.iterdir()):
+                        return False
+                    (folder / "launch.sh").unlink(missing_ok=True)
+                    folder.rmdir()
+                (self.root / (identifier + ".json")).unlink()
+                return True
+        except (OSError, ValueError, KeyError, TypeError, TmuxError):
+            return False
+
     def find(self, pid, start):
+        """Find this agent's terminal while sweeping proven-ended records."""
         if not start or proc_start(pid) != start:
             return None
         group = cgroup(pid)
+        found = None
         for path in self.root.glob("*.json"):
             try:
                 record = json.loads(path.read_text())
+                if self.prune(record):
+                    continue
                 if group and group.endswith("/" + record["scope"]) and self.pane(record):
-                    return record
+                    found = record
             except (OSError, ValueError, KeyError, TypeError, TmuxError):
                 continue
-        return None
+        return found
 
     def stop(self, identifier):
         """Cancel the owned launcher group and agent scope; confirm both are gone."""
@@ -343,6 +398,7 @@ class Runtime:
         while True:
             state = self.run(["systemctl", "--user", "show", "-P", "ActiveState", record["scope"]], check=False)
             if not self.pane(record) and state.stdout.strip() in ("", "inactive", "failed"):
+                self.prune(record)
                 return True
             if time.monotonic() >= deadline:
                 return False

@@ -499,6 +499,13 @@ Interactive pane launchers discard inherited `NO_COLOR` from automation tools wh
 `COLORTERM`. Explicit launcher environment overrides still apply. Existing processes need a session resume to
 receive this environment correction.
 
+Managed terminal lookup sweeps ended records, and a confirmed `stop()` also attempts cleanup. The same helper
+requires the pane and launcher group to have ended and a systemd scope probe to show an inactive or absent unit
+without a control group. Active scopes, incomplete identities and failed probes preserve the files. Cleanup
+shares the launch lock without waiting for a launch in progress, rechecks the record under that lock and respects
+the state directory's PID namespace. It removes only the known `launch.sh`, its empty folder and the matching
+record. Unexpected files and linked folders are retained. The shared tmux server and live terminals are untouched.
+
 The pane launcher waits for the agent in a separate process, so tmux's automatic `tmux-spawn` scope can move the
 launcher without moving the agent. On failure, timeout, Ctrl-C, SIGTERM or SIGHUP, cancellation kills the owned
 launcher process group and stops the complete agent scope. Only confirmed cancellation allows the source scope to thaw. If cancellation is

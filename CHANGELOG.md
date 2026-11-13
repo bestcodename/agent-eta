@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-11-13
+
+### Fixed
+
+- Ended managed terminal records and launcher folders are pruned after cancellation and during lookup
+- Cleanup preserves active scopes, launcher groups, concurrent launches and uncertain ownership
+- Launcher file creation shares the lock used by runtime cleanup
+
 ## [2.11.0] - 2026-11-13
 
 ### Added
