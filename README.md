@@ -41,6 +41,8 @@ another terminal supporting `-e`. Closing the viewer leaves agents running; expl
 A viewer closes once its agent ends, instead of showing another agent. Viewers run the running tmux server's own
 binary, so a tmux upgrade does not break new viewers before the server restarts.
 Each pane keeps a separate launcher so tmux's own scope tracking cannot move the agent out of its owned scope.
+Ended terminal records and launcher folders are pruned after cancellation and during terminal lookup. Cleanup
+retains anything with a live pane, launcher group, active scope or uncertain ownership.
 The launcher clears inherited `NO_COLOR` so automation tools cannot force an interactive agent into grayscale.
 It preserves `TERM` and `COLORTERM`; explicitly supplied launcher settings still take precedence.
 

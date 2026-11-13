@@ -1,5 +1,6 @@
 """Managed terminal ownership, attachment and cancellation regressions."""
 import json
+import fcntl
 import os
 from pathlib import Path
 import pty
@@ -39,6 +40,105 @@ class RuntimeUnit(unittest.TestCase):
         path.write_text("existing")
         with self.assertRaisesRegex(tmux.TmuxError, "cannot prepare"):
             tmux.Runtime(path)
+
+    def ended_record(self):
+        identifier = "d" * 32
+        record = {"id": identifier, "scope": "agent-eta-agent-" + identifier + ".scope",
+                  "server_pid": 10, "server_start": "old-server", "pane": "%1",
+                  "pane_pid": 123, "pane_start": "old-launcher"}
+        self.runtime.write(record)
+        folder = self.runtime.root / identifier
+        folder.mkdir()
+        (folder / "launch.sh").write_text("#!/bin/sh\nexit 0\n")
+        return record
+
+    def test_find_prunes_ended_records_and_launcher_folders(self):
+        record = self.ended_record()
+        state = subprocess.CompletedProcess([], 0, "LoadState=not-found\nActiveState=inactive\nControlGroup=\n", "")
+        with mock.patch.object(self.runtime, "pane", return_value=None), \
+                mock.patch.object(tmux, "proc_start", side_effect=lambda pid: "live" if pid == 456 else None), \
+                mock.patch.object(tmux, "cgroup", return_value="/other"), \
+                mock.patch.object(tmux, "group_alive", return_value=False), \
+                mock.patch.object(self.runtime, "run", return_value=state):
+            self.assertIsNone(self.runtime.find(456, "live"))
+        self.assertFalse((self.runtime.root / (record["id"] + ".json")).exists())
+        self.assertFalse((self.runtime.root / record["id"]).exists())
+        self.assertTrue(self.runtime.stop(record["id"]))
+
+    def test_stop_removes_confirmed_ended_runtime_files(self):
+        record = self.ended_record()
+        def state(argv, **kwargs):
+            text = "inactive\n" if "-P" in argv else "LoadState=not-found\nActiveState=inactive\nControlGroup=\n"
+            return subprocess.CompletedProcess([], 0, text, "")
+        with mock.patch.object(self.runtime, "pane", return_value=None), \
+                mock.patch.object(tmux, "proc_start", return_value=None), \
+                mock.patch.object(tmux, "group_alive", return_value=False), \
+                mock.patch.object(self.runtime, "run", side_effect=state):
+            self.assertTrue(self.runtime.stop(record["id"]))
+        self.assertFalse((self.runtime.root / (record["id"] + ".json")).exists())
+        self.assertFalse((self.runtime.root / record["id"]).exists())
+
+    def test_pruning_preserves_live_or_unknown_ownership(self):
+        record = self.ended_record()
+        cases = [
+            (record, None, False, 0, "LoadState=not-found\nActiveState=inactive\nControlGroup=\n"),
+            (None, "old-launcher", False, 0, "LoadState=not-found\nActiveState=inactive\nControlGroup=\n"),
+            (None, None, True, 0, "LoadState=not-found\nActiveState=inactive\nControlGroup=\n"),
+            (None, None, False, 0, "LoadState=loaded\nActiveState=active\nControlGroup=/scope\n"),
+            (None, None, False, 0, "LoadState=loaded\nActiveState=failed\nControlGroup=/scope\n"),
+            (None, None, False, 1, ""),
+            (None, None, False, 1, "LoadState=loaded\nActiveState=inactive\nControlGroup=\n"),
+        ]
+        for pane, start, group, code, output in cases:
+            with self.subTest(pane=bool(pane), start=start, group=group, output=output), \
+                    mock.patch.object(self.runtime, "pane", return_value=pane), \
+                    mock.patch.object(tmux, "proc_start", return_value=start), \
+                    mock.patch.object(tmux, "group_alive", return_value=group), \
+                    mock.patch.object(self.runtime, "run", return_value=subprocess.CompletedProcess([], code, output, "")):
+                self.assertFalse(self.runtime.prune(record))
+            self.assertTrue((self.runtime.root / (record["id"] + ".json")).exists())
+            self.assertTrue((self.runtime.root / record["id"] / "launch.sh").exists())
+
+    def test_cleanup_skips_a_launch_in_progress_and_foreign_pid_namespace(self):
+        record = self.ended_record()
+        with (self.runtime.root / "host.lock").open("a") as lock, \
+                mock.patch.object(self.runtime, "pane") as pane:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self.assertFalse(self.runtime.prune(record))
+            pane.assert_not_called()
+        (self.runtime.root.parent / ".pid-namespace").write_text("another namespace")
+        with mock.patch.object(self.runtime, "pane") as pane:
+            self.assertFalse(self.runtime.prune(record))
+            pane.assert_not_called()
+        self.assertTrue((self.runtime.root / record["id"] / "launch.sh").exists())
+
+    def test_cleanup_keeps_unexpected_files_and_does_not_follow_folder_links(self):
+        record = self.ended_record()
+        folder = self.runtime.root / record["id"]
+        state = subprocess.CompletedProcess([], 0, "LoadState=not-found\nActiveState=inactive\nControlGroup=\n", "")
+        with mock.patch.object(self.runtime, "pane", return_value=None), \
+                mock.patch.object(tmux, "proc_start", return_value=None), \
+                mock.patch.object(tmux, "group_alive", return_value=False), \
+                mock.patch.object(self.runtime, "run", return_value=state):
+            (folder / "unexpected").write_text("retain")
+            self.assertFalse(self.runtime.prune(record))
+            self.assertTrue((folder / "launch.sh").exists())
+            moved = self.runtime.root / "elsewhere"
+            folder.rename(moved)
+            folder.symlink_to(moved, target_is_directory=True)
+            self.assertFalse(self.runtime.prune(record))
+            self.assertTrue((moved / "launch.sh").exists())
+
+    def test_cleanup_retains_incomplete_or_malformed_records(self):
+        for record in ([], {}, {"id": "../outside"}, {"id": "a" * 32, "scope": "other.scope"}):
+            with self.subTest(record=record):
+                self.assertFalse(self.runtime.prune(record))
+        record = self.ended_record()
+        del record["pane_start"]
+        self.runtime.write(record)
+        with mock.patch.object(self.runtime, "pane", return_value=None):
+            self.assertFalse(self.runtime.prune(record))
+        self.assertTrue((self.runtime.root / record["id"] / "launch.sh").exists())
 
     def test_a_foreign_server_is_refused_before_any_window_is_created(self):
         def query(*args, **kwargs):

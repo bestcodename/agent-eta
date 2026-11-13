@@ -128,10 +128,6 @@ priority.
 27. (low) Install Qt 6's `qmltestrunner` on stefan-desktop and add it to the workstation setup of
     [bestcodename/ai](https://github.com/bestcodename/ai). `test_qml.Qml.test_widget_qml` is skipped here on
     2026-11-11 for lack of it, so widget changes are only tested on the notebook (ca. 15 Minuten)
-28. (low, proposal) Prune runtime records of ended terminals. On 2026-11-11 `/tmp/agent-eta-1000/tmux` held 65 records
-    and their `launch.sh` folders for 4 live windows; nothing in `agent_eta_tmux.py` deletes them, and `find()` reads
-    them all. Proposal: delete record and folder once `pane()` is `None` and the server identity is gone, in `stop()`
-    and in a sweep from `find()`, with a `test_tmux.py` case (ca. 1 Stunde)
 29. (low, proposal) Audit user-facing defaults and make useful behavior configurable through the existing widget
     settings and CLI configuration, requested on 2026-11-11. New widget sessions already have a CLI/desktop default
     and a one-launch menu override. Review session-click behavior, terminal and IDE commands, session visibility,
