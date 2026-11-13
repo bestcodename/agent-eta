@@ -598,12 +598,19 @@ Codex it writes from inside the sandbox through the shared `/tmp`.
 ```sh
 agent-eta run --eta 25m --label "full test suite" -- composer test
 id=$(agent-eta add --eta 10m --label "CI pipeline 1234")
+agent-eta set "$id" --eta 30m
 agent-eta done "$id"
 ```
 
 `run` lists the command for exactly as long as it runs. It forwards INT, TERM and HUP to it and exits with its exit code.
 `add` is for a wait that is not a local process, such as a CI pipeline or a subagent. With `--pid` the entry lives as
 long as that process. A bare number after `--eta` is seconds, as for `timeout(1)`.
+
+`set` gives a recorded entry a new ETA counted from now, and a new label with `--label`, instead of a second entry
+beside the stale one. The entry keeps its start, so the progress bar still counts from there, and its holder, so a
+hook entry still ends with its task. A background command recorded by the Claude hook has the id `claude-<task id>`,
+and every id is in `agent-eta list --json`. A `run` entry is refused, because its lock lives on the file that a
+rewrite would replace. A turn ETA is revised with another `agent-eta turn --eta …`.
 
 Every hook call adds one line to `hook.log` in the state directory, with the event, the agent, the session and tool ids
 and what the hook did. The command text never goes there. The log rotates at 256 KB.

@@ -31,6 +31,10 @@ dsh's own session logs, without an ETA. See docs/agent-eta.md.
         Record a wait that is not a local process, such as a CI pipeline, and remove it
         again. With --pid the entry lives exactly as long as that process.
 
+    agent-eta set ID --eta DUR [--label TEXT]
+        Give a recorded entry a new ETA from now instead of a second entry. A `run`
+        entry keeps its ETA.
+
     agent-eta account list [--json]
     agent-eta account refresh [--json]
     agent-eta account login|remove|launch ID
@@ -1755,6 +1759,28 @@ def cmd_done(args):
     return 1 if missing else 0
 
 
+def cmd_set(args):
+    """Give an existing entry a new ETA from now, and a new label with --label. Its start and holder stay, so
+    the progress bar keeps counting from the original start and a hook entry still ends with its task."""
+    directory = state_dir()
+    path = entry_path(directory, safe_id(args.id))
+    entry = read_json(path)
+    now = time.time()
+    if entry is None or not alive(entry, path, now):
+        print("agent-eta set: no entry %s" % args.id, file=sys.stderr)
+        return 1
+    if (entry.get("holder") or {}).get("type") == "lock":
+        # A rename would drop the flock that keeps a `run` entry alive.
+        print("agent-eta set: %s belongs to a running `agent-eta run`, whose ETA is fixed" % args.id,
+              file=sys.stderr)
+        return 1
+    entry["due"] = int(now + args.eta)
+    if args.label is not None:
+        entry["label"] = clip(args.label)
+    write_atomic(path, entry)
+    return 0
+
+
 def cmd_turn(args):
     agent, session = current_session()
     if agent not in ("claude", "codex", "dsh") or session_key(agent, session) is None:
@@ -1924,6 +1950,10 @@ def build_parser():
     turn.add_argument("--done", action="store_true")
     done = sub.add_parser("done", help="remove entries recorded with add")
     done.add_argument("ids", nargs="+")
+    setter = sub.add_parser("set", help="give a recorded entry a new ETA from now")
+    setter.add_argument("id", help="the id add printed, or claude-<background task id>")
+    setter.add_argument("--eta", type=eta_type, required=True)
+    setter.add_argument("--label")
     accounts_api.add_parser(sub)
     remote_api.add_parser(sub)
     handoff_api.add_parser(sub)
@@ -1946,7 +1976,7 @@ def main(argv=None):
         argv.insert(0, "list")
     args = build_parser().parse_args(argv)
     handlers = {"list": cmd_list, "hook": cmd_hook, "run": cmd_run, "add": cmd_add, "done": cmd_done,
-                "turn": cmd_turn, "handoff": cmd_handoff,
+                "set": cmd_set, "turn": cmd_turn, "handoff": cmd_handoff,
                 "account": lambda args: accounts_api.account_action(args, handoff_batch, handoff_inspect),
                 "tab": konsole_api.tab_action, "attach": cmd_attach, "viewer-guard": cmd_viewer_guard, "remote": remote_api.remote_action,
                 "account-tabs": cmd_account_tabs}

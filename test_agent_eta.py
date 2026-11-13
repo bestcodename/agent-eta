@@ -289,6 +289,36 @@ class Commands(StateTest):
         sleeper.wait()
         self.assertEqual(self.ids(), [])
 
+    def test_set_moves_an_add_entry_and_keeps_its_start(self):
+        entry_id = self.cli("add", "--eta", "10m", "--label", "CI pipeline").stdout.strip()
+        path = eta.entry_path(self.dir, entry_id)
+        before = eta.read_json(path)
+        revised = self.cli("set", entry_id, "--eta", "1h", "--label", "CI pipeline, retried")
+        self.assertEqual((revised.returncode, revised.stdout), (0, ""), revised.stderr)
+        after = eta.read_json(path)
+        self.assertEqual(after["started"], before["started"])
+        self.assertAlmostEqual(after["due"], time.time() + 3600, delta=5)
+        self.assertEqual(after["label"], "CI pipeline, retried")
+        self.assertEqual(self.ids(), [entry_id])
+
+    def test_set_reports_a_missing_or_ended_entry(self):
+        missing = self.cli("set", "add-missing", "--eta", "5m")
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("no entry add-missing", missing.stderr)
+        self.put("claude-bdead", holder={"type": "pid", "pid": self.dead_pid(), "start": 1})
+        self.assertEqual(self.cli("set", "claude-bdead", "--eta", "5m").returncode, 1)
+
+    def test_set_refuses_a_run_entry(self):
+        path = eta.entry_path(self.dir, "run-1")
+        lock = eta.write_locked(path, eta.make_entry("run-1", "other", "probe", 60, {"type": "lock"}, "run"))
+        self.addCleanup(lock.close)
+        due = eta.read_json(path)["due"]
+        refused = self.cli("set", "run-1", "--eta", "5m")
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("agent-eta run", refused.stderr)
+        self.assertEqual(eta.read_json(path)["due"], due)
+        self.assertTrue(eta.lock_held(path))
+
 
 class Hooks(StateTest):
     def hook(self, payload, env=None):
@@ -332,6 +362,17 @@ class Hooks(StateTest):
         child.kill()
         child.wait()
         self.assertEqual(eta.rows(self.dir, time.time()), [])
+
+    def test_set_revises_a_hook_recorded_eta(self):
+        child = self.background("bset1")
+        self.hook(self.claude_payload("bset1"), self.claude_env())
+        revised = self.cli("set", "claude-bset1", "--eta", "30m")
+        self.assertEqual(revised.returncode, 0, revised.stderr)
+        rows = eta.rows(self.dir, time.time())
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]["remaining"], 1800, delta=5)
+        self.assertEqual(rows[0]["label"], "Wait two minutes")
+        self.assertEqual(rows[0]["holder"]["pid"], child.pid)
 
     def test_claude_without_eta_is_listed_as_unknown(self):
         self.background("btest2")
