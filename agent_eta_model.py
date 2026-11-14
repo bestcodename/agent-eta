@@ -428,15 +428,30 @@ def late(session):
     return session["overdue"] or any(task["overdue"] for task in session["tasks"])
 
 
+# The summary fields that add up across hosts.
+SUMMARY_COUNTS = ("waiting", "working", "idle", "stopped", "overdue", "dormant", "attention", "live")
+
+
+def tray(counts):
+    """The tray state from summary counts. `light` is the tray orb over the sessions that are not
+    dormant: attention with the number of waiting sessions as soon as one waits, caution with the
+    number of idle and overdue ones, active without a number while everything else works or waits
+    for a limit, and off without any such session. Only attention makes the tray pulse.
+    """
+    if counts["waiting"]:
+        light, badge_count = "attention", counts["waiting"]
+    elif counts["idle"] or counts["overdue"]:
+        light, badge_count = "caution", counts["idle"] + counts["overdue"]
+    else:
+        light, badge_count = ("active" if counts["live"] else "off"), 0
+    status = "attention" if light == "attention" else "active" if counts["live"] else "passive"
+    return {"light": light, "badge_count": badge_count, "status": status}
+
+
 def summary(sessions):
     """Counts, the tray state and the session whose progress the tray icon shows. `attention`
     counts the sessions that need you now, which are the waiting ones and the working ones that
-    ran over.
-
-    `light` is the tray orb over the sessions that are not dormant: attention with the number of
-    waiting sessions as soon as one waits, caution with the number of idle and overdue ones, active
-    without a number while everything else works or waits for a limit, and off without any such
-    session. Only attention makes the tray pulse.
+    ran over. `tray()` derives the orb from the counts.
     """
     live = [s for s in sessions if not s["dormant"] and s["activity_state"] != "unknown"]
     counts = {state: sum(1 for s in live if s["activity_state"] == state)
@@ -447,13 +462,28 @@ def summary(sessions):
     result = dict(counts, overdue=overdue, dormant=sum(1 for s in sessions if s["dormant"]),
                   attention=counts["waiting"] + overdue, live=len(live),
                   progress_session_key=timed[0]["key"] if timed else None)
-    if counts["waiting"]:
-        result.update(light="attention", badge_count=counts["waiting"])
-    elif counts["idle"] or overdue:
-        result.update(light="caution", badge_count=counts["idle"] + overdue)
-    else:
-        result.update(light="active" if live else "off", badge_count=0)
-    result["status"] = "attention" if result["light"] == "attention" else "active" if live else "passive"
+    result.update(tray(result))
+    return result
+
+
+def summary_count(value):
+    """A count from another host's summary, or 0 when it is missing or not a count."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def combined_summary(parts, sessions):
+    """One summary over several hosts' summaries, such as the local one and each remote host's.
+    The counts add up and the tray state follows from the sums. The progress session is the one
+    among the parts' own whose row in `sessions` has the least time left, so each part's
+    `progress_session_key` must already name its row in `sessions`.
+    """
+    result = {name: sum(summary_count(part.get(name)) for part in parts) for name in SUMMARY_COUNTS}
+    rows = {session["key"]: session for session in sessions}
+    keys = [part.get("progress_session_key") for part in parts]
+    timed = [rows[key] for key in keys if isinstance(key, str) and key in rows]
+    timed = [row for row in timed if isinstance(row.get("remaining"), (int, float))]
+    result["progress_session_key"] = min(timed, key=lambda row: row["remaining"])["key"] if timed else None
+    result.update(tray(result))
     return result
 
 

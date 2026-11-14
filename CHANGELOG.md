@@ -7,8 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-11-14
+
 ### Changed
 
+- Remote hosts' sessions count in the tray orb, its number, the headline and the progress bar
+- Remote hosts' waiting and overdue signals notify, with the host in the title; their usage resets stay local
+- TODO: item 18 notes the remote sessions the badge left out before 2.14.0
+- TODO: proposal 42 to compact docs/agent-eta.md
 - TODO: proposals 37, 39 and 40; marketplace survey joins item 23
 - TODO: proposal 41 on Codex and Claude Code parity; items 29, 30 and 32 raised to next
 

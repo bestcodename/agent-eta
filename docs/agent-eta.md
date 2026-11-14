@@ -374,9 +374,9 @@ and `list --json` publishes it as contract schema 1, which the widget validates 
 | `labels` | the state and section labels, `question_open`, `reminder_pending` and `dormant_after` in seconds |
 | `sessions` | every session with `key`, `reported_state` as its agent reported it, `activity_state` as it effectively is, `activity_label`, `light` (`attention`, `caution`, `active`, `off`), `dormant`, `section`, its ETA fields, its task ids and `handoff`; a session of a remote host also has `host`, and its `tmux` navigation carries that `host` |
 | `tasks`, `usage`, `accounts` | the tasks, usage windows and accounts, each with a `key`; usage windows include `exhaustion` with a `state` and projected epoch `at`, or null when no timestamp applies |
-| `summary` | the counts per state, `light`, `badge_count`, `status` and `progress_session_key` for the tray icon |
+| `summary` | the counts per state, `light`, `badge_count`, `status` and `progress_session_key` for the tray icon, over the local sessions and those of every fresh remote host |
 | `sections`, `usage_groups` | the display order, as lists of keys |
-| `notification_signals` | one signal per waiting, overdue or reset condition, with `key`, `kind`, `entity_key`, `active`, `edge`, `notify_on_new`, `dedupe_key` and `message_params` |
+| `notification_signals` | one signal per waiting, overdue or reset condition, with `key`, `kind`, `entity_key`, `active`, `edge`, `notify_on_new`, `dedupe_key` and `message_params`; a fresh remote host adds its waiting and overdue signals with `remote:<host>/` before `key`, `entity_key` and `dedupe_key` and its `host` in `message_params` |
 
 Keys are `claude:<pid>`, `codex:<thread>`, `task:<id>`, `window:<agent>:<minutes>`, `account:<id>` and
 `usage:<agent>`, and a remote host's session and task keys and task ids start with `remote:<host>/`. An idle session that owns verified background work is working, while a reminder without a holder
@@ -482,7 +482,11 @@ remote rows, so two hosts never fetch each other in a loop. Hosts fetched within
 JSON listing. Their session and task keys and task ids gain the prefix `remote:HOST/`, and they join the local
 sections. `cwd`, `project_root` and `pids` are cleared and the handoff is unavailable, so only opening remains. A
 session in a managed tmux keeps its `tmux` navigation with `host`, and every other remote session reads "Runs on
-HOST". The summary, notifications, usage and accounts stay local, and the text list shows local sessions only.
+HOST". The summary adds up the counts of every fresh host, so the tray orb, its number, the headline and the
+progress bar cover them too. Their waiting and overdue signals join the notifications under prefixed keys, with the
+host in the title, so each machine's tray notifies for an event on either machine. A host that turns fresh again
+keeps its dedupe keys and notifies no claimed event a second time. Usage, its reset signals and accounts stay
+local, and the text list shows local sessions only.
 `agent-eta remote list` prints each host with its last fetch and its error, which is `unreachable`, `agent-eta on
 HOST is too old`, `invalid listing` or `exit N`, and `remote refresh` fetches at once. Remote output never reaches the
 cache as an error. BatchMode needs the key in an agent, and plasmashell has the user manager's `SSH_AUTH_SOCK`.
@@ -681,7 +685,7 @@ and what the hook did. The command text never goes there. The log rotates at 256
   ETA, and green without a number while every other session works or waits for a usage limit. Without such a session
   there is no orb, so dormant sessions alone leave the icon bare. Only a red orb marks the widget as needing attention,
   which makes the system tray pulse the icon, and any other orb marks it as active. A thin bar under the icon fills
-  with the progress of the working session whose ETA ends first.
+  with the progress of the working session whose ETA ends first. Sessions of fresh remote hosts count as well.
 - **Hovering** shows the same headline and up to seven sessions with their state and ETA.
 - **Clicking** opens the overview. The sessions come in the sections of the text list, each with its progress bar and
   its tasks below it. Stopped and dormant sessions each retain their heading and count and start folded. Their
@@ -751,7 +755,8 @@ and what the hook did. The command text never goes there. The log rotates at 256
   gets no overdue notification of its own, because the overdue task already brings one. Each panel has a tray of its own
   and therefore its own instance of the widget. Both see every transition, so they share the event keys through
   `contents/code/shared.js` and the first one to claim a key sends it. The first poll after a start only records the
-  state and notifies nothing.
+  state and notifies nothing. A remote host's waiting and overdue signals notify as well, with "on HOST" after the
+  session or task in the title.
 
 The settings also hold the command, which defaults to `"$HOME/.local/bin/agent-eta"` because plasmashell's `PATH`
 lacks `~/.local/bin`, the two poll intervals, whether the usage block shows, the half-width of a usage bar's yellow

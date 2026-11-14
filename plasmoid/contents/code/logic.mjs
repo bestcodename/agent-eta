@@ -598,18 +598,23 @@ export function tooltipLines(listing, max) {
     return lines;
 }
 
-// The notification texts of a signal, from the parameters agent-eta gives it.
+// The prefix of a remote host's keys.
+const REMOTE_KEY = /^remote:[^/]+\//;
+
+// The notification texts of a signal, from the parameters agent-eta gives it. A remote host's
+// signal names its host after the session or task.
 function message(signal, now) {
     const params = signal.message_params || {};
+    const where = params.host ? ` on ${params.host}` : "";
     if (signal.kind === "waiting") {
-        return {title: `${params.name} is waiting`, text: `${params.agent} needs you: ${params.waiting_for}`};
+        return {title: `${params.name}${where} is waiting`, text: `${params.agent} needs you: ${params.waiting_for}`};
     }
-    if (signal.kind === "overdue" && String(signal.entity_key).startsWith("task:")) {
-        return {title: `${params.label || "A task"} is overdue`,
+    if (signal.kind === "overdue" && String(signal.entity_key).replace(REMOTE_KEY, "").startsWith("task:")) {
+        return {title: `${params.label || "A task"}${where} is overdue`,
                 text: `${params.session_name} expected it at ${formatClock(params.due, now)}`};
     }
     if (signal.kind === "overdue") {
-        return {title: `${params.name} is overdue`,
+        return {title: `${params.name}${where} is overdue`,
                 text: params.turn_label ? `${params.turn_label} was due ${formatClock(params.due, now)}`
                     : `It was due ${formatClock(params.due, now)}`};
     }
@@ -623,6 +628,7 @@ function message(signal, now) {
 // signal notifies when it turns active, or when it shows up active with `notify_on_new`. A falling
 // one notifies when it turns inactive, under the dedupe key it had while active. The key is the same
 // for every widget instance, so two trays notify once. The first poll has nothing to compare with.
+// Remote hosts' signals arrive prefixed like their rows, and each machine's tray notifies for them.
 export function signalEvents(previous, next) {
     if (!previous || !next) {
         return [];
