@@ -50,9 +50,10 @@ priority.
     `claude/settings.json` of bestcodename/ai, so a flip shows up there as a diff, like a `/config` change.
     Proposal: an `agent-eta claude-push on|off|status` subcommand behind the checkbox (ca. 3 hours)
 18. (next, bug) The tray icon's notification badge seemed to show a wrong number, reported on 2026-11-05. No
-    snapshot of that moment exists. `summary()` in `agent_eta_model.py` sets `badge_count` to the waiting
-    sessions as soon as one waits, otherwise to idle plus overdue, and leaves out dormant sessions and those in
-    state `unknown`. So the badge never counts all sessions and switches meaning with the light. Next time it looks
+    snapshot of that moment exists. Until 2.14.0 the badge left out every remote host's sessions, measured on
+    2026-11-14; remote hosts shipped in 2.3.0 on the day of the report, so this presumably explains it.
+    `summary()` in `agent_eta_model.py` sets `badge_count` to the waiting sessions as soon as one waits, otherwise
+    to idle plus overdue, and leaves out dormant sessions and those in state `unknown`. So the badge never counts all sessions and switches meaning with the light. Next time it looks
     wrong, save `agent-eta list --json` and a screenshot of the badge and popup, then decide whether the count
     or the expectation is off. The same snapshot settles a Claude Code session shown under Needs you between
     turns while its background task ran (2026-11-12, not reproduced on 2.1.323 on 2026-11-13, where the registry
@@ -189,3 +190,7 @@ priority.
     desktop app opens no specific session, and Codex has no plan-mode flag or command description. Proposal: a parity
     table per feature and provider in docs/agent-eta.md, each gap closed in agent-eta or marked as an upstream limit
     with its evidence, and closable gaps filed or joined to the items above (ca. 2 hours for the table)
+42. (low, proposal) Compact `docs/agent-eta.md`, which passed 1000 lines with 2.14.0 (1005 on 2026-11-14) and grows
+    further with the parity table of #41. Delete resolved notes, drop text later measurements superseded and merge
+    sections that repeat each other, such as the remote-host facts spread over the contract, CLI and widget parts;
+    keep it one file (ca. 45 Minuten)

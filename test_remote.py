@@ -41,6 +41,11 @@ def listing(sessions=(), tasks=(), sections=None, **fields):
     return data
 
 
+# A summary of a host with no session, as agent_eta_model.summary() writes it.
+SUMMARY = {"waiting": 0, "working": 0, "idle": 0, "stopped": 0, "overdue": 0, "dormant": 0, "attention": 0,
+           "live": 0, "progress_session_key": None, "light": "off", "badge_count": 0, "status": "passive"}
+
+
 def remote_listing():
     managed = {"key": "claude:a", "agent": "claude", "id": "a", "tasks": ["t1"], "navigation": {"kind": "tmux"},
                "cwd": "/work/shop", "project_root": "/work/shop", "project_name": "shop", "pids": [10, 1],
@@ -78,7 +83,60 @@ class MergeTest(unittest.TestCase):
         self.assertEqual([(s["index"], s["session_keys"]) for s in merged["sections"]],
                          [(0, []), (1, ["claude:l", "remote:desktop/claude:a", "remote:desktop/codex:b"]),
                           (5, ["remote:desktop/claude:c"])])
-        self.assertEqual(merged["summary"], {"headline": "local"})
+        self.assertEqual(merged["summary"]["headline"], "local")
+        self.assertEqual((merged["summary"]["light"], merged["summary"]["badge_count"]), ("off", 0))
+        self.assertEqual(merged["notification_signals"], [])
+
+    def test_the_tray_summary_counts_every_fresh_host(self):
+        local = listing([{"key": "claude:l", "agent": "claude", "tasks": [], "remaining": 600}],
+                        summary=dict(SUMMARY, working=1, live=1, progress_session_key="claude:l",
+                                     light="active", status="active"))
+        other = dict(remote_listing(), summary=dict(SUMMARY, idle=1, working=1, dormant=1, live=2,
+                                                    progress_session_key="claude:a"))
+        other["sessions"][0]["remaining"] = 120
+        cache = {"hosts": {"desktop": {"fetched_at": 990, "listing": other}}}
+        found = remote.merge(local, cache, 1000)["summary"]
+        self.assertEqual({name: found[name] for name in ("working", "idle", "dormant", "live")},
+                         {"working": 2, "idle": 1, "dormant": 1, "live": 3})
+        self.assertEqual((found["light"], found["badge_count"], found["status"]), ("caution", 1, "active"))
+        self.assertEqual(found["progress_session_key"], "remote:desktop/claude:a")
+        other["summary"]["waiting"] = 2
+        found = remote.merge(local, cache, 1000)["summary"]
+        self.assertEqual((found["light"], found["badge_count"], found["status"]), ("attention", 2, "attention"))
+
+    def test_a_garbled_remote_summary_counts_as_empty(self):
+        local = listing([{"key": "claude:l", "agent": "claude", "tasks": [], "remaining": 600}],
+                        summary=dict(SUMMARY, working=1, live=1, progress_session_key="claude:l"))
+        for garbled in ("x", {"idle": "3", "waiting": True, "live": -1, "progress_session_key": ["claude:a"]},
+                        {"progress_session_key": "claude:gone"}):
+            with self.subTest(garbled=garbled):
+                cache = {"hosts": {"desktop": {"fetched_at": 990, "listing": dict(remote_listing(), summary=garbled)}}}
+                found = remote.merge(local, cache, 1000)["summary"]
+                self.assertEqual((found["light"], found["badge_count"], found["live"]), ("active", 0, 1))
+                self.assertEqual(found["progress_session_key"], "claude:l")
+
+    def test_remote_waits_and_overdue_runs_notify_with_their_host(self):
+        local_wait = {"key": "waiting:claude:l", "kind": "waiting", "entity_key": "claude:l", "active": True,
+                      "edge": "rising", "notify_on_new": True, "dedupe_key": "waiting:claude:l:5",
+                      "message_params": {"name": "here"}}
+        wait = dict(local_wait, key="waiting:claude:a", entity_key="claude:a", dedupe_key="waiting:claude:a:7",
+                    message_params={"name": "there"})
+        task = {"key": "overdue:task:t1", "kind": "overdue", "entity_key": "task:t1", "active": False,
+                "edge": "rising", "notify_on_new": False, "dedupe_key": "overdue:task:t1:9", "message_params": None}
+        reset = {"key": "reset:window:claude:300", "kind": "reset", "entity_key": "window:claude:300",
+                 "active": False, "edge": "falling", "notify_on_new": False, "dedupe_key": "reset:x"}
+        other = dict(remote_listing(), notification_signals=[wait, task, reset, "x", dict(wait, key=None)])
+        merged = remote.merge(listing(notification_signals=[local_wait]),
+                              {"hosts": {"desktop": {"fetched_at": 990, "listing": other}}}, 1000)
+        signals = merged["notification_signals"]
+        self.assertEqual([s["key"] for s in signals],
+                         ["waiting:claude:l", "remote:desktop/waiting:claude:a", "remote:desktop/overdue:task:t1"])
+        self.assertEqual(signals[0], local_wait)
+        self.assertEqual((signals[1]["entity_key"], signals[1]["dedupe_key"], signals[1]["message_params"]),
+                         ("remote:desktop/claude:a", "remote:desktop/waiting:claude:a:7",
+                          {"name": "there", "host": "desktop"}))
+        self.assertEqual(signals[2]["message_params"], {"host": "desktop"})
+        self.assertEqual(wait["message_params"], {"name": "there"})
 
     def test_stale_invalid_and_unknown_hosts_are_left_out(self):
         local = listing()

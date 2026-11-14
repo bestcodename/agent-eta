@@ -424,6 +424,25 @@ test("signals notify a new wait, an ETA that ran over and a reset limit, once ea
     assert.deepEqual(logic.signalEvents(null, after), []);
 });
 
+test("a remote host's signals name the host and keep the task wording", () => {
+    const signal = (kind, entity, active, params) => ({
+        key: `remote:desktop/${kind}:${entity}`, kind, entity_key: `remote:desktop/${entity}`, active,
+        edge: "rising", notify_on_new: kind === "waiting", dedupe_key: `remote:desktop/${kind}:${entity}:1`,
+        message_params: Object.assign({host: "desktop"}, params),
+    });
+    const before = {now: NOW, notification_signals: [signal("overdue", "task:ci", false, {})]};
+    const after = {now: NOW, notification_signals: [
+        signal("waiting", "claude:7", true, {name: "FDE", agent: "claude", waiting_for: "input"}),
+        signal("overdue", "task:ci", true, {label: "CI", session_name: "FDE", due: NOW - 60}),
+    ]};
+    const events = logic.signalEvents(before, after);
+    assert.deepEqual(events.map(e => [e.kind, e.key, e.title]), [
+        ["waiting", "remote:desktop/waiting:claude:7:1", "FDE on desktop is waiting"],
+        ["overdue", "remote:desktop/overdue:task:ci:1", "CI on desktop is overdue"],
+    ]);
+    assert.match(events[1].text, /^FDE expected it at /);
+});
+
 test("the tooltip escapes names, uses the activity label and cuts off after the limit", () => {
     const mixed = fixture("mixed");
     mixed.sessions[0].name = "<b>x</b>";

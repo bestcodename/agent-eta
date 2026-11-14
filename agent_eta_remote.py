@@ -4,7 +4,8 @@
 that runs `agent-eta list --json --all --local` on every host with BatchMode, so an unreachable host
 never blocks the widget's poll. Hosts fetched within the last minute merge into the listing as
 display-only rows: keys gain a `remote:HOST/` prefix, local actions are cleared, and a session in a
-managed tmux keeps its `tmux` navigation with a `host`. `attach SOURCE --host HOST` focuses the
+managed tmux keeps its `tmux` navigation with a `host`. Their counts join the tray summary and their
+waiting and overdue signals join the notifications. `attach SOURCE --host HOST` focuses the
 terminal running agent-eta's own `ssh -t HOST agent-eta attach SOURCE`, or opens one.
 """
 
@@ -18,7 +19,7 @@ import time
 
 from agent_eta_accounts import AccountStore, check_worker_lock, file_lock, read_json, start_worker, write_json
 from agent_eta_handoff import parse_source
-from agent_eta_model import SCHEMA_VERSION
+from agent_eta_model import SCHEMA_VERSION, combined_summary
 from agent_eta_providers import AccountError
 from agent_eta_tmux import VIEWER_TIMEOUT, lineage, open_terminal
 
@@ -32,6 +33,8 @@ REMOTE_CLI = "~/.local/bin/agent-eta"
 # Seconds a new remote viewer must stay up to count as attached. An ssh attach of a session the
 # other machine does not run exited after 0.33 to 0.37 s on 2026-11-13; three times that.
 REMOTE_SETTLE = 1.2
+# The signals a remote host contributes. Usage stays local, and with it the reset signals.
+REMOTE_SIGNAL_KINDS = ("waiting", "overdue")
 
 
 class RemoteError(Exception):
@@ -160,12 +163,45 @@ def remote_rows(host, listing):
     return sessions, tasks, sections
 
 
+def remote_summary(host, listing):
+    """A host's summary with its progress session under the prefixed key, or {} if it has none."""
+    found = listing.get("summary")
+    if not isinstance(found, dict):
+        return {}
+    key = found.get("progress_session_key")
+    return dict(found, progress_session_key="remote:%s/%s" % (host, key) if isinstance(key, str) else None)
+
+
+def remote_signals(host, listing):
+    """A host's waiting and overdue signals under prefixed keys, with the host for the message.
+    Its reset signals stay local like the usage they belong to, and a malformed signal is left out.
+    The prefixed dedupe key stays the same while the host is away, so a host that turns fresh again
+    does not notify a second time for a wait the widget already claimed."""
+    found = listing.get("notification_signals")
+    if not isinstance(found, list):
+        return []
+    prefix = "remote:%s/" % host
+    signals = []
+    for signal in found:
+        if not (isinstance(signal, dict) and signal.get("kind") in REMOTE_SIGNAL_KINDS
+                and all(isinstance(signal.get(name), str) for name in ("key", "entity_key", "dedupe_key"))):
+            continue
+        params = signal.get("message_params")
+        signals.append(dict(signal, key=prefix + signal["key"], entity_key=prefix + signal["entity_key"],
+                            dedupe_key=prefix + signal["dedupe_key"],
+                            message_params=dict(params if isinstance(params, dict) else {}, host=host)))
+    return signals
+
+
 def merge(listing, cache, now):
-    """The local listing plus every host fetched within FRESH_SECONDS. Summary, notification signals,
-    usage and accounts stay local, so remote rows are display only."""
+    """The local listing plus every host fetched within FRESH_SECONDS. The summary and the waiting
+    and overdue signals cover the merged hosts too, so the tray counts and notifies for them. Usage,
+    accounts and actions stay local, and without a fresh host the listing stays as it was."""
     merged = dict(listing, sessions=list(listing["sessions"]), tasks=list(listing["tasks"]),
                   sections=[dict(s, session_keys=list(s["session_keys"])) for s in listing["sections"]])
     by_index = {section["index"]: section for section in merged["sections"]}
+    summaries = [listing.get("summary") if isinstance(listing.get("summary"), dict) else {}]
+    signals = list(listing.get("notification_signals") or [])
     entries = cache.get("hosts") if isinstance(cache.get("hosts"), dict) else {}
     for host in sorted(entries):
         entry = entries[host]
@@ -188,7 +224,12 @@ def merge(listing, cache, now):
             else:
                 by_index[index] = section
                 merged["sections"].append(section)
+        summaries.append(remote_summary(host, entry["listing"]))
+        signals += remote_signals(host, entry["listing"])
     merged["sections"].sort(key=lambda section: section["index"])
+    if len(summaries) > 1:
+        merged["summary"] = dict(summaries[0], **combined_summary(summaries, merged["sessions"]))
+        merged["notification_signals"] = signals
     return merged
 
 
