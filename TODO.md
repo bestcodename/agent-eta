@@ -194,3 +194,10 @@ priority.
     further with the parity table of #41. Delete resolved notes, drop text later measurements superseded and merge
     sections that repeat each other, such as the remote-host facts spread over the contract, CLI and widget parts;
     keep it one file (ca. 45 Minuten)
+43. (proposal, bug) A launched Claude session cannot be attached from another machine before its first prompt, found
+    on 2026-11-16. `agent-eta account launch claude:… --cli --directory <untrusted folder>` on stefan-notebook stopped
+    at Claude Code's folder-trust dialog, and `agent-eta attach --host notebook claude:<pid>` from stefan-desktop
+    opened a Konsole that closed after about two seconds. Run in a terminal, the remote side printed "the session is
+    no longer running", because the session registers only with its first hook. A raw tmux client on window `@28`
+    showed it. Proposal: register a managed launch at start with its pane and pid, so `attach` and the list show it
+    while it waits at the trust dialog, and keep a failing viewer open long enough to show its error (ca. 1 Stunde)
