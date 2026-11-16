@@ -8,16 +8,16 @@ priority.
    thread's `codex://` link on 2026-10-14, but the click itself has not been watched yet (ca. 5 Minuten)
 2. (low) Match a Codex task to its process through `CODEX_THREAD_ID` in `/proc/*/environ`. Only worth it if Codex
    entries whose process ended unpolled stay listed until they expire often enough to mislead, see
-   [docs/agent-eta.md](docs/agent-eta.md) "Limits" (ca. 3 Stunden)
+   [docs/agent-eta.md](docs/agent-eta.md) "Limits" (ca. 1 Stunde 30 Minuten)
 3. (low) Further surfaces for `agent-eta list --json`, proposed and not evaluated yet. They are phone notifications
-   when a task turns overdue (ca. 2 Stunden) and a web app (ca. 8 Stunden)
+   when a task turns overdue (ca. 1 Stunde) and a web app (ca. 4 Stunden)
 4. (low) Show a turn that ends with a question in plain text as waiting rather than idle. Neither agent marks such a
    turn, so the candidate is a `Stop` hook that reads the last assistant message from `transcript_path` and checks
-   whether it ends with a question mark. It is a heuristic and was left out of 0.62.0 on purpose (ca. 2 Stunden)
+   whether it ends with a question mark. It is a heuristic and was left out of 0.62.0 on purpose (ca. 1 Stunde)
 5. (next) Investigate the reported `/effort effort max` session title appearing as command-name markup.
    Reproduce it and trace the title through the native registry, transcript title, CLI and widget.
    Confirm the source before proposing a fix, then preserve the reproduction as a regression fixture
-   (ca. 1 hour). On 2026-11-13 no current registry showed this title and no raw registry fixture was found.
+   (ca. 30 minutes). On 2026-11-13 no current registry showed this title and no raw registry fixture was found.
    On recurrence, capture `name`, `nameSource` and `sessionId` from the registry alongside the CLI row before
    the native title changes; a transcript's `/effort` command alone does not establish the displayed title
 6. (low) Make *Jump to window* select the PhpStorm terminal tab a Claude Code session runs in. Today it only
@@ -27,7 +27,7 @@ priority.
    shell process is an ancestor of the session's pid, if PhpStorm 2026.2 still runs startup scripts. Second,
    `run_inspection_kts` through the PhpStorm MCP server calling `contentManager.setSelectedContent`. Third,
    `ActivateTerminalToolWindow` through MCP, which shows the terminal but not the tab. A plugin is the last
-   resort (spike ca. 2 Stunden)
+   resort (spike ca. 1 Stunde)
 12. (low) Show a privacy-reduced Agent ETA summary on the locked screen if a supported route keeps it simple. Proposed
     content: counts per state, the nearest ETA and usage percentages with reset times, with no session titles,
     labels, paths, prompts or account names. Candidate routes on Plasma 6.3.6, none tested yet, are an MPRIS player,
@@ -35,20 +35,20 @@ priority.
     already show and which would also appear in the panel's media widget; a wallpaper plugin selected for the lock
     screen that renders the summary; or a user-level override of the shell's lockscreen QML, which Plasma updates can
     break. Drop the item if every route needs patched system files or a privileged helper. Evaluate the routes first
-    (ca. 1 hour).
+    (ca. 30 minutes).
 15. (low) A Claude Code session that a handoff started holds no ExitPlanMode approval, so moving it on to Codex forks
     a summary and plans again. Proposal: count such a session as approved from the completed handoff record that
-    started it with an approved plan (ca. 2 hours).
+    started it with an approved plan (ca. 1 hour).
 16. (next) Investigate the modal still showing *Log in* after login. The original 2026-11-03 report says
     "shows login even after logging in"; the recorded interpretation was that the button failed while `/login`
     worked. On 2026-11-13 the user confirmed that the account-menu login for `sri@ndcom.de` opened a terminal and
     browser, and the native auth-status classification was authenticated. Browser authorization was not completed
     for this check, so the reported post-login state remains unverified. On recurrence, compare native auth status,
-    account identity and the widget's cached state after login before changing the launch path (ca. 1 Stunde)
+    account identity and the widget's cached state after login before changing the launch path (ca. 30 Minuten)
 17. (low) Add a toggle for Claude Code's claude.ai push of permission prompts and questions
     (`inputNeededNotifEnabled`, off since 2026-11-04) next to the *Notify when* checkboxes. The key lives in
     `claude/settings.json` of bestcodename/ai, so a flip shows up there as a diff, like a `/config` change.
-    Proposal: an `agent-eta claude-push on|off|status` subcommand behind the checkbox (ca. 3 hours)
+    Proposal: an `agent-eta claude-push on|off|status` subcommand behind the checkbox (ca. 1 hour 30 minutes)
 18. (next, bug) The tray icon's notification badge seemed to show a wrong number, reported on 2026-11-05. No
     snapshot of that moment exists. Until 2.14.0 the badge left out every remote host's sessions, measured on
     2026-11-14; remote hosts shipped in 2.3.0 on the day of the report, so this presumably explains it.
@@ -58,18 +58,18 @@ priority.
     or the expectation is off. The same snapshot settles a Claude Code session shown under Needs you between
     turns while its background task ran (2026-11-12, not reproduced on 2.1.323 on 2026-11-13, where the registry
     reported `shell` and the session stayed in Working). Fix with a regression case in `test_model.py`
-    (ca. 1 Stunde)
+    (ca. 30 Minuten)
 20. (low, proposal) Rename sessions from agent-eta, requested on 2026-11-05. Names are only read today, from
     Claude Code's `custom-title` or `ai-title` and Codex's thread name (see [docs/agent-eta.md](docs/agent-eta.md)).
     1. **`agent-eta rename <session> <name>`** plus a row action in the widget. It renames the session in its agent,
        for Claude Code presumably by typing `/rename <name>` into it rather than writing its transcript, and sets
        the Konsole tab title over D-Bus (`/Sessions/<n>`, next to `title` in `agent_eta_konsole.py`), which the
-       window caption follows. A PhpStorm terminal tab has no such route, see #6 (ca. 3 Stunden)
+       window caption follows. A PhpStorm terminal tab has no such route, see #6 (ca. 1 Stunde 30 Minuten)
     2. **`agent-eta rename --all`**, which asks each idle session for the shortest fitting name of its current work,
        checks that the answer differs from every other session's name, and applies it through 1. A working session
        is skipped rather than interrupted, and the answer must not land in the session's own work as a turn of
        substance. Delivering the prompt needs the same input route as 1, through Konsole, tmux or dsh
-       (ca. 4 Stunden)
+       (ca. 2 Stunden)
 22. (low, proposal) A desktop Codex thread drops out of the list while the desktop app is closed. Since 2.4.1 a
     `codex exec resume` of a desktop thread keeps it listed through the app's app-server, but with the app closed
     the exec's `SessionEnd` still removes it. On 2026-11-06 the thread "Deploy Docmost on Proxmox", which a Claude
@@ -77,7 +77,7 @@ priority.
     `source` `vscode` after a client's `SessionEnd` without a holder, idle until `SESSION_IDLE_TTL`, and let its row
     open `codex://threads/<id>`, which starts the app. It contradicts the rule in
     [docs/agent-eta.md](docs/agent-eta.md) that navigation never falls back to a desktop link without a verified
-    Codex process, so decide that rule first (ca. 2 Stunden)
+    Codex process, so decide that rule first (ca. 1 Stunde)
 23. (low, proposal) Support macOS in this repository rather than in a second one, asked on 2026-11-11. The hooks,
     the state directory, the Claude Code and Codex registry parsers, the usage windows and `list --json` (contract
     schema 1, fixtures in `test_fixtures/contract-v1/`) are standard-library Python without OS calls, and they
@@ -89,13 +89,13 @@ priority.
     has to match; read a session registry on a Mac before building on it.
     1. **Platform module.** `agent_eta_platform.py` holds the process probes (`proc_start`, `parent_of`, `comm_of`,
        the cmdline reads and the fd scan of `find_task_pid`), from `/proc` on Linux and from `ps` and `lsof` on
-       macOS; a `macos-latest` job in `.github/workflows/tests.yml` runs the suite (ca. 8 hours)
+       macOS; a `macos-latest` job in `.github/workflows/tests.yml` runs the suite (ca. 4 hours)
     2. **Menu bar frontend.** A SwiftBar plugin under `macos/` renders `agent-eta list --json --all` and is tested
        against the contract fixtures; a native SwiftUI app follows only if the plugin falls short, and it gets a
-       repository of its own only if its signing and release cycle demand one (ca. 4 hours)
+       repository of its own only if its signing and release cycle demand one (ca. 2 hours)
     3. **Managed sessions and handoff.** tmux runs on macOS, but the owned systemd scopes and `systemctl --user
        freeze` have no launchd equivalent; candidates are a process-group `SIGSTOP`/`SIGCONT` and a Terminal.app or
-       iTerm2 viewer through `osascript`. These stay Linux-only until 1 and 2 run (ca. 16 hours)
+       iTerm2 viewer through `osascript`. These stay Linux-only until 1 and 2 run (ca. 8 hours)
     4. **Distribution beyond this workstation.** On 2026-11-12 the skills marketplace Agensi.io offered by mail to
        list agent-eta's skills and commands for Claude Code, Cursor, Copilot and other agents, non-exclusive and free
        to list with 70 % of each sale. agent-eta ships no skill, command or plugin manifest today, since `install.sh`
@@ -105,8 +105,8 @@ priority.
        with `/plugin marketplace add bestcodename/agent-eta`; Codex keeps its hand-wired hooks; a third-party listing
        such as Agensi only once 1 and 2 run, because the tool is Linux- and KDE-bound until then. Before listing,
        survey the other marketplaces for skills and plugins and record for each the share of a sale that goes to the
-       author and to the platform, requested on 2026-11-13 (ca. 4 hours; the license ca. 15 minutes; the survey
-       ca. 1 hour)
+       author and to the platform, requested on 2026-11-13 (ca. 2 hours; the license ca. 10 minutes; the survey
+       ca. 30 minutes)
 24. (low, proposal) Install tmux 3.7c from trixie-backports on stefan-desktop and stefan-notebook and add it to the
     workstation setup of [bestcodename/ai](https://github.com/bestcodename/ai). On 2026-11-11 at 17:41:45
     `tmux detach-client -t /dev/pts/5`, run against a duplicate Konsole viewer, crashed the tmux 3.5a server and all
@@ -117,45 +117,45 @@ priority.
     `destroy-unattached` session without taking clients off it. tmux 3.7c guards that read; only master also takes the
     clients off first. agent-eta never detaches a client, and its viewers now close through `kill-session`, which takes
     clients off before destroying. The private server keeps 3.5a until it restarts, which ends every agent, so switch
-    while none runs and run the test suite against 3.7c first (ca. 30 Minuten)
+    while none runs and run the test suite against 3.7c first (ca. 15 Minuten)
 27. (low) Install Qt 6's `qmltestrunner` on stefan-desktop and add it to the workstation setup of
     [bestcodename/ai](https://github.com/bestcodename/ai). `test_qml.Qml.test_widget_qml` is skipped here on
-    2026-11-11 for lack of it, so widget changes are only tested on the notebook (ca. 15 Minuten)
+    2026-11-11 for lack of it, so widget changes are only tested on the notebook (ca. 10 Minuten)
 29. (next, proposal) Audit user-facing defaults and make useful behavior configurable through the existing widget
     settings and CLI configuration, requested on 2026-11-11. New widget sessions already have a CLI/desktop default
     and a one-launch menu override. Review session-click behavior, terminal and IDE commands, session visibility,
     notification rules and the model, effort and permission settings in #21. Reuse native client settings and
     existing environment overrides; keep process ownership and live-writer checks mandatory. Propose the remaining
-    options and their implementation effort after this audit (ca. 2 hours)
+    options and their implementation effort after this audit (ca. 1 hour)
 30. (next, proposal) Split widget configuration into sections, requested on 2026-11-11. Use Plasma's existing
     configuration categories in `plasmoid/contents/config/config.qml`; proposed sections are General, Sessions
     and Launching, Appearance, and Notifications. Preserve existing setting keys, defaults and saved values,
-    and test that each section loads and saves its controls (ca. 1 hour)
+    and test that each section loads and saves its controls (ca. 30 minutes)
 32. (next, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize settings
     in `configGeneral.qml` and the sections proposed in #30, plus account and session context-menu actions in
     `FullRepresentation.qml`; then cover remaining controls and unclear icons, status indicators and abbreviations.
     Explain purpose, effect or disabled state instead of repeating labels. Keep essential information visible and
     provide accessible names. Reuse Qt/Plasma tooltip facilities and native timing, with pointer hover and keyboard
     focus; verify that disabled-action explanations remain discoverable. Add focused QML coverage for settings and
-    both context menus, including focus and disabled states, and check them in Plasma (ca. 2 hours)
+    both context menus, including focus and disabled states, and check them in Plasma (ca. 1 hour)
 33. (low, proposal) Offer Claude the same configurable CLI/desktop launch default and one-launch context-menu
     override as Codex, requested on 2026-11-11. Support both the saved default directory and a chosen directory,
     keep CLI as the initial default, and store each provider's preference independently. First verify the native
     desktop launch route on the target OS and whether it preserves the selected Claude account and project folder.
     If that route is unavailable, explain why instead of silently opening a different account. Reuse the existing
     launch pipeline and configuration; add focused command and QML tests for defaults, overrides, directory choice
-    and account isolation, plus tooltips under #32 (ca. 3 hours)
+    and account isolation, plus tooltips under #32 (ca. 1 hour 30 minutes)
 34. (low, proposal) A flaky Python test. On 2026-11-12 one full run of `python3 -m unittest discover -s .` on
     stefan-notebook ended with `FAILED (failures=1)` and four reruns passed; the failing test was not captured. On the
     next failure, record its name with `python3 -m unittest discover -s . 2>&1 | grep -E '^(FAIL|ERROR):'` and fix
-    the race behind it (ca. 1 hour)
+    the race behind it (ca. 30 minutes)
 36. (proposal) Expand the usage progress bar's time span across repeated quota resets, requested on
     2026-11-12. For `n` seven-day usage periods, show a span of `n × 7 days` instead of always showing seven
     days. Anchor the expanded timeline to the actual reset deadlines of all relevant usage limits, including
     different accounts, reset times and window lengths, rather than multiplying nominal durations alone.
     Define how the period count initializes, increments and persists, and keep every reset boundary and the
     current period's usage readable. Cover differing deadlines, the first period, multiple resets and missing
-    history with tests (ca. 2 hours)
+    history with tests (ca. 1 hour)
 37. (proposal) Add configurable usage thresholds for visibly marking accounts as blocked in the Agent ETA
     modal, requested on 2026-11-12. An account intentionally left at 99% while another account is used can
     otherwise look usable throughout the remaining quota window. Reuse the widget settings and allow separate
@@ -163,41 +163,41 @@ priority.
     reaches its configured cutoff, and show which window triggered it and when that window resets. Explain in
     a tooltip that the configured cutoff was reached, distinct from a provider-reported hard limit. Re-evaluate
     the display after settings changes, fresh usage readings and resets; preserve unknown or stale usage states.
-    Cover threshold boundaries, multiple windows, saved settings and reset handling with tests (ca. 2 hours)
+    Cover threshold boundaries, multiple windows, saved settings and reset handling with tests (ca. 1 hour)
 38. (low, proposal) Rename the project to Agent Desk and the repository slug to `agent-desk`, requested on
     2026-11-13. The name should cover sessions, accounts, usage limits and handoffs. Verify the GitHub repository
     and any GitLab mirror mapping before renaming either service. Introduce `agent-desk` as the primary command
     while retaining `agent-eta` compatibility. Update package and widget display names, repository URLs,
-    installation, hooks and external callers without losing saved settings or runtime ownership (ca. 4 hours)
+    installation, hooks and external callers without losing saved settings or runtime ownership (ca. 2 hours)
 39. (proposal) Collapsible subtask bars in active session rows, requested on 2026-11-13. `SessionRow.qml` shows a
     `TaskRow` for every entry of `session.taskItems`. A widget setting chooses what a collapsed row keeps: all subtask
     bars, the longest and the earliest ETA, only the longest, or only the earliest; a click expands the row to all
     bars. Default all, placed in the Appearance section of #30; test each mode, equal ETAs and a single entry
-    (ca. 1 hour)
+    (ca. 30 minutes)
 40. (proposal) Open sessions on the device the user is using, requested on 2026-11-13. A click opens or raises a
     viewer on the machine whose widget was clicked, and a remote session opens through `ssh -t HOST agent-eta attach`
     (docs/agent-eta.md, Remote hosts).
     1. **Default device setting.** This machine, a host from `remote_hosts` or automatic, for new launches and for
-       attach; stored in `config.json` and the widget settings, default this machine (ca. 1 hour)
+       attach; stored in `config.json` and the widget settings, default this machine (ca. 30 minutes)
     2. **Automatic detection.** The current device is the one whose graphical session is unlocked and not idle
        (`loginctl show-session <id> -p Type -p LockedHint -p IdleHint`), read locally and over the existing BatchMode
        SSH; an ambiguous result falls back to the default, and `DISPLAY` is never forced on another host
-       (ca. 2 hours)
+       (ca. 1 hour)
 41. (proposal) Close the gaps between the Codex and Claude Code integrations, requested on 2026-11-13. Known
     gaps are filed as #2 (Codex process match), #15 (handoff without ExitPlanMode approval), #22 (desktop Codex thread
     drops out) and #33 (Claude lacks the CLI/desktop launch default), and docs/agent-eta.md names more: Claude Code
     background agents and Monitor tasks are not recorded, a Codex thread shows only after its first hook, the Claude
     desktop app opens no specific session, and Codex has no plan-mode flag or command description. Proposal: a parity
     table per feature and provider in docs/agent-eta.md, each gap closed in agent-eta or marked as an upstream limit
-    with its evidence, and closable gaps filed or joined to the items above (ca. 2 hours for the table)
+    with its evidence, and closable gaps filed or joined to the items above (ca. 1 hour for the table)
 42. (low, proposal) Compact `docs/agent-eta.md`, which passed 1000 lines with 2.14.0 (1005 on 2026-11-14) and grows
     further with the parity table of #41. Delete resolved notes, drop text later measurements superseded and merge
     sections that repeat each other, such as the remote-host facts spread over the contract, CLI and widget parts;
-    keep it one file (ca. 45 Minuten)
+    keep it one file (ca. 25 Minuten)
 43. (proposal, bug) A launched Claude session cannot be attached from another machine before its first prompt, found
     on 2026-11-16. `agent-eta account launch claude:… --cli --directory <untrusted folder>` on stefan-notebook stopped
     at Claude Code's folder-trust dialog, and `agent-eta attach --host notebook claude:<pid>` from stefan-desktop
     opened a Konsole that closed after about two seconds. Run in a terminal, the remote side printed "the session is
     no longer running", because the session registers only with its first hook. A raw tmux client on window `@28`
     showed it. Proposal: register a managed launch at start with its pane and pid, so `attach` and the list show it
-    while it waits at the trust dialog, and keep a failing viewer open long enough to show its error (ca. 1 Stunde)
+    while it waits at the trust dialog, and keep a failing viewer open long enough to show its error (ca. 30 Minuten)

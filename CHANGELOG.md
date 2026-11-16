@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - TODO: #43 a launched session cannot be attached remotely before its first prompt
 
+### Changed
+
+- TODO: effort estimates halved, by the user's request of 2026-11-16
+
 ## [2.14.0] - 2026-11-14
 
 ### Changed
