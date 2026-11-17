@@ -67,7 +67,7 @@ agent-eta list --json --all        # what the widget reads, contract schema 1
 agent-eta account launch claude:NAME --directory /trusted/project
 agent-eta account launch claude:NAME --cli --model opus --effort max --permission-mode plan --prompt 'Review this project'
 agent-eta account launch codex --cli --directory /trusted/project
-agent-eta attach claude:<session>   # show the existing managed terminal
+agent-eta attach claude:<session>   # show the existing managed terminal; the claude:<pid> key works too
 ssh -t HOST agent-eta attach claude:<session>   # the same from another machine
 agent-eta remote add HOST           # HOST's sessions join the widget's list, orb and notifications
 agent-eta account-tabs FILE         # start a claude-account handoff's tabs in managed tmux
@@ -83,8 +83,9 @@ agent-eta workspace assign codex:<session> --clear
 A handoff refuses a folder the destination client does not trust yet, and its message names the command that opens
 the client there once to accept the trust question.
 
-Managed Codex resumes are listed idle before their first prompt. Local launch and attach succeed only after a
-viewer attaches; remote attach requires its SSH viewer to stay running through a short settling period.
+Managed Codex resumes are listed idle before their first prompt, and a managed Claude launch at the folder-trust dialog
+as waiting. Local launch and attach succeed only after a viewer attaches; remote attach requires its SSH viewer to stay
+running through a short settling period, and a failed one keeps its window open with the error.
 Managed CLI rows focus the window already showing their pane, or open a window of their own. Inside a viewer, a
 click on a status-line tab switches agents. An agent shows in at most one local viewer; selecting one that another
 viewer shows points at that viewer instead. An attach from another machine (`--host`) always opens a viewer of its

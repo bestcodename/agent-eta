@@ -545,6 +545,11 @@ export function tabTitles(code, stdout) {
     }
 }
 
+// The source `agent-eta attach` takes. A Claude launch without a registry record yet has only its pid.
+export function attachSource(session) {
+    return session.agent + ":" + (session.id || session.pid);
+}
+
 export function shellQuote(text) {
     return `'${String(text).replace(/'/g, "'\\''")}'`;
 }

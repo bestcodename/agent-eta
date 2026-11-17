@@ -142,10 +142,14 @@ def account_environment():
     return dict(os.environ, CLAUDE_HANDOFF_TERMINAL=adapter)
 
 
+def runtime_state(root=None):
+    """The private runtime directory that holds the tmux records, created only by Runtime."""
+    return Path(root or os.environ.get("AGENT_ETA_DIR") or f"/tmp/agent-eta-{os.getuid()}")
+
+
 class Runtime:
     def __init__(self, root=None):
-        state = Path(root or os.environ.get("AGENT_ETA_DIR") or f"/tmp/agent-eta-{os.getuid()}")
-        self.root = protected(protected(state) / "tmux")
+        self.root = protected(protected(runtime_state(root)) / "tmux")
         self.socket = str(self.root / "socket")
         if len(os.fsencode(self.socket)) > 100:
             raise TmuxError("AGENT_ETA_DIR is too long for a tmux socket; use a shorter runtime path")
@@ -342,6 +346,18 @@ class Runtime:
                 return True
         except (OSError, ValueError, KeyError, TypeError, TmuxError):
             return False
+
+    def records(self):
+        """Every managed terminal record, unpruned and without asking tmux; find() sweeps ended ones."""
+        found = []
+        for path in self.root.glob("*.json"):
+            try:
+                record = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if isinstance(record, dict) and str(record.get("scope") or "").startswith("agent-eta-agent-"):
+                found.append(record)
+        return found
 
     def find(self, pid, start):
         """Find this agent's terminal while sweeping proven-ended records."""

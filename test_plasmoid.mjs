@@ -488,3 +488,8 @@ test("rows show a pending or failed handoff and forget a completed one", () => {
         assert.match(logic.resumeCommand(row), /--cli --resume 'abc' --directory '\/work\/shop'/);
     }
  });
+
+test("attachSource prefers the session id and falls back to the pid", () => {
+    assert.equal(logic.attachSource({agent: "claude", id: "s1", pid: 42}), "claude:s1");
+    assert.equal(logic.attachSource({agent: "claude", id: null, pid: 42}), "claude:42");
+});

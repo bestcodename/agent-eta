@@ -9,6 +9,7 @@ tests start a real process with fd 1 on a fake tasks/<id>.output, because findin
 process is the part a payload alone cannot prove.
 """
 
+import argparse
 import datetime
 import importlib.machinery
 import importlib.util
@@ -1410,6 +1411,90 @@ class HandoffInspect(unittest.TestCase):
     def test_an_unmanaged_running_session_is_found_without_a_gate(self):
         found = self.inspect([model_session(pid=100)], [], gate=(None, None, "unmanaged CLI"))
         self.assertEqual((found["pid"], found["gate_reason"]), (None, "unmanaged CLI"))
+
+
+class AttachByPid(unittest.TestCase):
+    """`attach claude:<pid>` takes the key `list` shows straight to the managed terminal."""
+
+    def attach(self, source, comm="claude", start="4242-start"):
+        runtime = mock.MagicMock()
+        runtime.return_value.find.return_value = {"id": "r1"}
+        runtime.return_value.attach.return_value = {"opened": True}
+        inspect = mock.Mock(return_value={"pid": 100, "proc_start": "100-start"})
+        with mock.patch.object(eta, "comm_of", return_value=comm), \
+                mock.patch.object(eta.tmux_api, "proc_start", return_value=start), \
+                mock.patch.object(eta.tmux_api, "Runtime", runtime), \
+                mock.patch.object(eta, "handoff_inspect", inspect), \
+                mock.patch("sys.stdout", new_callable=io.StringIO):
+            code = eta.cmd_attach(argparse.Namespace(source=source, host=None, json=True))
+        return code, runtime, inspect
+
+    def test_a_pid_key_finds_its_managed_terminal_without_a_snapshot(self):
+        code, runtime, inspect = self.attach("claude:123")
+        self.assertEqual(code, 0)
+        runtime.return_value.find.assert_called_once_with(123, "4242-start")
+        inspect.assert_not_called()
+
+    def test_a_pid_that_is_no_live_claude_process_is_not_running(self):
+        for comm, start in (("bash", "4242-start"), ("claude", None)):
+            with self.subTest(comm=comm, start=start), \
+                    self.assertRaisesRegex(eta.tmux_api.TmuxError, "the session is no longer running"):
+                self.attach("claude:123", comm=comm, start=start)
+
+    def test_a_session_id_still_goes_through_the_snapshot(self):
+        code, runtime, inspect = self.attach("claude:s-100")
+        inspect.assert_called_once_with(("claude", "s-100"))
+        runtime.return_value.find.assert_called_once_with(100, "100-start")
+
+
+class ClaudeLaunches(unittest.TestCase):
+    """A managed Claude launch without a registry record lists as waiting for its startup prompt."""
+
+    def setUp(self):
+        state = tempfile.TemporaryDirectory(prefix="agent-eta-launch-")
+        self.addCleanup(state.cleanup)
+        self.state = pathlib.Path(state.name)
+        (self.state / "tmux").mkdir()
+
+    def launches(self, known=(), created=NOW - 60, comm="claude", registered=False, records=None):
+        record = {"id": "r1", "scope": "agent-eta-agent-1.scope", "cwd": "/work/shop", "created": created}
+        runtime = mock.MagicMock()
+        runtime.return_value.records.return_value = [record] if records is None else records
+        with mock.patch.object(eta.tmux_api, "Runtime", runtime), \
+                mock.patch.object(eta.tmux_api, "runtime_state", return_value=self.state), \
+                mock.patch.object(eta, "pane_children", return_value=[4242]), \
+                mock.patch.object(eta, "comm_of", return_value=comm), \
+                mock.patch.object(eta, "claude_session", return_value={"sessionId": "s"} if registered else {}), \
+                mock.patch.object(eta, "process_account", return_value="work"):
+            return eta.claude_launches(set(known), NOW)
+
+    def test_a_launch_past_the_grace_lists_as_waiting(self):
+        found = self.launches()
+        self.assertEqual(len(found), 1)
+        self.assertEqual({k: found[0][k] for k in ("agent", "account", "id", "pid", "name", "state", "waiting_for")},
+                         {"agent": "claude", "account": "work", "id": None, "pid": 4242, "name": "shop",
+                          "state": "waiting", "waiting_for": "startup prompt"})
+
+    def test_no_row_within_the_grace_for_a_known_or_registered_pid_or_another_process(self):
+        for case in ({"created": NOW - 1}, {"known": [4242]}, {"registered": True}, {"comm": "node"},
+                     {"created": None}):
+            with self.subTest(case):
+                self.assertEqual(self.launches(**case), [])
+
+    def test_an_unavailable_runtime_lists_nothing(self):
+        with mock.patch.object(eta.tmux_api, "Runtime", side_effect=eta.tmux_api.TmuxError("gone")), \
+                mock.patch.object(eta.tmux_api, "runtime_state", return_value=self.state):
+            self.assertEqual(eta.claude_launches(set(), NOW), [])
+        with tempfile.TemporaryDirectory() as state, \
+                mock.patch.object(eta.tmux_api, "runtime_state", return_value=pathlib.Path(state)):
+            self.assertEqual(eta.claude_launches(set(), NOW), [])
+            self.assertEqual(os.listdir(state), [])
+
+    def test_pane_children_need_the_recorded_pane_start(self):
+        record = {"pane_pid": os.getpid(), "pane_start": "not-this-start"}
+        self.assertEqual(eta.pane_children(record), [])
+        record["pane_start"] = eta.tmux_api.proc_start(os.getpid())
+        self.assertIsInstance(eta.pane_children(record), list)
 
 
 class Usage(StateTest):

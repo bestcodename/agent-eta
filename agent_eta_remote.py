@@ -34,6 +34,9 @@ REMOTE_CLI = "~/.local/bin/agent-eta"
 # Seconds a new remote viewer must stay up to count as attached. An ssh attach of a session the
 # other machine does not run exited after 0.33 to 0.37 s on 2026-11-13; three times that.
 REMOTE_SETTLE = 1.2
+# ssh hands the remote shell one string, so a window the widget opened keeps a failed attach's error
+# until Enter. A typed `attach --host` runs in the user's own terminal and gets no hold.
+HOLD = "|| { echo 'Press Enter to close.'; read -r _; }"
 # Import peer waiting/overdue signals. Shared usage builds reset signals in the local model.
 REMOTE_SIGNAL_KINDS = ("waiting", "overdue")
 
@@ -148,6 +151,9 @@ def _refresh(store):
 def shared_usage(local, cache, now):
     """Use newer native Claude readings from fresh peers with the same authenticated identity.
 
+    A newer peer reading replaces an older local one. One older than five minutes stays marked
+    stale, so when every reading is stale the newest one shows rather than an older, lower one.
+
     Keep login state and actions local. Never persist peer readings or export them through
     --local, which prevents feedback from keeping an idle reading alive. Older peers without
     identity fingerprints cannot contribute usage. Codex account IDs are not portable here.
@@ -169,8 +175,8 @@ def shared_usage(local, cache, now):
             seen = source.get("seen_at")
             if (source.get("provider") != "claude" or source.get("auth_state") != "authenticated"
                     or not source.get("usage_identity") or source.get("error")
-                    or source.get("usage_status") != "current" or not isinstance(seen, (int, float))
-                    or not 0 <= now - seen <= REFRESH_SECONDS):
+                    or source.get("usage_status") not in ("current", "stale")
+                    or not isinstance(seen, (int, float)) or not 0 <= now - seen):
                 continue
             reading = [w for w in peer.get("usage", [])
                        if isinstance(w, dict) and w.get("account_id") == source.get("id")]
@@ -181,16 +187,18 @@ def shared_usage(local, cache, now):
                                   or not number(w.get("resets_at")) or w["resets_at"] <= now
                                   or w.get("seen_at") != seen for w in reading):
                 continue
+            status = ("current" if source["usage_status"] == "current" and now - seen <= REFRESH_SECONDS
+                      else "stale")
             for account in accounts:
                 if (account["provider"] != "claude" or account["auth_state"] != "authenticated"
                         or account.get("usage_identity") != source["usage_identity"]
                         or seen <= (account.get("seen_at") or 0)):
                     continue
-                account.update(seen_at=seen, usage_status="current")
+                account.update(seen_at=seen, usage_status=status)
                 windows = [w for w in windows if w.get("account_id") != account["id"]]
                 windows += [dict({k: w[k] for k in ("minutes", "used", "resets_at")},
                                  agent=account["agent"], account_id=account["id"], seen_at=seen,
-                                 usage_status="current", auth_state=account["auth_state"]) for w in reading]
+                                 usage_status=status, auth_state=account["auth_state"]) for w in reading]
     return dict(local, accounts=accounts, usage=windows)
 
 
@@ -285,7 +293,8 @@ def merge(listing, cache, now):
 
 def viewer(argv, proc="/proc"):
     """The pid of this user's SSH viewer. Match ssh and the remote CLI by basename so viewers
-    opened by hand through PATH or an absolute CLI path count too. Other arguments stay exact."""
+    opened by hand through PATH or an absolute CLI path count too. Other arguments stay exact. A
+    viewer the widget opened carries HOLD, one opened by hand does not, and both count."""
     wanted = [arg.encode() for arg in argv]
     uid = os.getuid()
     for name in os.listdir(proc):
@@ -297,10 +306,10 @@ def viewer(argv, proc="/proc"):
                 continue
             with open(os.path.join(base, "cmdline"), "rb") as handle:
                 found = handle.read().split(b"\0")[:-1]
-            if (len(found) == len(wanted) == 6
+            if (len(wanted) >= 6 and len(found) in (6, len(wanted)) and found[6:] == wanted[6:len(found)]
                     and os.path.basename(found[0]) == os.path.basename(wanted[0])
                     and os.path.basename(found[3]) == os.path.basename(wanted[3])
-                    and found[1:3] == wanted[1:3] and found[4:] == wanted[4:]):
+                    and found[1:3] == wanted[1:3] and found[4:6] == wanted[4:6]):
                 return int(name)
         except OSError:
             continue
@@ -314,12 +323,14 @@ def attach(host, source, interactive, proc="/proc"):
     argv = ["ssh", "-t", valid_host(host), REMOTE_CLI, "attach", agent + ":" + identifier]
     if interactive:
         os.execvp(argv[0], argv)
+    argv = argv + [HOLD]
     pid = viewer(argv, proc)
     if pid:
         return {"opened": False, "pids": lineage(pid)}
     open_terminal(argv)
-    # The terminal command returns once its unit starts, and a remote attach that fails exits
-    # within a second, so only an ssh that is still up after REMOTE_SETTLE counts as opened.
+    # The terminal command returns once its unit starts. A remote error keeps its window through
+    # HOLD, so only an ssh that fails to connect ends at once, and one still up after REMOTE_SETTLE
+    # counts as opened.
     deadline = time.monotonic() + VIEWER_TIMEOUT
     while not pid and time.monotonic() < deadline:
         time.sleep(0.1)

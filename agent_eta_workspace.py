@@ -66,8 +66,6 @@ def validate(snapshot):
         names = [desktop["name"] for desktop in snapshot["desktops"]]
         if not names or len(names) > MAX_DESKTOPS or any(not isinstance(name, str) or not name or "\0" in name for name in names):
             raise ValueError("invalid desktop names")
-        if len(set(names)) != len(names):
-            raise ValueError("duplicate desktop names")
         outputs = snapshot["outputs"]
         output_names = [output["name"] for output in outputs]
         if not outputs or len(set(output_names)) != len(output_names):
@@ -183,10 +181,22 @@ class Backend:
         return result
 
 
+def ambiguous_names(*snapshots):
+    """Desktop names that occur more than once in any snapshot, such as KDE's default „New Desktop“.
+    Names identify desktops across hosts, so these stay unmatched."""
+    found = set()
+    for snapshot in snapshots:
+        counts = Counter(desktop["name"] for desktop in snapshot["desktops"])
+        found.update(name for name, count in counts.items() if count > 1)
+    return found
+
+
 def desktop_plan(source, target):
-    """Insert missing names; never redefine an existing desktop's identity."""
+    """Insert missing names; never redefine an existing desktop's identity. Ambiguous names are neither
+    created nor used for positions."""
+    ambiguous = ambiguous_names(source, target)
     current = [desktop["name"] for desktop in target["desktops"]]
-    wanted = [desktop["name"] for desktop in source["desktops"]]
+    wanted = [desktop["name"] for desktop in source["desktops"] if desktop["name"] not in ambiguous]
     creates = []
     for index, name in enumerate(wanted):
         if name in current:
@@ -202,6 +212,8 @@ def desktop_plan(source, target):
         raise WorkspaceError("The desktop union exceeds KWin's capacity of %d." % MAX_DESKTOPS)
     desired = wanted + [name for name in current if name not in wanted]
     warnings = [] if current == desired else ["Existing desktop IDs and order were preserved; source ordering differs."]
+    if ambiguous:
+        warnings.append("Desktops with duplicate names stay unmatched: %s." % ", ".join(sorted(ambiguous)))
     return creates, warnings
 
 
@@ -237,6 +249,7 @@ def reconcile(source, target, bindings=None):
     plan = {"version": VERSION, "expected_desktops": target["desktops"], "creates": creates,
             "windows": [], "skipped": [], "warnings": warnings}
     mappings = output_mapping(source, target)
+    ambiguous = ambiguous_names(source, target)
     counts = Counter(tuple(window["identity"]) for window in source["windows"])
     used = set()
     for window in source["windows"]:
@@ -250,7 +263,9 @@ def reconcile(source, target, bindings=None):
             if counts[tuple(window["identity"])] != 1:
                 candidates = []
         reason = None
-        if len(candidates) != 1 or candidates[0]["id"] in used:
+        if not window["all_desktops"] and ambiguous.intersection(window["desktops"]):
+            reason = "Desktop name is not unique."
+        elif len(candidates) != 1 or candidates[0]["id"] in used:
             reason = "No unique destination window."
         elif window.get("tiled") or candidates[0].get("tiled"):
             reason = "Tiling is not restored."

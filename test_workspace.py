@@ -62,10 +62,30 @@ class ReconciliationTests(unittest.TestCase):
         with self.assertRaisesRegex(workspace.WorkspaceError, "capacity"):
             workspace.reconcile(source, target)
 
-    def test_duplicate_names_and_unknown_versions_are_rejected(self):
-        for value in (snapshot(("A", "A")), dict(self.source, version=2)):
-            with self.subTest(value=value), self.assertRaises(workspace.WorkspaceError):
-                workspace.reconcile(value, self.target)
+    def test_unknown_versions_are_rejected(self):
+        with self.assertRaises(workspace.WorkspaceError):
+            workspace.reconcile(dict(self.source, version=2), self.target)
+
+    def test_duplicate_desktop_names_stay_unmatched_with_a_warning(self):
+        def with_new_desktop(value, names):
+            value["desktops"] = [{"id": str(index), "name": name} for index, name in enumerate(names)]
+            extra = deepcopy(value["windows"][0])
+            extra.update(id=value["host"] + "-other", identity=["app", "class", "other", "role", "digest"],
+                         desktops=["New Desktop"])
+            value["windows"].append(extra)
+            return value
+
+        for duplicated in ("source", "target"):
+            with self.subTest(duplicated=duplicated):
+                names = {"source": ("Work", "New Desktop"), "target": ("Work", "New Desktop")}
+                names[duplicated] = ("Work", "New Desktop", "New Desktop")
+                source = with_new_desktop(snapshot(), names["source"])
+                target = with_new_desktop(snapshot(host="target"), names["target"])
+                plan = workspace.reconcile(source, target)
+                self.assertEqual([window["id"] for window in plan["windows"]], ["target-window"])
+                self.assertEqual(plan["skipped"], [{"id": "source-other", "reason": "Desktop name is not unique."}])
+                self.assertEqual(plan["creates"], [])
+                self.assertIn("Desktops with duplicate names stay unmatched: New Desktop.", plan["warnings"])
 
     def test_invalid_records_are_rejected_before_application(self):
         for key, replacement in (("rect", [0, 0, float("nan"), 1]), ("rect", [0, 0, 0, 1]),

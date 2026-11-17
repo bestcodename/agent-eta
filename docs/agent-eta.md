@@ -135,7 +135,9 @@ and the web app that TODO.md proposes. Since 0.67.0 it carries what the widget w
 and `idle` to idle, and shows `waitingFor` in brackets. Between turns, Claude Code 2.1.323 reports `shell` rather
 than `idle` while a background shell runs (measured 2026-11-13), so the session stays working until the shell
 ends. No hook is involved, so every running session is listed,
-including the ones started before agent-eta existed.
+including the ones started before agent-eta existed. Claude Code 2.1.326 writes no record while its folder-trust
+dialog waits (measured 2026-11-17), so a managed launch without one lists after five seconds as waiting for its
+startup prompt under its `claude:<pid>` key.
 
 With at least two accounts in the registry of [claude-account](https://github.com/bestcodename/ai/blob/main/docs/claude-account.md), agent-eta reads the `sessions/` and
 `projects/` of every registered directory, and the AGENT column reads `claude/<name>`. With one account or none it reads
@@ -336,7 +338,7 @@ agent-eta account launch claude:work --cli --directory /trusted/project \
 `account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` resumes a session after its existing writer has
 exited. A managed Codex resume is listed idle before its first prompt. The command refuses a live writer and
 names either the managed terminal's attach command or the reason the writer cannot be gated. A thread held by
-the desktop app must be closed there before resuming. `agent-eta attach claude:ID` or `codex:ID` shows its existing managed
+the desktop app must be closed there before resuming. `agent-eta attach claude:ID` or `codex:ID`, or the `claude:<pid>` key `list` shows, shows its existing managed
 terminal, without starting a model session. In a terminal it attaches or switches; `--json` selects a pane and
 returns attachment window PIDs, opening the configured viewer when detached. Native commands receive argument arrays, not interpolated shell
 text. Local launch and detached attach return success only after a viewer attaches within five seconds. A timeout
@@ -492,7 +494,8 @@ keeps its dedupe keys and notifies no claimed event a second time. Account actio
 Before building the model, ordinary listings select newer native Claude usage from fresh configured peers when
 both hosts report the same authenticated login fingerprint. Names and directory paths alone never establish
 identity. Both hosts must export `usage_identity`; an older peer contributes no usage. The selected reading
-must be current, at most five minutes old and have future reset times. Usage bars, projections and reset signals
+must be newer than the local one and have future reset times; one older than five minutes stays marked stale, so
+when every reading is stale the newest one shows. Usage bars, projections and reset signals
 are rebuilt locally from it. Shared readings are not saved in the native account cache. `--local` exports only
 native readings, so peers cannot echo a reading back or extend its lifetime. Local login state and actions stay
 local. The text list shows local sessions and can use shared Claude usage; `account list` reports the native cache.
@@ -505,8 +508,8 @@ string. From a terminal it runs `ssh -t HOST ~/.local/bin/agent-eta attach SOURC
 a process of the user that runs that command. Both `ssh` and the remote `agent-eta` executable match by basename,
 so the documented `ssh -t HOST agent-eta attach SOURCE` and absolute CLI paths reuse an existing viewer too.
 The SSH option, host, action and session ID must still match exactly. It reports the pids of it and its ancestors,
-so the widget raises its terminal. Otherwise it opens a terminal running that command. A viewer started by hand with other ssh
-arguments is not found.
+so the widget raises its terminal. Otherwise it opens a terminal running that command, followed by a hold, so a window whose remote attach fails
+stays open with the error until Enter. A viewer started by hand with other ssh arguments is not found.
 
 Interactive pane launchers discard inherited `NO_COLOR` from automation tools while preserving `TERM` and
 `COLORTERM`. Explicit launcher environment overrides still apply. Existing processes need a session resume to
