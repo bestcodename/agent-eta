@@ -209,3 +209,10 @@ priority.
     fetches into `remote.json` carries the `usage` array. Proposal: for each account window, take the reading with the
     newest `seen_at` among the local one and every fresh host's, keep the reset and staleness rules, mark the source
     host in the tooltip, and cover it in `test_remote.py` (ca. 45 Minuten)
+45. (proposal, bug) A remote attach by the key `agent-eta list` shows fails, found on 2026-11-17. The desktop listed
+    the registered managed session as `claude:3144997` with `navigation: {"kind": "tmux"}`, and
+    `agent-eta attach --host desktop --json claude:3144997` on stefan-notebook exited 1 with "the remote attach ended
+    at once; run agent-eta attach claude:3144997 on desktop". The same call with the session id
+    `claude:09d6f884-f6ed-4f43-a8f8-a1b129d06d17` returned `{"opened": true, …}`. Proposal: `attach` resolves a
+    `claude:<pid>` key through the registry to the session id, or `list` keys rows by session id, with a test in
+    `test_remote.py`; see item 43 for the viewer that closes before its error shows (ca. 20 Minuten)
