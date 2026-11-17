@@ -181,6 +181,15 @@ class BoundaryTests(unittest.TestCase):
                 backend.run({"operation": "snapshot"})
         self.assertNotIn("private-title", str(error.exception))
 
+    def test_ssh_shell_without_session_environment_still_reaches_kdotool(self):
+        environment = {key: value for key, value in os.environ.items() if key != "KDE_SESSION_VERSION"}
+        environment["AGENT_ETA_KDOTOOL_BIN"] = "/fake/kdotool"
+        with mock.patch.dict(os.environ, environment, clear=True), \
+                mock.patch.object(workspace.subprocess, "run",
+                                  return_value=subprocess.CompletedProcess([], 0, "{}", "")) as run:
+            workspace.Backend().run({"operation": "snapshot"})
+        self.assertEqual(run.call_args.kwargs["env"]["KDE_SESSION_VERSION"], "6")
+
     def test_timeout_removes_temporary_script(self):
         folder = []
         def timed_out(argv, **kwargs):

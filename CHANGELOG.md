@@ -17,6 +17,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - TODO: effort estimates halved, by the user's request of 2026-11-16
 
+## [2.15.1] - 2026-11-17
+
+### Fixed
+
+- Workspace commands over SSH set `KDE_SESSION_VERSION`, which kdotool requires
+
 ## [2.15.0] - 2026-11-17
 
 ### Added
