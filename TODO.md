@@ -201,3 +201,11 @@ priority.
     no longer running", because the session registers only with its first hook. A raw tmux client on window `@28`
     showed it. Proposal: register a managed launch at start with its pane and pid, so `attach` and the list show it
     while it waits at the trust dialog, and keep a failing viewer open long enough to show its error (ca. 30 Minuten)
+44. (proposal, bug) Claude usage readings go stale on the host without a session of that account, reported on
+    2026-11-17. At 01:32 the desktop showed both Claude accounts `current` (sri@ndcom.de 40 % / 33 %), while the
+    notebook showed them `stale`, last seen 21:18 and 00:25, with the weekly window at 18 % instead of 33 %; Codex was
+    `current` on both. Claude usage comes only from the status-line recorder of a session on the same host, and
+    docs/agent-eta.md says usage and accounts stay local in the remote merge. The `--local` listing each host already
+    fetches into `remote.json` carries the `usage` array. Proposal: for each account window, take the reading with the
+    newest `seen_at` among the local one and every fresh host's, keep the reset and staleness rules, mark the source
+    host in the tooltip, and cover it in `test_remote.py` (ca. 45 Minuten)

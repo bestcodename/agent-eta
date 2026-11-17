@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - TODO: #43 a launched session cannot be attached remotely before its first prompt
+- TODO: #44 Claude usage readings go stale on the host without a session of that account
 
 ### Changed
 
