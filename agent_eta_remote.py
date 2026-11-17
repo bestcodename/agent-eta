@@ -11,13 +11,14 @@ terminal running agent-eta's own `ssh -t HOST agent-eta attach SOURCE`, or opens
 
 import argparse
 import json
+import math
 import os
 import re
 import subprocess
 import sys
 import time
 
-from agent_eta_accounts import AccountStore, check_worker_lock, file_lock, read_json, start_worker, write_json
+from agent_eta_accounts import REFRESH_SECONDS, AccountStore, check_worker_lock, file_lock, read_json, start_worker, write_json
 from agent_eta_handoff import parse_source
 from agent_eta_model import SCHEMA_VERSION, combined_summary
 from agent_eta_providers import AccountError
@@ -33,7 +34,7 @@ REMOTE_CLI = "~/.local/bin/agent-eta"
 # Seconds a new remote viewer must stay up to count as attached. An ssh attach of a session the
 # other machine does not run exited after 0.33 to 0.37 s on 2026-11-13; three times that.
 REMOTE_SETTLE = 1.2
-# The signals a remote host contributes. Usage stays local, and with it the reset signals.
+# Import peer waiting/overdue signals. Shared usage builds reset signals in the local model.
 REMOTE_SIGNAL_KINDS = ("waiting", "overdue")
 
 
@@ -144,6 +145,55 @@ def _refresh(store):
     return True
 
 
+def shared_usage(local, cache, now):
+    """Use newer native Claude readings from fresh peers with the same authenticated identity.
+
+    Keep login state and actions local. Never persist peer readings or export them through
+    --local, which prevents feedback from keeping an idle reading alive. Older peers without
+    identity fingerprints cannot contribute usage. Codex account IDs are not portable here.
+    """
+    accounts = [dict(account) for account in local["accounts"]]
+    windows = list(local["usage"])
+    entries = cache.get("hosts")
+    for entry in entries.values() if isinstance(entries, dict) else ():
+        if not isinstance(entry, dict):
+            continue
+        fetched = entry.get("fetched_at")
+        peer = entry.get("listing")
+        if (not isinstance(fetched, (int, float)) or not 0 <= now - fetched <= FRESH_SECONDS
+                or not valid_listing(peer)):
+            continue
+        for source in peer.get("accounts", []):
+            if not isinstance(source, dict):
+                continue
+            seen = source.get("seen_at")
+            if (source.get("provider") != "claude" or source.get("auth_state") != "authenticated"
+                    or not source.get("usage_identity") or source.get("error")
+                    or source.get("usage_status") != "current" or not isinstance(seen, (int, float))
+                    or not 0 <= now - seen <= REFRESH_SECONDS):
+                continue
+            reading = [w for w in peer.get("usage", [])
+                       if isinstance(w, dict) and w.get("account_id") == source.get("id")]
+            def number(value):
+                return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+            if not reading or any(not number(w.get("used")) or not 0 <= w["used"] <= 100
+                                  or w.get("minutes") not in (300, 10080)
+                                  or not number(w.get("resets_at")) or w["resets_at"] <= now
+                                  or w.get("seen_at") != seen for w in reading):
+                continue
+            for account in accounts:
+                if (account["provider"] != "claude" or account["auth_state"] != "authenticated"
+                        or account.get("usage_identity") != source["usage_identity"]
+                        or seen <= (account.get("seen_at") or 0)):
+                    continue
+                account.update(seen_at=seen, usage_status="current")
+                windows = [w for w in windows if w.get("account_id") != account["id"]]
+                windows += [dict({k: w[k] for k in ("minutes", "used", "resets_at")},
+                                 agent=account["agent"], account_id=account["id"], seen_at=seen,
+                                 usage_status="current", auth_state=account["auth_state"]) for w in reading]
+    return dict(local, accounts=accounts, usage=windows)
+
+
 def remote_rows(host, listing):
     """A host's sessions, tasks and section keys, prefixed and stripped of everything that acts locally."""
     prefix = "remote:%s/" % host
@@ -174,7 +224,7 @@ def remote_summary(host, listing):
 
 def remote_signals(host, listing):
     """A host's waiting and overdue signals under prefixed keys, with the host for the message.
-    Its reset signals stay local like the usage they belong to, and a malformed signal is left out.
+    Reset signals are rebuilt locally from the selected readings; malformed signals are left out.
     The prefixed dedupe key stays the same while the host is away, so a host that turns fresh again
     does not notify a second time for a wait the widget already claimed."""
     found = listing.get("notification_signals")
@@ -195,8 +245,8 @@ def remote_signals(host, listing):
 
 def merge(listing, cache, now):
     """The local listing plus every host fetched within FRESH_SECONDS. The summary and the waiting
-    and overdue signals cover the merged hosts too, so the tray counts and notifies for them. Usage,
-    accounts and actions stay local, and without a fresh host the listing stays as it was."""
+    and overdue signals cover the merged hosts too, so the tray counts and notifies for them.
+    shared_usage() selects readings before model construction. Account actions remain local."""
     merged = dict(listing, sessions=list(listing["sessions"]), tasks=list(listing["tasks"]),
                   sections=[dict(s, session_keys=list(s["session_keys"])) for s in listing["sections"]])
     by_index = {section["index"]: section for section in merged["sections"]}

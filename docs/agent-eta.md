@@ -485,8 +485,14 @@ session in a managed tmux keeps its `tmux` navigation with `host`, and every oth
 HOST". The summary adds up the counts of every fresh host, so the tray orb, its number, the headline and the
 progress bar cover them too. Their waiting and overdue signals join the notifications under prefixed keys, with the
 host in the title, so each machine's tray notifies for an event on either machine. A host that turns fresh again
-keeps its dedupe keys and notifies no claimed event a second time. Usage, its reset signals and accounts stay
-local, and the text list shows local sessions only.
+keeps its dedupe keys and notifies no claimed event a second time. Account actions and Codex usage stay local.
+Before building the model, ordinary listings select newer native Claude usage from fresh configured peers when
+both hosts report the same authenticated login fingerprint. Names and directory paths alone never establish
+identity. Both hosts must export `usage_identity`; an older peer contributes no usage. The selected reading
+must be current, at most five minutes old and have future reset times. Usage bars, projections and reset signals
+are rebuilt locally from it. Shared readings are not saved in the native account cache. `--local` exports only
+native readings, so peers cannot echo a reading back or extend its lifetime. Local login state and actions stay
+local. The text list shows local sessions and can use shared Claude usage; `account list` reports the native cache.
 `agent-eta remote list` prints each host with its last fetch and its error, which is `unreachable`, `agent-eta on
 HOST is too old`, `invalid listing` or `exit N`, and `remote refresh` fetches at once. Remote output never reaches the
 cache as an error. BatchMode needs the key in an agent, and plasmashell has the user manager's `SSH_AUTH_SOCK`.

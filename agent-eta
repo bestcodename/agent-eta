@@ -1476,6 +1476,8 @@ def cmd_list(args):
     require_process_view(directory)
     store = accounts_api.AccountStore()
     account_data = store.snapshot(claude_usage() + codex_usage(), now)
+    if not args.local:
+        account_data = remote_api.shared_usage(account_data, remote_api.read_cache(store), now)
     store.maybe_refresh(os.path.realpath(__file__), now)
     # The snapshot also deletes tasks that ended unseen, so --tasks builds it as well.
     result = snapshot(directory, now, usage=account_data["usage"], accounts=account_data["accounts"])

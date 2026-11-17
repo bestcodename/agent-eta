@@ -60,6 +60,50 @@ def remote_listing():
                    summary={"headline": "remote"})
 
 
+class SharedUsageTest(unittest.TestCase):
+    def setUp(self):
+        self.account = {"id": "claude:here", "agent": "claude/here", "provider": "claude",
+                        "auth_state": "authenticated", "usage_identity": "same-login",
+                        "seen_at": 100, "usage_status": "stale", "default_directory": "/local"}
+        self.source = dict(self.account, id="claude:there", agent="claude/there",
+                           seen_at=990, usage_status="current")
+        self.window = {"account_id": "claude:there", "agent": "claude/there", "minutes": 300,
+                       "used": 91, "resets_at": 1500, "seen_at": 990}
+        self.peer = listing(accounts=[self.source], usage=[self.window])
+        self.cache = {"hosts": {"desktop": {"fetched_at": 995, "listing": self.peer}}}
+        self.local = {"accounts": [self.account], "usage": []}
+
+    def test_newer_matching_identity_replaces_usage_and_keeps_local_actions(self):
+        before = copy.deepcopy((self.local, self.cache))
+        found = remote.shared_usage(self.local, self.cache, 1000)
+        self.assertEqual(found["accounts"][0], dict(self.account, seen_at=990, usage_status="current"))
+        self.assertEqual(found["usage"][0]["agent"], "claude/here")
+        self.assertEqual(found["usage"][0]["account_id"], "claude:here")
+        self.assertEqual(found["usage"][0]["used"], 91)
+        self.assertEqual((self.local, self.cache), before)
+
+    def test_unverified_or_old_readings_do_not_replace_local_usage(self):
+        cases = [({"usage_identity": None}, {}, {}),
+                 ({"usage_identity": "other"}, {}, {}),
+                 ({"auth_state": "logged_out"}, {}, {}),
+                 ({"provider": "codex"}, {}, {}),
+                 ({}, {"usage_status": "stale"}, {}),
+                 ({}, {"seen_at": 600}, {"seen_at": 600}),
+                 ({}, {"seen_at": 1100}, {"seen_at": 1100}),
+                 ({}, {}, {"resets_at": 999}),
+                 ({}, {}, {"used": None}),
+                 ({"seen_at": 999}, {}, {})]
+        for local, source, window in cases:
+            with self.subTest(local=local, source=source, window=window):
+                candidate = copy.deepcopy(self.cache)
+                candidate["hosts"]["desktop"]["listing"]["accounts"][0].update(source)
+                candidate["hosts"]["desktop"]["listing"]["usage"][0].update(window)
+                data = {"accounts": [dict(self.account, **local)], "usage": []}
+                self.assertEqual(remote.shared_usage(data, candidate, 1000), data)
+        self.cache["hosts"]["desktop"]["fetched_at"] = 900
+        self.assertEqual(remote.shared_usage(self.local, self.cache, 1000), self.local)
+
+
 class MergeTest(unittest.TestCase):
     def test_fresh_host_rows_are_prefixed_and_stripped_of_local_actions(self):
         local = listing([{"key": "claude:l", "agent": "claude", "tasks": []}],

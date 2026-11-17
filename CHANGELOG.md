@@ -17,6 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - TODO: effort estimates halved, by the user's request of 2026-11-16
 
+## [2.14.1] - 2026-11-17
+
+### Fixed
+
+- Newer Claude usage from configured remote hosts replaces older local readings for the same authenticated login
+- Native-only peer listings prevent shared readings from circulating or extending their freshness
+
 ## [2.14.0] - 2026-11-14
 
 ### Changed
