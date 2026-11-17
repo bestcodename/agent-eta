@@ -204,6 +204,10 @@ priority.
 44. (low, proposal) Show the source host of shared Claude usage in the account tooltip. Version 2.14.1
     selects newer peer readings for the same authenticated identity; source attribution is not displayed yet.
     Preserve the native reading timestamp and local account actions (ca. 30 Minuten)
+    Related gap, found on 2026-11-17 at 19:05: with no sri session on either host, stefan-notebook showed its own
+    reading of 84% (52 minutes old) while stefan-desktop held 100% (28 minutes old), because a peer reading counts
+    only up to five minutes. Proposal: when every reading is stale, show the newest one, still marked stale, so
+    the older and lower one never wins (ca. 20 Minuten)
 45. (proposal, bug) A remote attach by the key `agent-eta list` shows fails, found on 2026-11-17. The desktop listed
     the registered managed session as `claude:3144997` with `navigation: {"kind": "tmux"}`, and
     `agent-eta attach --host desktop --json claude:3144997` on stefan-notebook exited 1 with "the remote attach ended

@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - TODO: #44 Claude usage readings go stale on the host without a session of that account
 - TODO: #45 a remote attach by the `claude:<pid>` key that `list` shows fails
 - TODO: #46 workspace sync refuses a host with duplicate desktop names
+- TODO: #44 the newest stale Claude usage reading should win over an older local one
 
 ### Changed
 
