@@ -476,9 +476,14 @@ class Env:
                 environment["CLAUDE_CONFIG_DIR"] = directory
         else:
             environment["CODEX_HOME"] = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
-        return agent_eta_tmux.Runtime().start(command, handoff["cwd"],
+        runtime = agent_eta_tmux.Runtime()
+        record = runtime.start(command, handoff["cwd"],
                     session=handoff["source_terminal"]["session"], environment=environment,
                     identifier=handoff["destination_id"])
+        if "workspace" in handoff["source_terminal"]:
+            record["workspace"] = handoff["source_terminal"]["workspace"]
+            runtime.write(record)
+        return record
 
     def cancel_destination(self, handoff):
         if not handoff.get("destination_id"):

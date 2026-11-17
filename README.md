@@ -42,6 +42,8 @@ Requirements are Python 3.11 or later with the standard library only (CI runs 3.
 account features use `claude-account` from [bestcodename/ai](https://github.com/bestcodename/ai) when it is on `PATH`
 or in `~/.local/bin`, and the usage windows come from that repository's `scripts/claude-usage/statusline.py`.
 Managed CLI sessions and cross-provider handoffs require tmux and a running systemd 254+ user manager.
+Optional KDE workspace placement requires [kdotool 0.3.0 or later](https://github.com/jinliu/kdotool) and KWin 6.
+It preserves desktop IDs and skips uncertain matches. See [workspace synchronization](docs/workspaces.md).
 Install tmux with your package manager before running the installer. A private tmux server hosts agent terminals
 independently of viewers and handoff controllers. Konsole is the default viewer; `AGENT_ETA_TERMINAL_BIN` can select
 another terminal supporting `-e`. Closing the viewer leaves agents running; explicitly ending an agent stops it.
@@ -70,6 +72,12 @@ ssh -t HOST agent-eta attach claude:<session>   # the same from another machine
 agent-eta remote add HOST           # HOST's sessions join the widget's list, orb and notifications
 agent-eta account-tabs FILE         # start a claude-account handoff's tabs in managed tmux
 agent-eta handoff claude:<session> --to codex   # continue a session's plan in Codex
+agent-eta account launch codex --cli --directory /project --jira-key PROJECT-123
+agent-eta workspace snapshot > workspace.json
+agent-eta workspace apply < workspace.json      # preview only
+agent-eta workspace apply --apply --json < workspace.json
+agent-eta workspace assign codex:<session> PROJECT-123
+agent-eta workspace assign codex:<session> --clear
 ```
 
 A handoff refuses a folder the destination client does not trust yet, and its message names the command that opens

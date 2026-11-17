@@ -204,7 +204,7 @@ def spawn(command, env=None):
 
 
 def launch(account, directory, login=False, cli=False, resume=None, started=None,
-           model=None, effort=None, permission_mode=None, prompt=None):
+           model=None, effort=None, permission_mode=None, prompt=None, jira_key=None):
     """Pass argv directly to processes; no directory or account name becomes shell code.
     `started(record)` runs once a managed terminal is up and before its viewer opens, so the
     session is known even when no viewer attaches. Claude settings apply to this launch;
@@ -217,11 +217,18 @@ def launch(account, directory, login=False, cli=False, resume=None, started=None
                for value in (*settings.values(), prompt) if value is not None):
             raise AccountError("Claude launch options must be nonempty text without NUL characters")
     if account["provider"] == "codex" and not login and not cli and not resume:
+        if jira_key is not None:
+            raise AccountError("Ticket placement requires a managed CLI viewer; use --cli.")
         from urllib.parse import urlencode
         spawn([executable("opener"), "codex://threads/new?" + urlencode({"path": directory})])
         return
     if not login:
         import agent_eta_tmux
+        import agent_eta_workspace
+        try:
+            key = agent_eta_workspace.assignment(directory, jira_key)
+        except agent_eta_workspace.WorkspaceError as error:
+            raise AccountError(str(error)) from None
         if account["provider"] == "claude":
             arguments = ["--resume", resume] if resume else []
             for option, value in settings.items():
@@ -248,6 +255,10 @@ def launch(account, directory, login=False, cli=False, resume=None, started=None
             raise AccountError(str(exc) + ("" if cancelled else "; terminal cleanup is unconfirmed")) from None
         if started:
             started(record)
+        agent_eta_workspace.configure(runtime, record, key)
+        if resume:
+            record["source"] = account["provider"] + ":" + resume
+            runtime.write(record)
         runtime.attach(record)
         return record
     if account["provider"] == "claude":

@@ -384,7 +384,8 @@ class Actions(Isolated):
                 accounts.account_action(args, inspect=lambda source: None,
                                         launched=lambda account, record, resume: calls.append(
                                             ("launched", account["id"], record, resume)))
-        self.assertEqual(calls, [("launched", "codex", {"scope": "s"}, "r1"), "attach"])
+        self.assertEqual(calls, [("launched", "codex", {"scope": "s", "workspace": {"jira_key": None},
+                                                        "source": "codex:r1"}, "r1"), "attach"])
 
     def test_resume_refuses_a_live_writer_before_starting_anything(self):
         args = self.args("launch", resume="thread", cli=True)

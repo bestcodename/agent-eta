@@ -1,5 +1,8 @@
 # Agent ETA overview
 
+Optional KDE desktop snapshots, ticket assignments and host-handoff placement are documented in
+[KDE workspace synchronization](workspaces.md).
+
 `agent-eta` lists every running Claude Code, Codex, dsh and local-model session on this machine with its
 state, its ETA and its background tasks. Sessions waiting for an answer come first. Hooks and Claude Code's own session
 registry fill the list, so an agent only has to write down the ETA it states anyway.
