@@ -372,6 +372,13 @@ class Contract(unittest.TestCase):
         self.assertFalse(view["available"])
         self.assertEqual(view["reason"], record["error"])
         self.assertEqual(view["status"]["state"], "interrupted")
+
+    def test_a_session_without_an_id_does_not_move_and_says_why(self):
+        for agent, reason in (("claude", "it has no session ID yet"), ("dsh", "only Claude Code and Codex sessions move")):
+            with self.subTest(agent=agent):
+                view = model.handoff_view({"agent": agent, "id": None, "pid": 7}, {})
+                self.assertEqual((view["available"], view["reason"]), (False, reason))
+
     def test_handoff_availability_comes_from_the_gate_and_the_latest_record(self):
         sessions = [{"agent": "claude", "id": "s1", "pid": 1, "name": "a", "state": "idle", "since": NOW, "cwd": "/w"},
                     {"agent": "codex", "id": "t1", "name": "b", "state": "idle", "since": NOW, "cwd": "/w",

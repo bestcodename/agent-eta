@@ -338,7 +338,7 @@ agent-eta account launch claude:work --cli --directory /trusted/project \
 `account launch ACCOUNT --cli --resume SESSION_ID --directory DIR` resumes a session after its existing writer has
 exited. A managed Codex resume is listed idle before its first prompt. The command refuses a live writer and
 names either the managed terminal's attach command or the reason the writer cannot be gated. A thread held by
-the desktop app must be closed there before resuming. `agent-eta attach claude:ID` or `codex:ID`, or the `claude:<pid>` key `list` shows, shows its existing managed
+the desktop app must be closed there before resuming. `agent-eta attach claude:ID`, `claude:PID` or `codex:ID` shows its existing managed
 terminal, without starting a model session. In a terminal it attaches or switches; `--json` selects a pane and
 returns attachment window PIDs, opening the configured viewer when detached. Native commands receive argument arrays, not interpolated shell
 text. Local launch and detached attach return success only after a viewer attaches within five seconds. A timeout

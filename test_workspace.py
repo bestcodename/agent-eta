@@ -56,6 +56,11 @@ class ReconciliationTests(unittest.TestCase):
     def test_repeated_topology_application_has_no_creates(self):
         self.assertEqual(workspace.desktop_plan(self.source, self.target), ([], []))
 
+    def test_duplicate_names_between_matched_desktops_report_no_order_conflict(self):
+        layout = snapshot(("Work", "New Desktop", "New Desktop", "Mail"), windows=False)
+        self.assertEqual(workspace.desktop_plan(layout, deepcopy(layout)),
+                         ([], ["Desktops with duplicate names stay unmatched: New Desktop."]))
+
     def test_capacity_is_checked_before_any_writes(self):
         source = snapshot(tuple("Source%d" % number for number in range(15)), windows=False)
         target = snapshot(tuple("Target%d" % number for number in range(15)), windows=False)
