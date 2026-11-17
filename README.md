@@ -17,6 +17,9 @@ Usage bars show local hours for five-hour windows and weekdays for seven-day win
 **Time labels on usage bars** is enabled by default. Labels adapt to the bar width and can be hidden in settings.
 Each usage window also shows estimated exhaustion at its current average rate, separately from its reset.
 Stale readings have no estimate; windows projected to last until reset say so.
+Configured remote hosts contribute newer Claude usage when both hosts authenticate the same login fingerprint.
+Readings expire after five minutes and peers after one minute. Login state, account actions and Codex usage stay local.
+Both hosts need a version that exports login fingerprints. `--local` exports only native readings to prevent feedback.
 
 Hooks and the agents' own session registries fill the list, so an agent only has to write down the ETA it states anyway.
 Run process-aware listing on the host. A sandbox with a different PID namespace is refused before it can delete

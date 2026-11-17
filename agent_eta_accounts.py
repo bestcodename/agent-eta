@@ -175,7 +175,7 @@ class AccountStore:
             status = "current" if current else "stale" if reading else "unavailable"
             accounts.append({k: account[k] for k in ("id", "provider", "agent", "name", "can_remove", "default_directory")})
             accounts[-1].update(auth_state=auth, usage_status=status, seen_at=seen, checked_at=record.get("checked_at"),
-                                error=record.get("error"))
+                                error=record.get("error"), usage_identity=record.get("identity"))
             for window in reading:
                 windows.append(dict(window, agent=account["agent"], account_id=account["id"], seen_at=seen,
                                     usage_status=status, auth_state=auth))

@@ -151,6 +151,8 @@ class Cache(Isolated):
                 mock.patch.object(accounts, "claude_read", return_value=self.result()):
             self.store.refresh(now=1100)
         self.assertEqual(self.store.snapshot([self.reading()], now=1200)["usage"], [])
+        self.assertEqual(next(a for a in self.store.snapshot(now=1200)["accounts"]
+                              if a["provider"] == "codex")["usage_identity"], "new")
 
     def test_claude_and_codex_readings_stay_isolated_and_moved_registrations_do_not_inherit_cache(self):
         self.registered()
