@@ -116,6 +116,8 @@ class Backend:
         bus = Path("/run/user/%d/bus" % os.getuid())
         if not environment.get("DBUS_SESSION_BUS_ADDRESS") and bus.exists():
             environment["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=" + str(bus)
+        # kdotool refuses without it, and an SSH shell from host-sync or a handoff has no session environment.
+        environment.setdefault("KDE_SESSION_VERSION", "6")
         with tempfile.TemporaryDirectory(prefix="agent-eta-workspace-") as folder:
             script = Path(folder) / "operation.js"
             script.write_text("const request = " + json.dumps(request, ensure_ascii=True) + ";\n" + SCRIPT.read_text())
