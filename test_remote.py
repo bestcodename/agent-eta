@@ -87,8 +87,7 @@ class SharedUsageTest(unittest.TestCase):
                  ({"usage_identity": "other"}, {}, {}),
                  ({"auth_state": "logged_out"}, {}, {}),
                  ({"provider": "codex"}, {}, {}),
-                 ({}, {"usage_status": "stale"}, {}),
-                 ({}, {"seen_at": 600}, {"seen_at": 600}),
+                 ({}, {"usage_status": "unavailable"}, {}),
                  ({}, {"seen_at": 1100}, {"seen_at": 1100}),
                  ({}, {}, {"resets_at": 999}),
                  ({}, {}, {"used": None}),
@@ -102,6 +101,26 @@ class SharedUsageTest(unittest.TestCase):
                 self.assertEqual(remote.shared_usage(data, candidate, 1000), data)
         self.cache["hosts"]["desktop"]["fetched_at"] = 900
         self.assertEqual(remote.shared_usage(self.local, self.cache, 1000), self.local)
+
+    def stale_peer(self, seen):
+        self.source.update(seen_at=seen, usage_status="stale")
+        self.window.update(seen_at=seen)
+        return {"hosts": {"desktop": {"fetched_at": 995, "listing": listing(accounts=[self.source], usage=[self.window])}}}
+
+    def test_a_newer_stale_reading_replaces_an_older_one_and_stays_stale(self):
+        found = remote.shared_usage(self.local, self.stale_peer(600), 1000)
+        self.assertEqual((found["accounts"][0]["seen_at"], found["accounts"][0]["usage_status"]), (600, "stale"))
+        self.assertEqual((found["usage"][0]["used"], found["usage"][0]["usage_status"]), (91, "stale"))
+
+    def test_an_older_stale_peer_reading_never_replaces_a_newer_local_one(self):
+        local = {"accounts": [dict(self.account, seen_at=700)], "usage": []}
+        self.assertEqual(remote.shared_usage(local, self.stale_peer(600), 1000), local)
+
+    def test_a_current_peer_reading_older_than_five_minutes_shows_as_stale(self):
+        self.source.update(seen_at=600)
+        self.window.update(seen_at=600)
+        found = remote.shared_usage(self.local, self.cache, 1000)
+        self.assertEqual(found["accounts"][0]["usage_status"], "stale")
 
 
 class MergeTest(unittest.TestCase):
@@ -354,7 +373,18 @@ class AttachTest(unittest.TestCase):
                 mock.patch.object(remote, "REMOTE_SETTLE", 0):
             result = remote.attach("desktop", "codex:t1", False, proc=str(self.proc))
         self.assertEqual(result, {"opened": True, "pids": lineage(os.getpid())})
-        self.assertEqual(self.opened, self.argv)
+        self.assertEqual(self.opened, self.argv + [remote.HOLD])
+
+    def test_a_viewer_the_widget_opened_with_the_hold_is_reused(self):
+        self.fake_process(os.getpid(), self.argv + [remote.HOLD])
+        with mock.patch.object(remote, "open_terminal") as open_terminal:
+            result = remote.attach("desktop", "codex:t1", False, proc=str(self.proc))
+        self.assertEqual(result, {"opened": False, "pids": lineage(os.getpid())})
+        open_terminal.assert_not_called()
+
+    def test_a_viewer_with_another_suffix_is_not_reused(self):
+        self.fake_process(os.getpid(), self.argv + ["|| true"])
+        self.assertIsNone(remote.viewer(self.argv + [remote.HOLD], proc=str(self.proc)))
 
     def test_a_remote_attach_that_never_shows_or_ends_at_once_is_an_error(self):
         def gone(seconds):

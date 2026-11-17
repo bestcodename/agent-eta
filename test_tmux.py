@@ -25,6 +25,14 @@ class RuntimeUnit(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_records_skip_malformed_json_and_foreign_scopes(self):
+        root = Path(self.tmp.name) / "tmux"
+        (root / "good.json").write_text(json.dumps({"id": "good", "scope": "agent-eta-agent-1.scope"}))
+        (root / "foreign.json").write_text(json.dumps({"id": "foreign", "scope": "other.scope"}))
+        (root / "list.json").write_text("[]")
+        (root / "broken.json").write_text("{")
+        self.assertEqual([record["id"] for record in self.runtime.records()], ["good"])
+
     def test_exposed_or_symlinked_runtime_is_refused(self):
         root = Path(self.tmp.name) / "exposed"
         root.mkdir(mode=0o755)

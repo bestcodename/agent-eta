@@ -117,7 +117,10 @@ priority.
     `destroy-unattached` session without taking clients off it. tmux 3.7c guards that read; only master also takes the
     clients off first. agent-eta never detaches a client, and its viewers now close through `kill-session`, which takes
     clients off before destroying. The private server keeps 3.5a until it restarts, which ends every agent, so switch
-    while none runs and run the test suite against 3.7c first (ca. 15 Minuten)
+    while none runs and run the test suite against 3.7c first (ca. 15 Minuten). On 2026-11-13 a viewer on the desktop's
+    3.5a server closed twice while its agent ran, right after another window's pane died (16:30:56, 16:32:17); on
+    3.7c on 2026-11-17 an isolated server closed only the dead window's viewer. On recurrence capture
+    `/proc/<server pid>/exe -V`, `list-clients`, `show-hooks -w -t <dead window>` and `journalctl --user` around it
 27. (low) Install Qt 6's `qmltestrunner` on stefan-desktop and add it to the workstation setup of
     [bestcodename/ai](https://github.com/bestcodename/ai). `test_qml.Qml.test_widget_qml` is skipped here on
     2026-11-11 for lack of it, so widget changes are only tested on the notebook (ca. 10 Minuten)
@@ -194,29 +197,14 @@ priority.
     further with the parity table of #41. Delete resolved notes, drop text later measurements superseded and merge
     sections that repeat each other, such as the remote-host facts spread over the contract, CLI and widget parts;
     keep it one file (ca. 25 Minuten)
-43. (proposal, bug) A launched Claude session cannot be attached from another machine before its first prompt, found
-    on 2026-11-16. `agent-eta account launch claude:… --cli --directory <untrusted folder>` on stefan-notebook stopped
-    at Claude Code's folder-trust dialog, and `agent-eta attach --host notebook claude:<pid>` from stefan-desktop
-    opened a Konsole that closed after about two seconds. Run in a terminal, the remote side printed "the session is
-    no longer running", because the session registers only with its first hook. A raw tmux client on window `@28`
-    showed it. Proposal: register a managed launch at start with its pane and pid, so `attach` and the list show it
-    while it waits at the trust dialog, and keep a failing viewer open long enough to show its error (ca. 30 Minuten)
 44. (low, proposal) Show the source host of shared Claude usage in the account tooltip. Version 2.14.1
     selects newer peer readings for the same authenticated identity; source attribution is not displayed yet.
     Preserve the native reading timestamp and local account actions (ca. 30 Minuten)
-    Related gap, found on 2026-11-17 at 19:05: with no sri session on either host, stefan-notebook showed its own
-    reading of 84% (52 minutes old) while stefan-desktop held 100% (28 minutes old), because a peer reading counts
-    only up to five minutes. Proposal: when every reading is stale, show the newest one, still marked stale, so
-    the older and lower one never wins (ca. 20 Minuten)
-45. (proposal, bug) A remote attach by the key `agent-eta list` shows fails, found on 2026-11-17. The desktop listed
-    the registered managed session as `claude:3144997` with `navigation: {"kind": "tmux"}`, and
-    `agent-eta attach --host desktop --json claude:3144997` on stefan-notebook exited 1 with "the remote attach ended
-    at once; run agent-eta attach claude:3144997 on desktop". The same call with the session id
-    `claude:09d6f884-f6ed-4f43-a8f8-a1b129d06d17` returned `{"opened": true, …}`. Proposal: `attach` resolves a
-    `claude:<pid>` key through the registry to the session id, or `list` keys rows by session id, with a test in
-    `test_remote.py`; see item 43 for the viewer that closes before its error shows (ca. 20 Minuten)
-46. (proposal) Workspace sync refuses a host with duplicate desktop names, found on 2026-11-17. stefan-notebook has
-    two desktops named `New Desktop`, KDE's default name, so `host-sync desktops desktop` refused in both directions
-    with "Invalid workspace snapshot (duplicate desktop names)", because `apply` also snapshots the target. Proposal:
-    leave duplicate-named desktops unmatched with a preview warning instead of refusing the whole snapshot, with a
-    test in `test_workspace.py` (ca. 30 Minuten)
+47. (proposal) An `agent-eta add` reminder stays with a session that moved to another account or host, as a grey
+    `unknown` task-only row under the old name. On 2026-11-17 at 18:55 the desktop listed `unknown … claude
+    migrate-sri-servers-proxmox` due 09:44, which the user saw greyed out in the notebook's modal next to the moved
+    ndcnet session; the reminder was re-added by hand. Proposal: `agent-eta handoff` and `account-tabs` re-own the
+    source session's holderless reminders to the destination (same host), and a host move carries them in the tabs
+    file (ca. 45 Minuten)
+48. (low, proposal) Split `agent-eta`, which is past the 2000-line refactor mark, by moving the Claude and Codex
+    collectors into `agent_eta_collect.py` (ca. 1 Stunde)

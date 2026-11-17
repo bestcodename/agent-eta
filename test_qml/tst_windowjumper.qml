@@ -24,8 +24,8 @@ TestCase {
             return true;
         }
 
-        function answer(code, stdout) {
-            callbacks[callbacks.length - 1](code, stdout, "");
+        function answer(code, stdout, stderr) {
+            callbacks[callbacks.length - 1](code, stdout, stderr || "");
         }
     }
 
@@ -159,6 +159,22 @@ TestCase {
         verify(jumper.canJump(managed));
         verify(jumper.jump(managed));
         launcher.answer(0, JSON.stringify({opened: true, pids: []}));
+        compare(TaskFixture.activated, []);
+    }
+
+    SignalSpy {
+        id: failures
+        target: jumper
+        signalName: "failed"
+    }
+
+    function test_a_failed_attach_reports_its_error_and_raises_nothing() {
+        failures.clear();
+        const managed = {agent: "claude", id: "s1", navigation: {kind: "tmux"}, pids: []};
+        verify(jumper.jump(managed));
+        launcher.answer(1, "", "agent-eta: the session is no longer running\n");
+        compare(failures.count, 1);
+        compare(failures.signalArguments[0][0], "agent-eta: the session is no longer running");
         compare(TaskFixture.activated, []);
     }
 

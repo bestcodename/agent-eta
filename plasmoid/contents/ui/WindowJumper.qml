@@ -21,6 +21,9 @@ Item {
     property string command
     property var openUrl: url => Qt.openUrlExternally(url)
 
+    // A tmux attach that failed, with the error agent-eta printed, for the footer.
+    signal failed(string message)
+
     TaskManager.TasksModel {
         id: tasks
         groupMode: TaskManager.TasksModel.GroupDisabled
@@ -75,10 +78,13 @@ Item {
             return openUrl(target.url);
         }
         if (target && target.kind === "tmux") {
-            const attach = command + " attach " + Logic.shellQuote(session.agent + ":" + session.id) + " --json"
+            const attach = command + " attach " + Logic.shellQuote(Logic.attachSource(session)) + " --json"
                 + (target.host ? " --host " + Logic.shellQuote(target.host) : "");
-            launcher.run(attach, (code, stdout) => {
-                if (code !== 0) return;
+            launcher.run(attach, (code, stdout, stderr) => {
+                if (code !== 0) {
+                    jumper.failed((stderr || "").trim());
+                    return;
+                }
                 try {
                     const result = JSON.parse(stdout);
                     if (Array.isArray(result.pids)) raise({pids: result.pids, project_name: target.host ? "" : session.project_name}, []);

@@ -59,6 +59,7 @@ PlasmoidItem {
         id: jumper
         launcher: runner
         command: root.command
+        onFailed: message => root.actionFailure = message || i18n("Could not open the session.")
     }
 
     KQuickControlsAddons.Clipboard {

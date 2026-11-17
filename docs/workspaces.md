@@ -20,7 +20,9 @@ The private bestcodename/ai host-sync tool transports snapshots over its existin
 
 ## Desktop identity and matching
 
-Unique desktop names identify workspaces across hosts. Existing local IDs and relative order remain unchanged.
+Unique desktop names identify workspaces across hosts. A name that occurs twice on either host, such as KDE's
+default „New Desktop“, stays unmatched with a preview warning, and windows on it are skipped. Existing local IDs and
+relative order remain unchanged.
 Missing names are inserted before the next source desktop when existing order permits, otherwise appended.
 Ordering differences are reported. Destination-only desktops remain. The union must fit KWin's 20-desktop capacity.
 Desktops are never renamed, removed or automatically pruned.

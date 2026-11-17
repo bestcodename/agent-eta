@@ -7,17 +7,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-11-17
+
 ### Added
 
+- A managed Claude launch without a registry record, such as one at the folder-trust dialog, lists as waiting
+- TODO: #47 reminders stay with a session that moved to another account or host
+- TODO: #48 split `agent-eta` past 2000 lines
 - TODO: #43 a launched session cannot be attached remotely before its first prompt
 - TODO: #44 Claude usage readings go stale on the host without a session of that account
 - TODO: #45 a remote attach by the `claude:<pid>` key that `list` shows fails
 - TODO: #46 workspace sync refuses a host with duplicate desktop names
 - TODO: #44 the newest stale Claude usage reading should win over an older local one
 
+### Fixed
+
+- `attach claude:<pid>` resolves the key `list --json` shows
+- A failed remote attach keeps its window open with the error
+- The widget shows a failed attach in its footer
+- The newest stale Claude usage reading wins over an older local one
+- Workspace sync leaves duplicate desktop names unmatched instead of refusing the host
+
 ### Changed
 
 - TODO: effort estimates halved, by the user's request of 2026-11-16
+- TODO: #43, #45, #46 and the stale usage gap of #44 resolved; #24 records the viewers that closed on 2026-11-13
 
 ## [2.15.1] - 2026-11-17
 

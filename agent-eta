@@ -773,6 +773,70 @@ def account_sessions(account, directory):
     return found
 
 
+# Claude Code 2.1.326 writes sessions/<pid>.json 0.3 s after start in a trusted folder and not at all
+# while its folder-trust dialog waits (measured on 2026-11-17). A launch younger than this grace is
+# left to its registry record, so a normal start never flashes up as waiting.
+LAUNCH_GRACE = 5
+
+
+def process_account(pid):
+    """The Claude account whose directory the process runs with, by its CLAUDE_CONFIG_DIR."""
+    try:
+        with open("/proc/%d/environ" % pid, "rb") as handle:
+            pairs = [item.split(b"=", 1) for item in handle.read().split(b"\0") if b"=" in item]
+    except OSError:
+        return None
+    configured = dict(pairs).get(b"CLAUDE_CONFIG_DIR")
+    directory = os.path.realpath(os.fsdecode(configured) if configured else os.path.expanduser("~/.claude"))
+    return next((account for account, home in claude_accounts() if os.path.realpath(home) == directory), None)
+
+
+def pane_children(record):
+    """The direct children of a managed terminal's pane shell, the agent among them, read from /proc
+    so a listing asks neither tmux nor systemd. Empty once the pane ended or its pid was reused."""
+    pane = record.get("pane_pid")
+    if not isinstance(pane, int) or not record.get("pane_start") or tmux_api.proc_start(pane) != record["pane_start"]:
+        return []
+    try:
+        with open("/proc/%d/task/%d/children" % (pane, pane), "r", encoding="utf-8") as handle:
+            return [int(pid) for pid in handle.read().split()]
+    except (OSError, ValueError):
+        return []
+
+
+def claude_launches(known, now):
+    """Managed Claude Code launches without a registry record yet, such as one at the folder-trust
+    dialog, as sessions waiting for their startup prompt. They keep the key `claude:<pid>` the
+    registry row takes over once Claude Code writes it."""
+    if not (tmux_api.runtime_state() / "tmux").is_dir():
+        return []
+    try:
+        records = tmux_api.Runtime().records()
+    except (tmux_api.TmuxError, OSError):
+        return []
+    found = []
+    for record in records:
+        created = record.get("created")
+        if not isinstance(created, (int, float)) or now - created < LAUNCH_GRACE:
+            continue
+        for pid in pane_children(record):
+            if comm_of(pid) != "claude" or pid in known or claude_session(pid):
+                continue
+            found.append({
+                "agent": "claude",
+                "account": process_account(pid),
+                "id": None,
+                "pid": pid,
+                "name": os.path.basename(record.get("cwd") or "") or "-",
+                "state": "waiting",
+                "waiting_for": "startup prompt",
+                "since": created,
+                "cwd": record.get("cwd"),
+                "unused": False,
+            })
+    return found
+
+
 def codex_session_path(directory, thread):
     return os.path.join(sub_dir(directory, "sessions"), "codex-%s.json" % safe_id(thread))
 
@@ -1244,7 +1308,9 @@ def collect_sessions(directory, now):
     threads = codex_threads()
     names = codex_thread_names(threads)
     dsh, dsh_tasks = dsh_sessions(directory, now)
-    sessions = claude_sessions() + codex_sessions(directory, now, names, threads=threads) + dsh
+    claude = claude_sessions()
+    claude += claude_launches({session["pid"] for session in claude}, now)
+    sessions = claude + codex_sessions(directory, now, names, threads=threads) + dsh
     return sessions, dsh_tasks, load_turns(directory, now, sessions)
 
 
@@ -1979,7 +2045,14 @@ def cmd_attach(args):
             print(json.dumps(result))
         return 0
     source = handoff_api.parse_source(args.source)
-    session = handoff_inspect(source)
+    if source[0] == "claude" and source[1].isdigit():
+        # `list` keys a Claude Code session by its pid, and a launch at the trust dialog has no registry
+        # record yet, so the pid finds its managed terminal directly.
+        pid = int(source[1])
+        start = tmux_api.proc_start(pid) if comm_of(pid) == "claude" else None
+        session = {"pid": pid, "proc_start": start} if start else None
+    else:
+        session = handoff_inspect(source)
     if not session:
         raise tmux_api.TmuxError("the session is no longer running")
     runtime = tmux_api.Runtime()
@@ -2067,7 +2140,7 @@ def build_parser():
     konsole_api.add_parser(sub)
     workspace_api.add_parser(sub)
     attach = sub.add_parser("attach", help="show an existing managed CLI session")
-    attach.add_argument("source", metavar="SOURCE", help="claude:<session> or codex:<thread>")
+    attach.add_argument("source", metavar="SOURCE", help="claude:<session or pid> or codex:<thread>")
     attach.add_argument("--json", action="store_true", help="select or open a viewer and report window PIDs")
     attach.add_argument("--host", help="the SSH host the session runs on, as added with remote add")
     guard = sub.add_parser("viewer-guard", help="tmux hook: send a viewer back from an agent another viewer shows")
