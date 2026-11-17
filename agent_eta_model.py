@@ -535,8 +535,9 @@ def handoff_view(session, handoffs):
     """Whether `agent-eta handoff` can move a session, where to, and its latest move. A collector
     that found no process to pause sets `gate_reason`."""
     if session.get("agent") not in HANDOFF_TARGETS or not session.get("id"):
-        return {"available": False, "reason": "only Claude Code and Codex sessions move", "targets": [],
-                "status": None}
+        reason = ("it has no session ID yet" if session.get("agent") in HANDOFF_TARGETS
+                  else "only Claude Code and Codex sessions move")
+        return {"available": False, "reason": reason, "targets": [], "status": None}
     record = handoffs.get("%s:%s" % (session["agent"], session["id"]))
     status = {key: record.get(key) for key in ("id", "state", "target", "error")} if record else None
     reason = session.get("gate_reason")

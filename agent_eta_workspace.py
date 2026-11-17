@@ -210,8 +210,9 @@ def desktop_plan(source, target):
         creates.append({"name": name, "position": position})
     if len(current) > MAX_DESKTOPS:
         raise WorkspaceError("The desktop union exceeds KWin's capacity of %d." % MAX_DESKTOPS)
-    desired = wanted + [name for name in current if name not in wanted]
-    warnings = [] if current == desired else ["Existing desktop IDs and order were preserved; source ordering differs."]
+    named = [name for name in current if name not in ambiguous]
+    desired = wanted + [name for name in named if name not in wanted]
+    warnings = [] if named == desired else ["Existing desktop IDs and order were preserved; source ordering differs."]
     if ambiguous:
         warnings.append("Desktops with duplicate names stay unmatched: %s." % ", ".join(sorted(ambiguous)))
     return creates, warnings

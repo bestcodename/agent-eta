@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.16.1] - 2026-11-17
+
+### Fixed
+
+- Workspace preview reports no order conflict for duplicate desktop names between matched desktops
+- A Claude launch without a session ID names that as the reason it cannot move
+
+### Changed
+
+- Remote viewer match and launch detection simplified
+- Docs: `attach` source forms in one sentence
+
 ## [2.16.0] - 2026-11-17
 
 ### Added

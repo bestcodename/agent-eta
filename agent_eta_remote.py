@@ -306,7 +306,7 @@ def viewer(argv, proc="/proc"):
                 continue
             with open(os.path.join(base, "cmdline"), "rb") as handle:
                 found = handle.read().split(b"\0")[:-1]
-            if (len(wanted) >= 6 and len(found) in (6, len(wanted)) and found[6:] == wanted[6:len(found)]
+            if (len(found) >= 6 and found[6:] in ([], wanted[6:])
                     and os.path.basename(found[0]) == os.path.basename(wanted[0])
                     and os.path.basename(found[3]) == os.path.basename(wanted[3])
                     and found[1:3] == wanted[1:3] and found[4:6] == wanted[4:6]):

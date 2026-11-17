@@ -820,7 +820,7 @@ def claude_launches(known, now):
         if not isinstance(created, (int, float)) or now - created < LAUNCH_GRACE:
             continue
         for pid in pane_children(record):
-            if comm_of(pid) != "claude" or pid in known or claude_session(pid):
+            if comm_of(pid) != "claude" or pid in known:
                 continue
             found.append({
                 "agent": "claude",

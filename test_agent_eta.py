@@ -1456,7 +1456,7 @@ class ClaudeLaunches(unittest.TestCase):
         self.state = pathlib.Path(state.name)
         (self.state / "tmux").mkdir()
 
-    def launches(self, known=(), created=NOW - 60, comm="claude", registered=False, records=None):
+    def launches(self, known=(), created=NOW - 60, comm="claude", records=None):
         record = {"id": "r1", "scope": "agent-eta-agent-1.scope", "cwd": "/work/shop", "created": created}
         runtime = mock.MagicMock()
         runtime.return_value.records.return_value = [record] if records is None else records
@@ -1464,7 +1464,6 @@ class ClaudeLaunches(unittest.TestCase):
                 mock.patch.object(eta.tmux_api, "runtime_state", return_value=self.state), \
                 mock.patch.object(eta, "pane_children", return_value=[4242]), \
                 mock.patch.object(eta, "comm_of", return_value=comm), \
-                mock.patch.object(eta, "claude_session", return_value={"sessionId": "s"} if registered else {}), \
                 mock.patch.object(eta, "process_account", return_value="work"):
             return eta.claude_launches(set(known), NOW)
 
@@ -1475,9 +1474,8 @@ class ClaudeLaunches(unittest.TestCase):
                          {"agent": "claude", "account": "work", "id": None, "pid": 4242, "name": "shop",
                           "state": "waiting", "waiting_for": "startup prompt"})
 
-    def test_no_row_within_the_grace_for_a_known_or_registered_pid_or_another_process(self):
-        for case in ({"created": NOW - 1}, {"known": [4242]}, {"registered": True}, {"comm": "node"},
-                     {"created": None}):
+    def test_no_row_within_the_grace_for_a_registered_pid_or_another_process(self):
+        for case in ({"created": NOW - 1}, {"known": [4242]}, {"comm": "node"}, {"created": None}):
             with self.subTest(case):
                 self.assertEqual(self.launches(**case), [])
 
@@ -1495,6 +1493,19 @@ class ClaudeLaunches(unittest.TestCase):
         self.assertEqual(eta.pane_children(record), [])
         record["pane_start"] = eta.tmux_api.proc_start(os.getpid())
         self.assertIsInstance(eta.pane_children(record), list)
+
+
+class LaunchListing(StateTest):
+    def test_a_launch_row_lists_under_needs_you_by_its_pid(self):
+        row = {"agent": "claude", "account": None, "id": None, "pid": os.getpid(), "name": "shop",
+               "state": "waiting", "waiting_for": "startup prompt", "since": NOW - 30, "cwd": "/work/shop",
+               "unused": False}
+        with mock.patch.object(eta, "claude_launches", return_value=[row]):
+            result = eta.snapshot(self.dir, NOW)
+        found = eta.model.listing(result, eta.session_json)["sessions"]
+        self.assertEqual([(s["key"], s["id"], s["section"], s["handoff"]["reason"]) for s in found],
+                         [("claude:%d" % os.getpid(), None, 0, "it has no session ID yet")])
+        self.assertIn("shop (startup prompt)", eta.render_sessions(list(result.sessions), NOW, False))
 
 
 class Usage(StateTest):
