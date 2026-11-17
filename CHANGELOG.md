@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- TODO #47 covers reminders of a session continued under a new ID
+
 ## [2.16.1] - 2026-11-17
 
 ### Fixed
