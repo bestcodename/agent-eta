@@ -211,3 +211,8 @@ priority.
     `claude:09d6f884-f6ed-4f43-a8f8-a1b129d06d17` returned `{"opened": true, …}`. Proposal: `attach` resolves a
     `claude:<pid>` key through the registry to the session id, or `list` keys rows by session id, with a test in
     `test_remote.py`; see item 43 for the viewer that closes before its error shows (ca. 20 Minuten)
+46. (proposal) Workspace sync refuses a host with duplicate desktop names, found on 2026-11-17. stefan-notebook has
+    two desktops named `New Desktop`, KDE's default name, so `host-sync desktops desktop` refused in both directions
+    with "Invalid workspace snapshot (duplicate desktop names)", because `apply` also snapshots the target. Proposal:
+    leave duplicate-named desktops unmatched with a preview warning instead of refusing the whole snapshot, with a
+    test in `test_workspace.py` (ca. 30 Minuten)
