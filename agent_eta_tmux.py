@@ -530,6 +530,7 @@ class Runtime:
         pane = self.pane(record)
         if not pane:
             raise TmuxError("the managed terminal has ended")
+        from agent_eta_workspace import place_viewer
         if interactive:
             inside = os.environ.get("TMUX", "").rsplit(",", 2)[0] == self.socket
             # Without a target tmux resolves the calling viewer's session.
@@ -537,6 +538,7 @@ class Runtime:
             single = not viewer_duplicates() and not remote_client(os.getpid())
             other = self.local_client(pane["window"], current) if single else None
             if other:
+                place_viewer(self, record, lineage(other["pid"]))
                 print("agent-eta: a viewer on %s already shows this agent" % other["tty"], file=sys.stderr)
                 return {"opened": False, "pids": self.focus(other)}
             if inside:
@@ -548,6 +550,7 @@ class Runtime:
             os.execvpe(argv[0], argv, env)
         client = self.local_client(pane["window"])
         if client:
+            place_viewer(self, record, lineage(client["pid"]))
             return {"opened": False, "pids": lineage(client["pid"])}
         open_terminal(self.viewer(pane, self.binary(record)))
         # The terminal command returns once its unit starts, also for a terminal that dies at once,
@@ -555,6 +558,7 @@ class Runtime:
         client = self.wait_for_viewer(pane["window"])
         if not client:
             raise TmuxError("no viewer attached within %d s; the agent keeps running" % VIEWER_TIMEOUT)
+        place_viewer(self, record, lineage(client["pid"]))
         return {"opened": True, "pids": lineage(client["pid"])}
 
     def wait_for_viewer(self, window, timeout=None):
@@ -608,6 +612,15 @@ def account_tabs(path):
             if not cancelled:
                 raise TmuxError(str(error) + "; terminal cleanup is unconfirmed") from None
             raise
+        from agent_eta_workspace import WorkspaceError, assignment, configure
+        try:
+            # Optional JSON survives the legacy ;; descriptor through base64.
+            import base64
+            placement = json.loads(base64.b64decode(fields["workspace"], validate=True)) if fields.get("workspace") else None
+            key = placement.get("assignment") if placement is not None else assignment(fields["workdir"])
+            configure(runtime, record, key, placement)
+        except (WorkspaceError, ValueError, TypeError, KeyError) as error:
+            print("agent-eta workspace: %s; the session resume continues." % error, file=sys.stderr)
         runtime.attach(record)
 
 

@@ -289,7 +289,7 @@ def account_action(args, batch=None, inspect=None, launched=None):
             options = {"cli": getattr(args, "cli", False), "resume": resume} if action == "launch" else {}
             if action == "launch":
                 options.update({name: getattr(args, name) for name in
-                                ("model", "effort", "permission_mode", "prompt")
+                                ("model", "effort", "permission_mode", "prompt", "jira_key")
                                 if getattr(args, name, None) is not None})
             if action == "launch" and launched:
                 options["started"] = lambda record: launched(account, record, resume)
@@ -352,6 +352,7 @@ def add_parser(sub):
             parser.add_argument("--directory")
             parser.add_argument("--cli", action="store_true", help="launch a managed CLI instead of the Codex desktop")
             parser.add_argument("--resume", metavar="SESSION_ID", help="resume a session without a live writer")
+            parser.add_argument("--jira-key", metavar="KEY", help="ticket desktop; otherwise infer one key from the Git branch")
             parser.add_argument("--model", help="Claude model alias or full model ID for this launch")
             parser.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"),
                                 help="Claude effort level for this launch")

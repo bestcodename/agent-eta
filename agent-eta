@@ -98,6 +98,7 @@ import agent_eta_accounts as accounts_api
 import agent_eta_handoff as handoff_api
 import agent_eta_tmux as tmux_api
 import agent_eta_konsole as konsole_api
+import agent_eta_workspace as workspace_api
 import agent_eta_model as model
 import agent_eta_remote as remote_api
 from agent_eta_dsh import DSH_LOCK, DSH_LOG, dsh_sessions, dsh_summary, dsh_web_url, is_dsh  # noqa: F401
@@ -1985,6 +1986,8 @@ def cmd_attach(args):
     record = runtime.find(session["pid"], session["proc_start"])
     if not record:
         raise tmux_api.TmuxError("the session is not in a managed tmux terminal")
+    record["source"] = args.source
+    runtime.write(record)
     result = runtime.attach(record, interactive=interactive)
     if args.json:
         print(json.dumps(result))
@@ -2007,6 +2010,19 @@ def cmd_account_tabs(args):
     except (OSError, KeyError, ValueError) as error:
         raise tmux_api.TmuxError("%s: unreadable tabs file (%s)" % (args.file, error)) from None
     return 0
+
+
+def cmd_workspace(args):
+    """Workspace reads reuse the native local session index; they never open viewers."""
+    known = {}
+    for session in snapshot(state_dir(), time.time()).sessions:
+        if session["agent"] not in ("claude", "codex") or not session.get("id"):
+            continue
+        app = session.get("app") or {}
+        pid = session.get("pid") if session["agent"] == "claude" else app.get("pid")
+        known[(session["agent"], session["id"])] = {"pid": pid, "proc_start": proc_start(pid) if pid else None}
+    sources = ["%s:%s" % source for source in known]
+    return workspace_api.action(args, known.get, sources)
 
 
 def eta_type(text):
@@ -2049,6 +2065,7 @@ def build_parser():
     remote_api.add_parser(sub)
     handoff_api.add_parser(sub)
     konsole_api.add_parser(sub)
+    workspace_api.add_parser(sub)
     attach = sub.add_parser("attach", help="show an existing managed CLI session")
     attach.add_argument("source", metavar="SOURCE", help="claude:<session> or codex:<thread>")
     attach.add_argument("--json", action="store_true", help="select or open a viewer and report window PIDs")
@@ -2070,10 +2087,11 @@ def main(argv=None):
                 "set": cmd_set, "turn": cmd_turn, "handoff": cmd_handoff,
                 "account": lambda args: accounts_api.account_action(args, handoff_batch, handoff_inspect, register_launch),
                 "tab": konsole_api.tab_action, "attach": cmd_attach, "viewer-guard": cmd_viewer_guard, "remote": remote_api.remote_action,
-                "account-tabs": cmd_account_tabs}
+                "account-tabs": cmd_account_tabs, "workspace": cmd_workspace}
     try:
         return handlers[args.cmd](args)
-    except (StateDirError, AccountError, handoff_api.HandoffError, tmux_api.TmuxError, remote_api.RemoteError) as exc:
+    except (StateDirError, AccountError, handoff_api.HandoffError, tmux_api.TmuxError, remote_api.RemoteError,
+            workspace_api.WorkspaceError) as exc:
         print("agent-eta: %s" % exc, file=sys.stderr)
         return 1
 

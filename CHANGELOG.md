@@ -17,6 +17,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - TODO: effort estimates halved, by the user's request of 2026-11-16
 
+## [2.15.0] - 2026-11-17
+
+### Added
+
+- Optional KWin workspace snapshots, conservative preview/application and verification receipts through kdotool
+- Desktop identity preservation, output-relative geometry and managed-session matching
+- Explicit or branch-inferred Jira desktop assignments for managed launch, attach and Jump
+- Optional placement metadata for native host handoffs and assignment retention across provider handoffs
+- Unit coverage and isolated X11/Wayland compositor integration tests
+
 ## [2.14.1] - 2026-11-17
 
 ### Fixed
