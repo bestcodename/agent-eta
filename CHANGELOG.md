@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - TODO: #43 a launched session cannot be attached remotely before its first prompt
 - TODO: #44 Claude usage readings go stale on the host without a session of that account
+- TODO: #45 a remote attach by the `claude:<pid>` key that `list` shows fails
 
 ### Changed
 
