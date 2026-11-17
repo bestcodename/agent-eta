@@ -200,11 +200,15 @@ priority.
 44. (low, proposal) Show the source host of shared Claude usage in the account tooltip. Version 2.14.1
     selects newer peer readings for the same authenticated identity; source attribution is not displayed yet.
     Preserve the native reading timestamp and local account actions (ca. 30 Minuten)
-47. (proposal) An `agent-eta add` reminder stays with a session that moved to another account or host, as a grey
-    `unknown` task-only row under the old name. On 2026-11-17 at 18:55 the desktop listed `unknown … claude
-    migrate-sri-servers-proxmox` due 09:44, which the user saw greyed out in the notebook's modal next to the moved
-    ndcnet session; the reminder was re-added by hand. Proposal: `agent-eta handoff` and `account-tabs` re-own the
-    source session's holderless reminders to the destination (same host), and a host move carries them in the tabs
-    file (ca. 45 Minuten)
+47. (proposal) An `agent-eta add` reminder stays with a session that moved or was continued under a new ID, as a
+    grey `unknown` task-only row under the old name, while the continuation sinks to Dormant without it. On
+    2026-11-17 the desktop listed `unknown … claude migrate-sri-servers-proxmox` at 18:55 after an account move. At
+    22:15 the notebook listed reminder `add-ff9d1cc5` (vm104 balloon reboot, due 09:45) as `stefanr-98`, bound to
+    session `63b1cb88`, whose pid 4095252 ended at 19:38:31. A `claude bg-spare` process (pid 76691, ndcnet) started
+    the same second and continued it as `1703c3ed`, which listed as dormant "SRI servers Proxmox migration". The
+    continuation's transcript holds all 868 entry `uuid`s of the old one but no lineage key, and rewrites
+    `sessionId`. Proposal: for a reminder whose session has no live process, look for a live Claude session whose
+    transcript contains the old transcript's last `uuid` and re-own the reminder to it. `agent-eta handoff` and
+    `account-tabs` re-own directly, and a host move carries reminders in the tabs file (ca. 1 Stunde 15 Minuten)
 48. (low, proposal) Split `agent-eta`, which is past the 2000-line refactor mark, by moving the Claude and Codex
     collectors into `agent_eta_collect.py` (ca. 1 Stunde)
