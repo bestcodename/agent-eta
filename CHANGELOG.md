@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- CI: the `workspaces` job's container gets `SYS_NICE`, so `kwin_wayland` starts and the Wayland test runs
+
 ### Changed
 
 - TODO #47 covers reminders of a session continued under a new ID

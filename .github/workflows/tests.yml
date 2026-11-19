@@ -50,7 +50,11 @@ jobs:
 
   workspaces:
     runs-on: ubuntu-latest
-    container: debian:trixie
+    # Debian's kwin_wayland carries the file capability cap_sys_nice=ep, and a container
+    # without SYS_NICE refuses to exec it with EPERM.
+    container:
+      image: debian:trixie
+      options: --cap-add=SYS_NICE
     steps:
       - uses: actions/checkout@v4
       - name: Install isolated compositor test dependencies
