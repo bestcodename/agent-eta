@@ -239,9 +239,15 @@ priority.
     displays agree. Check whether the Codex CLI can show the same meter for Codex sessions, and add it if a
     supported integration is available. See item 28 in the [AI backlog](https://github.com/bestcodename/ai/blob/main/TODO.md)
     for the related plan-progress work.
-50. (proposal) Simplify the usage section of the Agent ETA modal. Review the account rows for redundant
-    labels and repeated information, and remove duplication while keeping account identity, quota usage,
-    and reset times easy to scan.
+50. (proposal) Declutter the Agent ETA modal, requested on 2026-11-19 and widened from the usage section. By
+    default each session and account row shows only what a decision needs, such as name, state, ETA or reset
+    and quota bar. Advanced and additional information and controls, such as time labels, pace, project path,
+    handoff and secondary actions, appear on pointer hover or keyboard focus of that row, and permanently once
+    the popup is wide or tall enough. Take the breakpoints from the popup's own width and height (`FullRepresentation.qml`)
+    instead of a fixed screen size, keep one place per piece of information, and leave nothing reachable only
+    by hover, so tooltips (#32) and context menus still expose it. In the usage section, also remove redundant
+    labels and repeated values across account rows. Inventory every row element first and sort it into
+    essential, hover and wide; cover both layouts and hover or focus states with QML tests (ca. 1 hour 30 minutes)
 51. (medium) Support PhpStorm's JetBrains AI agents like Claude Code and Codex, requested on 2026-11-19, with the
     same list, ETA and *Jump to window* behaviour (ca. 2 Stunden). Pre-plan from PhpStorm 2026.3 on 2026-11-19:
     - **Route.** The AI chat runs agents over ACP. A Claude chat is `npm exec @agentclientprotocol/claude-agent-acp`
@@ -255,16 +261,15 @@ priority.
       `AUI_EVENTS_V1` plus one base64 JSON event per line (`ChatSessionUserPromptEvent`,
       `ChatSessionMessageBlockEvent`), `.unread` holds `true` while the chat has unread output, `.usage` holds
       `{"used", "size", "cost"}` of the context window. Treat the format as internal and unversioned
-    - **Gaps measured.** `list --json` showed the 12:03 ACP chat as `claude:161500` with `title: null`,
-      `window: null` and `state: stopped`, and did not list the 23:50 one (pid 3459920) at all. First step: find why
-      in the process scan and the state derivation, with a fixture of this process chain
-    - **Changes.** Mark a `claude` process whose binary lies under `acp-agents/` or whose ancestor is a JetBrains
-      IDE as `host: "phpstorm"`. *Jump to window* raises the IDE window whose caption names the project of the
-      session's `cwd`, through the existing KWin path. The title comes from the transcript like for CLI sessions,
-      else from the first `ChatSessionUserPromptEvent` of the chat whose `.agentsession` names the session.
-      `.unread = true` on an idle chat puts it under Needs you. Launch and handoff stay CLI-only
+    - **Gaps measured.** `list --json` already lists both live ACP chats with their transcript titles and the
+      right `stopped` state of a limit-blocked account. *Jump to window* misses, because `project_root()` cuts at
+      the first level below `~/PhpstormProjects` (`private`, `ndcom`) while the PhpStorm windows are captioned
+      `ai` and `components`; this hits nested CLI sessions too. `handoff_gate()` gives the chats CLI advice, and
+      nothing marks a row as a PhpStorm chat. An idle chat already sits under *Needs you*, so `.unread` adds nothing
+    - **Changes.** Project root from the deepest matching key in PhpStorm's `options/recentProjects.xml`, a
+      `client: "phpstorm"` field for a `claude` binary under `acp-agents/` with a `phpstorm` ancestor (`host`
+      already means the remote machine), an own handoff reason and a widget label. Executable plan in
+      `~/.claude/plans/agent-eta-phpstorm-chats-and-usage-cutoff.md`
     - **Open.** The four `codex:` chats from 2026-11-05 have no rollout under `~/.codex/sessions`, so check where the
       IDE's Codex keeps them before covering Codex. Junie (`~/.junie/instances/`, `history.jsonl`) and the other
       ACP registry agents stay out until someone uses them
-    - **Tests.** Fixtures of the ACP process chain and an `aia-task-history` folder with one Claude chat; host
-      detection, title fallback, the `.unread` mapping, a missing or garbled `.events` file, the IDE window match
