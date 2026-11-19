@@ -149,6 +149,8 @@ test("rows say what is left, what ran over and where the session stands", () => 
                             waiting_for: "turn failed (TIMEOUT)"});
     assert.equal(logic.detailLine(failed, NOW), "dsh · qwen3-coder · shop · waiting (turn failed (TIMEOUT)) for 2m (03:10)");
     assert.equal(logic.title(session({turn_label: "tests"})), "shop · tests");
+    const chat = session({state: "waiting", waiting_for: "input", account: "ndcnet", client: "phpstorm"});
+    assert.equal(logic.detailLine(chat, NOW), "claude/ndcnet · PhpStorm · shop · waiting (input) for 2m (03:10)");
 });
 
 test("countdowns read like `12h 13m` and follow the clock time of a reset", () => {

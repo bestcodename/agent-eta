@@ -77,6 +77,7 @@ sessions/ under the state directory.
 
 import argparse
 import fcntl
+import functools
 import glob
 import json
 import os
@@ -88,6 +89,7 @@ import stat
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ElementTree
 from datetime import datetime
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -117,8 +119,10 @@ HOOK_LOG_MAX = 256 * 1024
 # wait but stayed silent for SESSION_STALE most likely lost its Stop, and counts as idle.
 SESSION_IDLE_TTL = 12 * 3600
 SESSION_STALE = 6 * 3600
-# Where PhpStorm projects live. A session below it belongs to the project at its first level.
+# Where PhpStorm projects live. A session belongs to the deepest project PhpStorm lists in its
+# recent projects, and otherwise, below PROJECTS_ROOT, to the project at its first level.
 PROJECTS_ROOT = "~/PhpstormProjects"
+PHPSTORM_RECENT_PROJECTS = "~/.config/JetBrains/PhpStorm*/options/recentProjects.xml"
 # How many processes up from a session's own one --json lists, for the tray to find its window.
 LINEAGE_DEPTH = 12
 # The line between the sections of the session table.
@@ -346,6 +350,19 @@ def lineage(pid, depth=LINEAGE_DEPTH):
         found.append(pid)
         pid = parent_of(pid)
     return found
+
+
+def ide_client(pid):
+    """"phpstorm" for a Claude Code process PhpStorm's AI chat runs over ACP, whose binary lives
+    under the IDE's cache in `JetBrains/<IDE>/acp-agents/`, and None for anything else. The path
+    decides, not the ancestry: the `npm exec` between PhpStorm and the adapter can exit while the
+    chat goes on, which leaves the adapter a child of systemd. Measured on PhpStorm 2026.3 with
+    claude-agent-acp 0.108.1 on 2026-11-19."""
+    try:
+        exe = os.readlink("/proc/%d/exe" % pid)
+    except OSError:
+        return None
+    return "phpstorm" if re.search(r"/JetBrains/PhpStorm[^/]*/acp-agents/", exe) else None
 
 
 def ancestor(match, start=None, depth=8):
@@ -769,6 +786,7 @@ def account_sessions(account, directory):
             "since": since / 1000 if isinstance(since, (int, float)) else None,
             "cwd": record.get("cwd"),
             "unused": unused,
+            "client": ide_client(pid),
         })
     return found
 
@@ -833,6 +851,7 @@ def claude_launches(known, now):
                 "since": created,
                 "cwd": record.get("cwd"),
                 "unused": False,
+                "client": None,
             })
     return found
 
@@ -1402,13 +1421,40 @@ def session_lines(sessions, now):
     return lines
 
 
-def project_root(cwd, projects=None):
-    """The project a working directory belongs to. Below PROJECTS_ROOT that is the directory at
-    its first level, since PhpStorm opens a project there and never a subdirectory, elsewhere the
-    nearest directory with a `.git`, and otherwise the working directory itself."""
+def phpstorm_projects(pattern=None):
+    """The project roots PhpStorm lists in the recent projects of every installed version, as
+    absolute paths. An unreadable or garbled file is skipped, so a missing IDE yields nothing."""
+    return _phpstorm_projects(os.path.expanduser(pattern or PHPSTORM_RECENT_PROJECTS), os.path.expanduser("~"))
+
+
+@functools.lru_cache(maxsize=4)
+def _phpstorm_projects(pattern, home):
+    """phpstorm_projects() for an expanded pattern, read once per process."""
+    roots = set()
+    for name in glob.glob(pattern):
+        try:
+            tree = ElementTree.parse(name)
+        except (OSError, ElementTree.ParseError):
+            continue
+        for entry in tree.iter("entry"):
+            key = (entry.get("key") or "").replace("$USER_HOME$", home)
+            if key.startswith("/"):
+                roots.add(os.path.normpath(key))
+    return frozenset(roots)
+
+
+def project_root(cwd, projects=None, ide_projects=None):
+    """The project a working directory belongs to. That is the deepest of PhpStorm's recent
+    projects containing it, since PhpStorm titles its window after that one. Failing that, below
+    PROJECTS_ROOT it is the directory at the first level, elsewhere the nearest directory with a
+    `.git`, and otherwise the working directory itself. `ide_projects` replaces PhpStorm's list."""
     if not cwd:
         return None
     path = os.path.abspath(cwd)
+    known = [root for root in (phpstorm_projects() if ide_projects is None else ide_projects)
+             if path == root or path.startswith(root + os.sep)]
+    if known:
+        return max(known, key=len)
     base = os.path.abspath(os.path.expanduser(projects or PROJECTS_ROOT))
     inner = os.path.relpath(path, base)
     if inner != os.curdir and inner != os.pardir and not inner.startswith(os.pardir + os.sep):
@@ -1960,6 +2006,8 @@ def handoff_gate(session, sessions):
     has its own process. A Codex thread qualifies only when no other thread shares its process,
     which rules out every chat of the desktop app and its single app-server."""
     if session["agent"] == "claude":
+        if session.get("client") == "phpstorm":
+            return None, None, "PhpStorm AI chat; continue it in PhpStorm"
         if not managed_terminal(session):
             return None, None, "unmanaged CLI; close and resume through agent-eta account launch --cli --resume"
         return session.get("pid"), proc_start(session["pid"]) if session.get("pid") else None, None

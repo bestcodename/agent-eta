@@ -1,7 +1,8 @@
 # agent-eta
 
 `agent-eta` lists every running Claude Code, Codex, dsh and local-model session on a Linux machine with its state, its
-ETA and its background tasks, and shows the usage windows of every account. Sessions waiting for an answer come first.
+ETA and its background tasks, and shows the usage windows of every account. Claude chats in PhpStorm's AI panel are
+listed as Claude Code sessions marked PhpStorm. Sessions waiting for an answer come first.
 Completed Codex turns stay idle even when a rejected command misses its completion hook; unanswered native questions
 show as waiting. An open asynchronous question stays green in Working while its turn continues, with the label
 "working, question open". A permission request still needs attention. A Plasma 6 tray widget shows the same overview,

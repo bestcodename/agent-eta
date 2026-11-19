@@ -248,33 +248,17 @@ priority.
     by hover, so tooltips (#32) and context menus still expose it. In the usage section, also remove redundant
     labels and repeated values across account rows. Inventory every row element first and sort it into
     essential, hover and wide; cover both layouts and hover or focus states with QML tests (ca. 1 hour 30 minutes)
-51. (medium) Support PhpStorm's JetBrains AI agents like Claude Code and Codex, requested on 2026-11-19, with the
-    same list, ETA and *Jump to window* behaviour (ca. 2 Stunden). Pre-plan from PhpStorm 2026.3 on 2026-11-19:
-    - **Route.** The AI chat runs agents over ACP. A Claude chat is `npm exec @agentclientprotocol/claude-agent-acp`
-      → `node claude-agent-acp` → the SDK's own `claude` binary under
-      `~/.cache/JetBrains/PhpStorm2026.3/acp-agents/claude-acp/<version>/`, a child of `phpstorm`. It writes a normal
-      transcript to `~/.claude/projects/<dir>/<session>.jsonl` and runs the Claude hooks (`session-start/` record
-      seen), so the Claude integration already covers turns, waiting questions and ETAs. No new provider is needed
-      for Claude
-    - **IDE side.** `~/.config/JetBrains/<IDE>/aia-task-history/<chat uuid>.*` per chat: `.agentsession` holds
-      `<agent>:<session id>` (`acp.registry.claude-acp:<claude session>` or `codex:<thread>`), `.events` is
-      `AUI_EVENTS_V1` plus one base64 JSON event per line (`ChatSessionUserPromptEvent`,
-      `ChatSessionMessageBlockEvent`), `.unread` holds `true` while the chat has unread output, `.usage` holds
-      `{"used", "size", "cost"}` of the context window. Treat the format as internal and unversioned
-    - **Gaps measured.** `list --json` already lists both live ACP chats with their transcript titles and the
-      right `stopped` state of a limit-blocked account. *Jump to window* misses, because `project_root()` cuts at
-      the first level below `~/PhpstormProjects` (`private`, `ndcom`) while the PhpStorm windows are captioned
-      `ai` and `components`; this hits nested CLI sessions too. `handoff_gate()` gives the chats CLI advice, and
-      nothing marks a row as a PhpStorm chat. An idle chat already sits under *Needs you*, so `.unread` adds nothing
-    - **Changes.** Project root from the deepest matching key in PhpStorm's `options/recentProjects.xml`, a
-      `client: "phpstorm"` field for a `claude` binary under `acp-agents/` with a `phpstorm` ancestor (`host`
-      already means the remote machine), an own handoff reason and a widget label. Executable plan in
-      `~/.claude/plans/agent-eta-phpstorm-chats-and-usage-cutoff.md`
+51. (medium) Finish PhpStorm AI chat support, requested on 2026-11-19 (ca. 1 Stunde). Claude chats are listed and
+    marked `client: "phpstorm"` since 2.17.0; see `docs/agent-eta.md`, *PhpStorm AI chats*. Open:
     - **Account.** The ACP `claude` gets `--settings` with `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`,
       `ANTHROPIC_AUTH_TOKEN=acp-proxy` and empty `CLAUDE_CODE_OAUTH_TOKEN`, so its requests go through PhpStorm's
       proxy (measured on pid 211146, 2026-11-19). `list` still files it under `claude/sri@ndcom.de` and derives
       `stopped` from that account's limit. Check which budget the proxy bills (JetBrains AI quota in
       `AIAssistantQuotaManager2.xml` or a linked Claude account) before keeping that state (ca. 30 Minuten)
-    - **Open.** The four `codex:` chats from 2026-11-05 have no rollout under `~/.codex/sessions`, so check where the
-      IDE's Codex keeps them before covering Codex. Junie (`~/.junie/instances/`, `history.jsonl`) and the other
-      ACP registry agents stay out until someone uses them
+    - **Codex and Junie.** The four `codex:` chats from 2026-11-05 have no rollout under `~/.codex/sessions`, so check
+      where the IDE's Codex keeps them before covering Codex. Junie (`~/.junie/instances/`, `history.jsonl`) and the
+      other ACP registry agents stay out until someone uses them. PhpStorm's own records per chat are
+      `~/.config/JetBrains/<IDE>/aia-task-history/<chat uuid>.*`: `.agentsession` holds `<agent>:<session id>`
+      (`acp.registry.claude-acp:<claude session>` or `codex:<thread>`), `.events` is `AUI_EVENTS_V1` plus one base64
+      JSON event per line, `.usage` holds `{"used", "size", "cost"}` of the context window. The format is internal
+      and unversioned; `.unread` stays `true` on dead chats and is no signal

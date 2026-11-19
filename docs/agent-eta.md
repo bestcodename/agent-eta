@@ -101,6 +101,14 @@ session is listed as idle and counts as dormant from the start. A record without
 stays `unknown`, because whether those processes ever report a running turn is unmeasured. Measured on
 claude-agent-sdk 2.1.220 on 2026-10-15.
 
+**PhpStorm AI chats.** PhpStorm's AI chat runs Claude over ACP, the Agent Client Protocol. Its adapter starts a
+`claude` binary of its own from `~/.cache/JetBrains/PhpStorm<version>/acp-agents/`, which writes a normal registry
+record and transcript and runs the Claude hooks, so the chat is listed like any Claude Code session. The binary's path
+marks it as `client: "phpstorm"`, not its ancestry, because the `npm exec` between PhpStorm and the adapter can exit
+while the chat goes on. The widget shows `PhpStorm` after the agent, and a handoff refuses it with "PhpStorm AI chat;
+continue it in PhpStorm", since only the IDE can pause or resume it. Measured on PhpStorm 2026.3 with claude-agent-acp
+0.108.1 on 2026-11-19. Codex and Junie chats in PhpStorm are not covered yet.
+
 `agent-eta --tasks` prints the flat task list of version 0.61.0, overdue first. `agent-eta --json` prints both, as
 `sessions` with the ids of their tasks and `tasks` with every field, for the tray widget and for the phone notification
 and the web app that TODO.md proposes. Since 0.67.0 it carries what the widget would otherwise have to work out itself.
@@ -120,9 +128,13 @@ and the web app that TODO.md proposes. Since 0.67.0 it carries what the widget w
   Python decides from the current hook host's PID and start time, controlling terminal and desktop executable
   ancestry, independently of the transcript's original client. An `app-server` alone proves no desktop or terminal
   association. This is additive in contract schema 1; an older listing without the field keeps its thread links.
-- A session has `project_root` and `project_name`. The root is the first directory below `~/PhpstormProjects`, else the
-  nearest repository root, else the working directory. The name is PhpStorm's `.idea/.name` when the project was
+- A session has `project_root` and `project_name`. The root is the deepest project in PhpStorm's recent projects
+  (`~/.config/JetBrains/PhpStorm*/options/recentProjects.xml`, every version) that contains the working directory, so
+  a nested project such as `private/bestcodename/ai` names the window PhpStorm opened for it. Without one it is the
+  first directory below `~/PhpstormProjects`, else the nearest repository root, else the working directory. An
+  unreadable recent-projects file falls back to these rules. The name is PhpStorm's `.idea/.name` when the project was
   renamed there, else the root's directory name.
+- A Claude session of PhpStorm's AI chat has `client: "phpstorm"`, every other session `null` or no field.
 - The top-level `accounts` array inventories monitored accounts even without readings. Each entry carries `id`,
   `provider`, `agent`, `name`, `can_remove`, `default_directory`, `auth_state`, `usage_status`, `seen_at`, `checked_at`
   and a safe `error` message. Authentication is `authenticated`, `logged_out`, `mismatch` or `unknown`; usage is

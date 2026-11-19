@@ -37,6 +37,9 @@ _spec = importlib.util.spec_from_loader(
 eta = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(eta)
 
+# The host's own PhpStorm projects must not decide a project in these tests.
+eta.PHPSTORM_RECENT_PROJECTS = "/nonexistent/agent-eta-test/recentProjects.xml"
+
 AGENT_VARS = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SANDBOX",
               "CODEX_SANDBOX_NETWORK_DISABLED", "AGENT_ETA_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
               "CLAUDE_ACCOUNTS_FILE", "DSH_HOME", "DSH_SESSION_ID", "AGENT_ETA_NO_REFRESH",
@@ -1387,6 +1390,66 @@ class CodexNavigation(unittest.TestCase):
                 target, pids = self.target(**fields)
                 self.assertEqual(target["kind"], "unavailable")
                 self.assertEqual(pids, [])
+
+
+class PhpStormChats(unittest.TestCase):
+    """PhpStorm's recent projects decide a session's project, and its AI chats are marked."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+    def recent(self, version, *keys, text=None):
+        options = self.root / "config" / ("PhpStorm" + version) / "options"
+        options.mkdir(parents=True)
+        entries = "".join('<entry key="%s"><value/></entry>' % key for key in keys)
+        body = text if text is not None else (
+            '<application><component name="RecentProjectsManager"><option name="additionalInfo">'
+            '<map>%s</map></option></component></application>' % entries)
+        (options / "recentProjects.xml").write_text(body)
+
+    def test_recent_projects_of_every_version_are_read_and_broken_files_skipped(self):
+        self.recent("2026.2", "$USER_HOME$/PhpstormProjects/private", "$APPLICATION_CONFIG_DIR$/light-edit")
+        self.recent("2026.3", "$USER_HOME$/PhpstormProjects/private/bestcodename/ai/")
+        self.recent("2026.1", text="<application><map><entry key=")
+        (self.root / "config" / "PhpStorm2025.1").mkdir()
+        home = os.path.expanduser("~")
+        pattern = str(self.root / "config" / "PhpStorm*" / "options" / "recentProjects.xml")
+        self.assertEqual(eta.phpstorm_projects(pattern),
+                         frozenset({home + "/PhpstormProjects/private",
+                                    home + "/PhpstormProjects/private/bestcodename/ai"}))
+        self.assertEqual(eta.phpstorm_projects(str(self.root / "missing" / "*.xml")), frozenset())
+
+    def test_the_deepest_ide_project_wins_and_the_first_level_stays_the_fallback(self):
+        projects = self.root / "projects"
+        nested = projects / "private" / "bestcodename" / "ai"
+        (nested / "docs").mkdir(parents=True)
+        ide = frozenset({str(projects / "private"), str(nested)})
+        self.assertEqual(eta.project_root(str(nested / "docs"), str(projects), ide), str(nested))
+        self.assertEqual(eta.project_root(str(nested), str(projects), ide), str(nested))
+        self.assertEqual(eta.project_root(str(projects / "private" / "other"), str(projects), ide),
+                         str(projects / "private"))
+        self.assertEqual(eta.project_root(str(projects / "privatex"), str(projects), ide),
+                         str(projects / "privatex"))
+        self.assertEqual(eta.project_root(str(nested / "docs"), str(projects), frozenset()),
+                         str(projects / "private"))
+
+    def client(self, exe):
+        with mock.patch.object(eta.os, "readlink", return_value=exe):
+            return eta.ide_client(100)
+
+    def test_only_a_claude_from_phpstorms_acp_agents_is_a_phpstorm_chat(self):
+        acp = "/home/u/.cache/JetBrains/PhpStorm2026.3/acp-agents/claude-acp/0.108.1/node_modules/x/claude"
+        self.assertEqual(self.client(acp), "phpstorm")
+        self.assertIsNone(self.client("/home/u/.cache/JetBrains/IntelliJIdea2026.3/acp-agents/claude-acp/claude"))
+        self.assertIsNone(self.client("/home/u/.local/bin/claude"))
+        with mock.patch.object(eta.os, "readlink", side_effect=OSError):
+            self.assertIsNone(eta.ide_client(100))
+
+    def test_a_phpstorm_chat_gets_its_own_handoff_reason(self):
+        chat = model_session(pid=100, client="phpstorm")
+        self.assertEqual(eta.handoff_gate(chat, [chat]), (None, None, "PhpStorm AI chat; continue it in PhpStorm"))
 
 
 class HandoffInspect(unittest.TestCase):
