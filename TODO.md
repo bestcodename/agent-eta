@@ -130,12 +130,8 @@ priority.
     notification rules and the model, effort and permission settings in #21. Reuse native client settings and
     existing environment overrides; keep process ownership and live-writer checks mandatory. Propose the remaining
     options and their implementation effort after this audit (ca. 1 hour)
-30. (next, proposal) Split widget configuration into sections, requested on 2026-11-11. Use Plasma's existing
-    configuration categories in `plasmoid/contents/config/config.qml`; proposed sections are General, Sessions
-    and Launching, Appearance, and Notifications. Preserve existing setting keys, defaults and saved values,
-    and test that each section loads and saves its controls (ca. 30 minutes)
-32. (next, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize settings
-    in `configGeneral.qml` and the sections proposed in #30, plus account and session context-menu actions in
+32. (next, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize the four
+    settings pages (`plasmoid/contents/ui/config*.qml`), plus account and session context-menu actions in
     `FullRepresentation.qml`; then cover remaining controls and unclear icons, status indicators and abbreviations.
     Explain purpose, effect or disabled state instead of repeating labels. Keep essential information visible and
     provide accessible names. Reuse Qt/Plasma tooltip facilities and native timing, with pointer hover and keyboard
@@ -167,7 +163,7 @@ priority.
 39. (proposal) Collapsible subtask bars in active session rows, requested on 2026-11-13. `SessionRow.qml` shows a
     `TaskRow` for every entry of `session.taskItems`. A widget setting chooses what a collapsed row keeps: all subtask
     bars, the longest and the earliest ETA, only the longest, or only the earliest; a click expands the row to all
-    bars. Default all, placed in the Appearance section of #30; test each mode, equal ETAs and a single entry
+    bars. Default all, placed on the Appearance settings page; test each mode, equal ETAs and a single entry
     (ca. 30 minutes)
 40. (proposal) Open sessions on the device the user is using, requested on 2026-11-13. A click opens or raises a
     viewer on the machine whose widget was clicked, and a remote session opens through `ssh -t HOST agent-eta attach`
@@ -229,7 +225,11 @@ priority.
       (`acp.registry.claude-acp:<claude session>` or `codex:<thread>`), `.events` is `AUI_EVENTS_V1` plus one base64
       JSON event per line, `.usage` holds `{"used", "size", "cost"}` of the context window. The format is internal
       and unversioned; `.unread` stays `true` on dead chats and is no signal
-52. (proposal) Flag an orphaned PhpStorm ACP agent that still holds a chat's session (ca. 45 Minuten). On
+52. (proposal, bug) Flag an orphaned PhpStorm ACP agent that still holds a chat's session (ca. 1 Stunde). A second
+    variant on 2026-11-19 16:17: a `claude-agent-acp` 0.108.1 pair started 45 s before the chat's 0.109.0 pair and
+    stayed idle under `systemd --user` with its own session id, which no `aia-task-history/*.agentsession` and no
+    transcript named. The modal showed it as an extra row `docs-7d`; a SIGTERM to the old node removed it.
+    Detection should also cover a PhpStorm session id that no `.agentsession` names. On
     2026-11-19 one Claude session id was listed twice, `idle` and `working`. PhpStorm had started a new
     `claude-agent-acp` for the chat at 12:58, and the old pair (node and `claude`, started 2026-11-18 23:50) lived
     on under `systemd --user` with no process holding the other end of its stdin or stdout pipes, still keeping the
@@ -254,3 +254,15 @@ priority.
     - **Tests.** `test_model.py`: reset exactly at the horizon, reset past it, `resets_at` None, a window
       across the DST change on 2026-10-25, month end in local time; `test_plasmoid.mjs`: the label
 
+54. (next, bug) A local run that Claude Code starts gets an unrecognizable row and a wrong jump target, seen on
+    2026-11-19 (ca. 1 Stunde). `run-local.sh` calls `agent-eta add --agent local --pid $$` from the Claude
+    session's Bash, and `cmd_add` stores `current_session()`, so the task carries that Claude session's id, pid and
+    name. The model then builds a synthetic `local` row named `docs-d6` after the Claude session instead of the
+    label `qwen3-coder:30b-a3b-q4_K_M on agent-eta`, with the Claude pid 517727 rather than goose's. Its
+    `project_root` is `~/PhpstormProjects/private`, because `project_root()` takes the first level below
+    `PROJECTS_ROOT` before the `.git` probe when the repository is not among PhpStorm's recent projects, so a cwd of
+    `agent-eta/.handoff/wt` lands on `private`. Proposal: an `add` with an `--agent` other than the caller's
+    records no caller session and names the row after its label; `project_root()` probes `.git` (a worktree's
+    `.git` file leads to its main repository) before the first-level fallback; the jump of a pid-only local row
+    raises the terminal or PhpStorm window of the session that started it, which needs a `parent` field.
+    Jump not clicked yet; the wrong target is read from `list --json`

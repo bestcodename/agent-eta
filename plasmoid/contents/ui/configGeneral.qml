@@ -9,15 +9,15 @@ KCM.SimpleKCM {
     property alias cfg_command: command.text
     property alias cfg_pollClosed: pollClosed.value
     property alias cfg_pollOpen: pollOpen.value
-    property alias cfg_showUsage: showUsage.checked
-    property alias cfg_showUsageTimeLabels: showUsageTimeLabels.checked
-    property alias cfg_launchInCli: launchInCli.checked
-    property alias cfg_yellowWidth: yellowWidth.value
-    property alias cfg_blendYellow: blendYellow.checked
-    property alias cfg_blendWidth: blendWidth.value
-    property alias cfg_notifyWaiting: notifyWaiting.checked
-    property alias cfg_notifyOverdue: notifyOverdue.checked
-    property alias cfg_notifyReset: notifyReset.checked
+    property bool cfg_showUsage
+    property bool cfg_showUsageTimeLabels
+    property bool cfg_launchInCli
+    property int cfg_yellowWidth
+    property bool cfg_blendYellow
+    property int cfg_blendWidth
+    property bool cfg_notifyWaiting
+    property bool cfg_notifyOverdue
+    property bool cfg_notifyReset
     // The popup's usage headers set these; the page only declares them, so Plasma does not warn.
     property bool cfg_usageCollapsed
     property bool cfg_usageOpenCollapsed
@@ -39,8 +39,6 @@ KCM.SimpleKCM {
     property bool cfg_notifyOverdueDefault
     property bool cfg_notifyResetDefault
 
-    Runner { id: runner }
-
     Kirigami.FormLayout {
         QQC2.TextField {
             id: command
@@ -57,72 +55,6 @@ KCM.SimpleKCM {
             Kirigami.FormData.label: i18nc("@label:spinbox", "Refresh every (seconds), open:")
             from: 1
             to: 60
-        }
-        QQC2.CheckBox {
-            id: showUsage
-            Kirigami.FormData.label: i18nc("@title:group", "Show:")
-            text: i18nc("@option:check", "Usage windows")
-        }
-        QQC2.CheckBox {
-            id: showUsageTimeLabels
-            objectName: "showUsageTimeLabels"
-            enabled: showUsage.checked
-            text: i18nc("@option:check", "Time labels on usage bars")
-            QQC2.ToolTip.text: enabled
-                ? i18n("Show local hours or weekdays along each usage window. Labels adapt to the available width.")
-                : i18n("Enable usage windows to change their time labels.")
-            QQC2.ToolTip.visible: hovered || activeFocus
-            Accessible.description: QQC2.ToolTip.text
-        }
-        QQC2.CheckBox {
-            id: launchInCli
-            Kirigami.FormData.label: i18nc("@title:group", "New Codex sessions:")
-            text: i18nc("@option:check", "Use CLI by default")
-        }
-        QQC2.Button {
-            text: i18n("Restore Codex monitoring")
-            onClicked: runner.run(config.cfg_command + " account enable codex", (code, stdout, stderr) => {
-                restoreStatus.text = code === 0 ? i18n("Codex monitoring is enabled") : (stderr || i18n("Restore failed")).trim();
-            })
-        }
-        QQC2.Label {
-            id: restoreStatus
-            text: ""
-            visible: text !== ""
-            wrapMode: Text.Wrap
-        }
-        QQC2.SpinBox {
-            id: yellowWidth
-            Kirigami.FormData.label: i18nc("@label:spinbox", "Yellow band (% of the usage past the tick, each side):")
-            enabled: showUsage.checked
-            from: 0
-            to: 100
-        }
-        QQC2.CheckBox {
-            id: blendYellow
-            enabled: showUsage.checked
-            text: i18nc("@option:check", "Blend the yellow band of a usage bar")
-        }
-        QQC2.SpinBox {
-            id: blendWidth
-            Kirigami.FormData.label: i18nc("@label:spinbox", "Fade width (% of each half of the yellow band):")
-            enabled: showUsage.checked && blendYellow.checked
-            from: 10
-            to: 100
-            stepSize: 10
-        }
-        QQC2.CheckBox {
-            id: notifyWaiting
-            Kirigami.FormData.label: i18nc("@title:group", "Notify when:")
-            text: i18nc("@option:check", "A session starts waiting for you")
-        }
-        QQC2.CheckBox {
-            id: notifyOverdue
-            text: i18nc("@option:check", "An ETA runs over")
-        }
-        QQC2.CheckBox {
-            id: notifyReset
-            text: i18nc("@option:check", "A usage limit resets")
         }
     }
 }
