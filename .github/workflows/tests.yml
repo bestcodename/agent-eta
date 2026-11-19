@@ -61,7 +61,7 @@ jobs:
         run: |
           apt-get update -q
           DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
-            python3 kwin-x11 kwin-wayland konsole xvfb xauth dbus-x11 libgl1-mesa-dri curl ca-certificates
+            python3 kwin-x11 kwin-wayland konsole qt6-wayland xvfb xauth dbus-x11 libgl1-mesa-dri curl ca-certificates
           curl -fsSL https://github.com/jinliu/kdotool/releases/download/v0.3.0/kdotool-0.3.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/kdotool.tar.gz
           printf '%s  %s\n' 2079cc1d492b6e83e04def4d9376e34fcb36a4e3bdc637c8c2ee6fa547ce90ff /tmp/kdotool.tar.gz | sha256sum -c -
           tar -xzf /tmp/kdotool.tar.gz -C /usr/local/bin kdotool

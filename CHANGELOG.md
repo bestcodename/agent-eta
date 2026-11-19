@@ -9,7 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- CI: the `workspaces` job's container gets `SYS_NICE`, so `kwin_wayland` starts and the Wayland test runs
+- CI: the `workspaces` job's container gets `SYS_NICE`, so `kwin_wayland` starts, and `qt6-wayland`, so the test
+  window can open on it
 
 ### Changed
 
