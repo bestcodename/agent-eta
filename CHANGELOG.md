@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - TODO #47 covers reminders of a session continued under a new ID
+- TODO #49 plan completion meter, #50 simpler usage section, #51 support for PhpStorm's JetBrains AI agents
 
 ## [2.16.1] - 2026-11-17
 
