@@ -387,6 +387,16 @@ export function usageGroups(listing) {
     }));
 }
 
+// The two sub-sections of the usage block, agents with room left above blocked ones, each with its
+// groups in agent-eta's order. An empty one is left out.
+export function usageSections(groups) {
+    const list = groups || [];
+    return [
+        {key: "open", groups: list.filter(group => !group.reached)},
+        {key: "blocked", groups: list.filter(group => group.reached)},
+    ].filter(section => section.groups.length > 0);
+}
+
 function known(window) {
     return !!window && window.remaining !== null && window.remaining !== undefined;
 }

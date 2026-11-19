@@ -379,6 +379,15 @@ test("sections come in agent-eta's order, and stopped and dormant ones open inde
     assert.deepEqual(logic.groupSessions(fixture("empty"), true, true), []);
 });
 
+test("the usage block splits into room left above blocked, leaving out an empty part", () => {
+    const groups = logic.usageGroups(fixture("mixed"));
+    assert.deepEqual(logic.usageSections(groups).map(s => [s.key, s.groups.map(g => g.agent)]),
+                     [["open", ["claude", "claude/work"]], ["blocked", ["codex"]]]);
+    assert.deepEqual(logic.usageSections(groups.filter(g => !g.reached)).map(s => s.key), ["open"]);
+    assert.deepEqual(logic.usageSections([]), []);
+    assert.deepEqual(logic.usageSections(undefined), []);
+});
+
 test("usage groups resolve agent-eta's window and account keys", () => {
     const mixed = fixture("mixed");
     const groups = logic.usageGroups(mixed);

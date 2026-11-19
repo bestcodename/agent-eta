@@ -742,7 +742,11 @@ and what the hook did. The command text never goes there. The log rotates at 256
   verified running background task counts as working for the dot and the orb. A holderless `agent-eta add` reminder
   does not establish activity by itself, but a session whose reminders are all still ahead shows green as "idle,
   reminder pending" until one is due. The line below the title shows its state age and start, as in `idle for 1h 5m (17:25)`.
-  Usage windows follow, with a bar filled to the used share and a tick at the elapsed share. Usage beyond the tick
+  Usage windows follow under a *Usage* heading, split into *Room left* above *Blocked*, each part with its count and
+  left out when empty. A click, Space or Enter on any of the three headings folds or unfolds what it heads, and the
+  choice is kept in the widget's configuration (`usageCollapsed`, `usageOpenCollapsed`, `usageBlockedCollapsed`), so
+  it survives a restart of plasmashell. All three start unfolded.
+  Each window has a bar filled to the used share and a tick at the elapsed share. Usage beyond the tick
   runs ahead of time. Faint ticks mark local hours of the 5-hour window and local calendar days of the 7-day one. Their positions
   derive from each recorded reset and window length, including daylight-saving transitions. Labels below the bar
   show local hours or weekdays, with full dates and timezone names on hover. Start and reset labels take priority;

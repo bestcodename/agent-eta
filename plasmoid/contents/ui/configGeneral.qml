@@ -18,6 +18,13 @@ KCM.SimpleKCM {
     property alias cfg_notifyWaiting: notifyWaiting.checked
     property alias cfg_notifyOverdue: notifyOverdue.checked
     property alias cfg_notifyReset: notifyReset.checked
+    // The popup's usage headers set these; the page only declares them, so Plasma does not warn.
+    property bool cfg_usageCollapsed
+    property bool cfg_usageOpenCollapsed
+    property bool cfg_usageBlockedCollapsed
+    property bool cfg_usageCollapsedDefault
+    property bool cfg_usageOpenCollapsedDefault
+    property bool cfg_usageBlockedCollapsedDefault
     // Plasma also hands every page the defaults, and warns about each one the page does not declare.
     property string cfg_commandDefault
     property int cfg_pollClosedDefault
