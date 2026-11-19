@@ -1452,6 +1452,30 @@ class PhpStormChats(unittest.TestCase):
         self.assertEqual(eta.handoff_gate(chat, [chat]), (None, None, "PhpStorm AI chat; continue it in PhpStorm"))
 
 
+class UsageBlock(unittest.TestCase):
+    """`usage_block` in the config sets the usage at which a window counts as blocked."""
+
+    def settings(self, raw):
+        store = mock.Mock()
+        store.return_value.settings.return_value = {} if raw is None else {"usage_block": raw}
+        with mock.patch.object(eta.accounts_api, "AccountStore", store):
+            return eta.usage_block_settings()
+
+    def test_only_numbers_from_1_to_100_replace_the_defaults(self):
+        self.assertEqual(self.settings(None), {300: 100, 10080: 100})
+        self.assertEqual(self.settings("99"), {300: 100, 10080: 100})
+        self.assertEqual(self.settings({"weekly_percent": 99.5, "five_hour_percent": 95}), {300: 95, 10080: 99.5})
+        for bad in (True, "99", 0, 101, None):
+            self.assertEqual(self.settings({"weekly_percent": bad, "other": 50}), {300: 100, 10080: 100}, bad)
+
+    def test_the_usage_table_names_the_cutoff_of_a_blocked_window(self):
+        [blocked] = eta.model.usage_view(NOW, [{"agent": "claude", "minutes": 10080, "used": 99.0,
+                                               "resets_at": NOW + 7200, "seen_at": NOW}], {10080: 99})
+        self.assertEqual(eta.usage_cells(blocked, NOW)[3], "2h00 (cutoff 99%)")
+        [limit] = eta.model.usage_view(NOW, [dict(blocked, used=100.0)], {10080: 99})
+        self.assertNotIn("cutoff", eta.usage_cells(limit, NOW)[3])
+
+
 class HandoffInspect(unittest.TestCase):
     """Handoff, attach and resume see only running sessions, never a row an ETA task keeps listed."""
 

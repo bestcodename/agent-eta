@@ -320,11 +320,16 @@ def quota_exhaustion(window, now):
     return result
 
 
-def usage_view(now, windows):
+def usage_view(now, windows, block_at=None):
     """Every usage window, copied, with the share of it that has passed, both in percent, how far
     the usage runs ahead of the time in percentage points, the time left until its reset and
     whether its limit is reached. A window whose reset lies in the past has started over since
-    its reading, so none of that is known then."""
+    its reading, so none of that is known then.
+
+    `block_at` maps a window length in minutes to the usage in percent at which it counts as
+    reached, 100 by default. `block_at` holds that cutoff, and `blocked_by` says why a reached
+    window is reached: "limit" at 100 and "cutoff" below, or None while it has room."""
+    block_at = block_at or {}
     found = []
     for window in windows:
         window = dict(window)
@@ -336,7 +341,10 @@ def usage_view(now, windows):
         else:
             window["used"] = window["elapsed"] = window["pace"] = window["remaining"] = None
         window["ahead"] = window["pace"] is not None and window["pace"] > 0
-        window["reached"] = window["used"] is not None and window["used"] >= 100
+        window["block_at"] = block_at.get(window["minutes"], 100)
+        window["reached"] = window["used"] is not None and window["used"] >= window["block_at"]
+        window["blocked_by"] = (None if not window["reached"]
+                                else "limit" if window["used"] >= 100 else "cutoff")
         window["exhaustion"] = quota_exhaustion(window, now)
         window["key"] = window_key(window)
         found.append(window)
@@ -548,7 +556,7 @@ def handoff_view(session, handoffs):
 
 
 def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, handoffs=None,
-                   reminders_need_you=False):
+                   reminders_need_you=False, block_at=None):
     """One snapshot from the collected inputs, none of which it changes.
 
     A task whose session is not known, such as a local run, stands as a session of its own. A
@@ -559,11 +567,12 @@ def build_snapshot(*, now, sessions, tasks, usage=(), accounts=(), turns=None, h
     limit resets. `turns` maps a session_key() to the turn ETA record of that session, and
     `handoffs` a handoff source such as `codex:<thread>` to its latest handoff record. An idle
     session that only waits for reminders not due yet counts as working, unless
-    `reminders_need_you` keeps it under Needs you.
+    `reminders_need_you` keeps it under Needs you. `block_at` holds the usage cutoffs of
+    usage_view().
     """
     sessions = copy.deepcopy(list(sessions))
     accounts = [dict(account, key="account:%s" % account["id"]) for account in copy.deepcopy(list(accounts))]
-    windows = usage_view(now, copy.deepcopy(list(usage)))
+    windows = usage_view(now, copy.deepcopy(list(usage)), block_at)
     turns = turns or {}
     by_key = {}
     for session in sessions:

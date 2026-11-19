@@ -289,6 +289,27 @@ class Usage(unittest.TestCase):
                                   ("claude", True, "window:claude:300")])
         self.assertEqual(snap.usage_groups[0]["window_keys"], ["window:codex:300", "window:codex:10080"])
 
+    def test_a_cutoff_blocks_a_window_below_the_provider_limit(self):
+        cutoff = {10080: 99}
+        views = model.usage_view(NOW, [window(minutes=10080, used=used) for used in (98.9, 99.0, 100.0)]
+                                 + [window(minutes=300, used=99.5), window(minutes=10080, used=99.5, resets_in=-10)],
+                                 cutoff)
+        self.assertEqual([(w["reached"], w["blocked_by"], w["block_at"]) for w in views],
+                         [(False, None, 99), (True, "cutoff", 99), (True, "limit", 99), (False, None, 100),
+                          (False, None, 99)])
+        self.assertEqual([w["reached"] for w in model.usage_view(NOW, [window(minutes=10080, used=99.0)])], [False])
+
+    def test_a_weekly_cutoff_alone_blocks_the_agent_and_stops_its_idle_sessions(self):
+        usage = [window(minutes=300, used=20.0, resets_in=600), window(minutes=10080, used=99.0, resets_in=90000)]
+        snap = build(sessions=[session(pid=1, state="idle"), session(pid=2, state="working")], usage=usage,
+                     block_at={10080: 99})
+        found = by_key(snap)
+        self.assertEqual((found["claude:1"]["state"], found["claude:1"]["resume_at"]), ("stopped", NOW + 90000))
+        self.assertEqual(found["claude:2"]["state"], "working")
+        [group] = snap.usage_groups
+        self.assertEqual((group["reached"], group["reset_window_key"]), (True, "window:claude:10080"))
+        self.assertEqual(build(sessions=[session(pid=1, state="idle")], usage=usage).sessions[0]["state"], "idle")
+
     def test_a_window_past_its_reset_is_unknown_and_its_reset_signal_falls(self):
         snap = build(usage=[window(used=100.0, resets_in=-10)])
         [found] = snap.usage

@@ -141,6 +141,10 @@ CODEX_STATES = {"UserPromptSubmit": "working", "PreToolUse": "working", "PostToo
 TURN_ENDS = ("UserPromptSubmit", "Stop", "Interrupt", "SessionEnd")
 # The Codex limit trigger's defaults, overridden by `codex_handoff` in ~/.config/agent-eta/config.json.
 HANDOFF_TRIGGER = {"enabled": True, "five_hour_percent": 90, "weekly_percent": 98}
+# The usage at which a window counts as blocked, overridden by `usage_block` in the same config.
+# Below 100 it blocks an account that still has a sliver left, which no session can use anyway.
+USAGE_BLOCK = {"five_hour_percent": 100, "weekly_percent": 100}
+USAGE_BLOCK_WINDOWS = {"five_hour_percent": 300, "weekly_percent": 10080}
 HANDOFF_WAIT = 1800
 # Codex tools that put a question to the user. No hook sees them, and none sees a plan waiting
 # for approval either, so the reader looks for both in the thread's rollout transcript.
@@ -1183,8 +1187,10 @@ def usage_window(agent, minutes, used, resets_at, seen_at):
 
 
 def usage_view(now, windows=None):
-    """Every usage window as model.usage_view() describes it, read from both agents unless given."""
-    return model.usage_view(now, claude_usage() + codex_usage() if windows is None else windows)
+    """Every usage window as model.usage_view() describes it, read from both agents unless given,
+    with the configured block cutoffs."""
+    return model.usage_view(now, claude_usage() + codex_usage() if windows is None else windows,
+                            usage_block_settings())
 
 
 def render_usage(windows, now, notes=None):
@@ -1242,11 +1248,15 @@ def agent_cells(summary, group, now):
 
 
 def usage_cells(window, now):
-    """USED, ELAPSED, PACE, REMAINING and DUE of one usage window."""
+    """USED, ELAPSED, PACE, REMAINING and DUE of one usage window. REMAINING names the configured
+    cutoff of a window blocked by one."""
     if window["elapsed"] is None:
         return (percent(window["used"]), "?", "?", "?", "?")
     pace = "%s %+d%%" % ("ahead" if window["ahead"] else "ok", round(window["pace"]))
-    return (percent(window["used"]), percent(window["elapsed"]), pace, span_to(window["resets_at"], now),
+    remaining = span_to(window["resets_at"], now)
+    if window.get("blocked_by") == "cutoff":
+        remaining += " (cutoff %g%%)" % window["block_at"]
+    return (percent(window["used"]), percent(window["elapsed"]), pace, remaining,
             format_due(window["resets_at"], now))
 
 
@@ -1349,7 +1359,7 @@ def snapshot(directory, now, tasks=None, usage=None, accounts=()):
     result = model.build_snapshot(now=now, sessions=sessions, tasks=list(tasks) + dsh_tasks,
                                   usage=usage_view(now) if usage is None else usage, accounts=accounts,
                                   turns=turns, handoffs=handoff_records(),
-                                  reminders_need_you=reminders_need_you())
+                                  reminders_need_you=reminders_need_you(), block_at=usage_block_settings())
     for task_id in result.prune_tasks:
         remove(entry_path(directory, task_id))
     return result
@@ -1809,6 +1819,18 @@ def handoff_trigger_settings():
         if key in settings and type(value) in ((bool,) if key == "enabled" else (int, float)):
             settings[key] = value
     return settings
+
+
+def usage_block_settings():
+    """The usage per window length in minutes at which a window counts as blocked, from
+    `usage_block` in the agent-eta config over USAGE_BLOCK. A value must be a number from 1 to 100;
+    anything else keeps the default."""
+    raw = accounts_api.AccountStore().settings().get("usage_block")
+    settings = dict(USAGE_BLOCK)
+    for key, value in (raw.items() if isinstance(raw, dict) else ()):
+        if key in settings and type(value) in (int, float) and 1 <= value <= 100:
+            settings[key] = value
+    return {USAGE_BLOCK_WINDOWS[key]: value for key, value in settings.items()}
 
 
 def codex_limit_trigger(directory, thread, now, usage=None, start=None):

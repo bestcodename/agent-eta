@@ -612,6 +612,17 @@ Two triggers start a handoff by themselves, each detached and once per tripped w
   {"codex_handoff": {"enabled": true, "five_hour_percent": 90, "weekly_percent": 98}}
   ```
 
+**Usage block cutoff.** A usage window counts as reached at 100 % by default. `usage_block` in the same config lowers
+that per window length, so an account parked at 99 % of its week counts as blocked in the usage table, the widget and
+the session list, which stops its resting sessions until the reset. A value must be a number from 1 to 100; anything
+else keeps 100. Each usage window of `list --json` carries `block_at`, its cutoff, and `blocked_by`, which is
+`"limit"` at 100 %, `"cutoff"` below and `null` while the window has room. The CLI adds `(cutoff 99%)` to the reset
+time, and the widget reads `blocked at 99% cutoff`. Remote readings are viewed with the local cutoff.
+
+```json
+{"usage_block": {"five_hour_percent": 100, "weekly_percent": 99}}
+```
+
 ## Install
 
 ```sh

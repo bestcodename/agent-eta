@@ -312,6 +312,8 @@
     {
       "agent": "codex",
       "ahead": false,
+      "block_at": 100,
+      "blocked_by": null,
       "elapsed": null,
       "exhaustion": {
         "at": null,
