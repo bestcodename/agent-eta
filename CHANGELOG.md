@@ -7,8 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-11-19
+
+### Added
+
+- Claude chats of PhpStorm's AI panel carry `client: "phpstorm"`, show `PhpStorm` in the widget and get their own
+  handoff reason instead of the unmanaged-CLI advice
+
 ### Fixed
 
+- A session in a nested PhpStorm project, such as `private/bestcodename/ai`, takes that project from PhpStorm's recent
+  projects, so *Jump to window* raises its window instead of any PhpStorm window
 - CI: the `workspaces` job's container gets `SYS_NICE`, so `kwin_wayland` starts, and `qt6-wayland`, so the test
   window can open on it
 

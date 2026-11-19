@@ -236,6 +236,9 @@ export function etaText(item, now) {
 // The second line of a session row.
 export function detailLine(session, now) {
     const parts = session.host ? [session.host, agentLabel(session)] : [agentLabel(session)];
+    if (session.client === "phpstorm") {
+        parts.push("PhpStorm");
+    }
     if (session.model) {
         parts.push(session.model);
     }
