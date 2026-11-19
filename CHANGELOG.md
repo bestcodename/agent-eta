@@ -7,8 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-11-19
+
 ### Changed
 
+- Widget settings split into four pages, General, Sessions and Launching, Appearance and Notifications; setting keys,
+  defaults and saved values stay; **Restore Codex monitoring** moves to Sessions and Launching
+- TODO #30 done and removed; #32 and #39 point at the new pages
+- TODO #52 covers an orphaned PhpStorm ACP agent with its own session id; #54 filed for a local run's row name and
+  jump target
 - TODO #53 resets left per account and usage window, priority next
 - TODO #53 and #36 linked through one reset-boundary helper; #53 example recalculated
 

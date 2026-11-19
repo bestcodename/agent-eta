@@ -814,10 +814,11 @@ and what the hook did. The command text never goes there. The log rotates at 256
   state and notifies nothing. A remote host's waiting and overdue signals notify as well, with "on HOST" after the
   session or task in the title.
 
-The settings also hold the command, which defaults to `"$HOME/.local/bin/agent-eta"` because plasmashell's `PATH`
-lacks `~/.local/bin`, the two poll intervals, whether the usage block shows, the half-width of a usage bar's yellow
-band and whether the yellow band of a usage
-bar fades, together with the width of that fade. The logic that needs no QML lives in
+The settings have four pages. **General** holds the command, which defaults to `"$HOME/.local/bin/agent-eta"`
+because plasmashell's `PATH` lacks `~/.local/bin`, and the two poll intervals. **Sessions and Launching** holds
+**Use CLI by default** and **Restore Codex monitoring**. **Appearance** holds whether the usage block shows, its time
+labels, the half-width of a usage bar's yellow band and whether that band fades, together with the width of the
+fade. **Notifications** holds the three notification switches. The logic that needs no QML lives in
 `contents/code/logic.mjs`, which the tests run under node.
 
 ```sh

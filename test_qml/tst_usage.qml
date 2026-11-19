@@ -47,7 +47,7 @@ Item {
         }
 
         function test_time_label_setting_loads_and_saves() {
-            const component = Qt.createComponent("../plasmoid/contents/ui/configGeneral.qml");
+            const component = Qt.createComponent("../plasmoid/contents/ui/configAppearance.qml");
             compare(component.status, Component.Ready, component.errorString());
             const settings = createTemporaryObject(component, root, {width: 500, height: 400,
                 cfg_showUsage: true, cfg_showUsageTimeLabels: true});
@@ -62,6 +62,26 @@ Item {
             compare(settings.cfg_showUsageTimeLabels, true);
             settings.cfg_showUsage = false;
             compare(checkbox.enabled, false);
+        }
+
+        function test_each_settings_page_loads_and_saves_data() {
+            return [
+                {tag: "general", file: "configGeneral.qml", key: "cfg_pollOpen", first: 7, second: 9},
+                {tag: "sessions", file: "configSessions.qml", key: "cfg_launchInCli", first: false, second: true},
+                {tag: "appearance", file: "configAppearance.qml", key: "cfg_blendWidth", first: 30, second: 50},
+                {tag: "notifications", file: "configNotifications.qml", key: "cfg_notifyReset", first: false, second: true}
+            ];
+        }
+        function test_each_settings_page_loads_and_saves(data) {
+            const component = Qt.createComponent("../plasmoid/contents/ui/" + data.file);
+            compare(component.status, Component.Ready, component.errorString());
+            const properties = {width: 500, height: 400, cfg_command: "agent-eta"};
+            properties[data.key] = data.first;
+            const settings = createTemporaryObject(component, root, properties);
+            verify(settings);
+            compare(settings[data.key], data.first);
+            settings[data.key] = data.second;
+            compare(settings[data.key], data.second);
         }
 
         function test_axis_labels_fit_actual_font_widths_data() {
