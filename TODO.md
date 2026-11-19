@@ -229,3 +229,10 @@ priority.
       (`acp.registry.claude-acp:<claude session>` or `codex:<thread>`), `.events` is `AUI_EVENTS_V1` plus one base64
       JSON event per line, `.usage` holds `{"used", "size", "cost"}` of the context window. The format is internal
       and unversioned; `.unread` stays `true` on dead chats and is no signal
+52. (proposal) Flag an orphaned PhpStorm ACP agent that still holds a chat's session (ca. 45 Minuten). On
+    2026-11-19 one Claude session id was listed twice, `idle` and `working`. PhpStorm had started a new
+    `claude-agent-acp` for the chat at 12:58, and the old pair (node and `claude`, started 2026-11-18 23:50) lived
+    on under `systemd --user` with no process holding the other end of its stdin or stdout pipes, still keeping the
+    transcript open. A graceful SIGTERM to the old node ended both. Proposal: when two live processes share a
+    session id, mark the one whose ACP node is parented by `systemd --user` and whose stdio pipes have no other
+    holder as `orphaned` in `list` and the widget, and offer the stop as an action rather than doing it
