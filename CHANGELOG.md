@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - TODO #53 resets left per account and usage window, priority next
+- TODO #53 and #36 linked through one reset-boundary helper; #53 example recalculated
 
 ## [2.21.0] - 2026-11-19
 

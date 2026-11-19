@@ -158,7 +158,7 @@ priority.
     different accounts, reset times and window lengths, rather than multiplying nominal durations alone.
     Define how the period count initializes, increments and persists, and keep every reset boundary and the
     current period's usage readable. Cover differing deadlines, the first period, multiple resets and missing
-    history with tests (ca. 1 hour)
+    history with tests (ca. 1 hour). Reuses the reset-boundary helper of #53, which comes first
 38. (low, proposal) Rename the project to Agent Desk and the repository slug to `agent-desk`, requested on
     2026-11-13. The name should cover sessions, accounts, usage limits and handoffs. Verify the GitHub repository
     and any GitLab mirror mapping before renaming either service. Introduce `agent-desk` as the primary command
@@ -239,8 +239,12 @@ priority.
 53. (next) Show per account how many resets of each usage window are left, for Codex and Claude, requested on
     2026-11-19 with raised priority (ca. 45 Minuten). Pure calculation, no history: the resets of a window from
     now up to a horizon are the `k >= 0` with `resets_at + k * minutes * 60 <= horizon`, 0 when `resets_at` lies
-    past it, none for a window without a known reset. Example on 2026-11-19 with the calendar month as horizon:
-    codex `7d` resets on 24.11., so 1 left; `5h` resets at 14:24, so 63 left
+    past it, none for a window without a known reset or one whose reset already passed (usage_view() treats it as
+    unknown). Calculated on 2026-11-19 at 14:00 with 01.12. 00:00 local as horizon: codex `7d` (24.11. 09:29) 1,
+    `5h` (20:11) 54; `claude@ndcnet.de` `7d` 2, `5h` 55; `sri@ndcom.de` `7d` 2, `5h` none, its 01:00 reset passed
+    - **Linked to #36.** Both rest on the same reset arithmetic: the reset boundaries of a window between now and
+      a horizon. Build #53 first with one helper in `agent_eta_model.py` that yields those boundaries; #53 counts
+      them, #36 draws them as the extended timeline
     - **Horizon, open.** Proposal: end of the current calendar month in local time. Alternatives are each
       account's subscription renewal, which no reading carries and would need a per-account date in
       `~/.config/agent-eta/config.json`, or one configured date
