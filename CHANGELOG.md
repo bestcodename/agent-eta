@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-11-19
+
+### Added
+
+- The JetBrains AI quota as usage window `claude/jetbrains-ai` of 30 days, read from PhpStorm's `idea.log`
+- `usage_block.monthly_percent` for that window
+
+### Fixed
+
+- PhpStorm AI chats run on the account `jetbrains-ai` instead of the Claude account of `~/.claude`, so that account's
+  reached limit no longer files them as stopped, which hid them in the widget
+- PhpStorm's recent projects and log are found below `$XDG_CONFIG_HOME` and `$XDG_CACHE_HOME`
+
 ## [2.18.0] - 2026-11-19
 
 ### Added
