@@ -212,3 +212,15 @@ priority.
     `account-tabs` re-own directly, and a host move carries reminders in the tabs file (ca. 1 Stunde 15 Minuten)
 48. (low, proposal) Split `agent-eta`, which is past the 2000-line refactor mark, by moving the Claude and Codex
     collectors into `agent_eta_collect.py` (ca. 1 Stunde)
+49. (proposal) Show a plan completion meter with the percentage and completed step count in each applicable
+    session row of the Agent ETA modal. Reuse the progress data behind the Claude Code CLI status line so both
+    displays agree. Check whether the Codex CLI can show the same meter for Codex sessions, and add it if a
+    supported integration is available. See item 28 in the [AI backlog](https://github.com/bestcodename/ai/blob/main/TODO.md)
+    for the related plan-progress work.
+50. (proposal) Simplify the usage section of the Agent ETA modal. Review the account rows for redundant
+    labels and repeated information, and remove duplication while keeping account identity, quota usage,
+    and reset times easy to scan.
+51. (medium) Support PhpStorm's JetBrains AI agents (AI Assistant, Junie) like Claude Code and Codex, requested on
+    2026-11-19. First check which supported route reports a session's state, turns and waiting questions, such as
+    hooks, a log or transcript directory, or the IDE's MCP server, then add an integration on that route with the
+    same list, ETA and *Jump to window* behaviour (ca. 2 Stunden)
