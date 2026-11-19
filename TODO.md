@@ -135,8 +135,9 @@ priority.
     `FullRepresentation.qml`; then cover remaining controls and unclear icons, status indicators and abbreviations.
     Explain purpose, effect or disabled state instead of repeating labels. Keep essential information visible and
     provide accessible names. Reuse Qt/Plasma tooltip facilities and native timing, with pointer hover and keyboard
-    focus; verify that disabled-action explanations remain discoverable. Add focused QML coverage for settings and
-    both context menus, including focus and disabled states, and check them in Plasma (ca. 1 hour)
+    focus; verify that disabled-action explanations remain discoverable. Add focused QML coverage for settings and both
+    context menus, including focus and disabled states, and check them in Plasma. The settings-page part suits a local
+    `prompt-split.py` run once the plan holds the tooltip texts, see item 36.12 of `bestcodename/ai` (ca. 1 hour)
 33. (low, proposal) Offer Claude the same configurable CLI/desktop launch default and one-launch context-menu
     override as Codex, requested on 2026-11-11. Support both the saved default directory and a chosen directory,
     keep CLI as the initial default, and store each provider's preference independently. First verify the native
