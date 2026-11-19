@@ -159,14 +159,36 @@ priority.
     Define how the period count initializes, increments and persists, and keep every reset boundary and the
     current period's usage readable. Cover differing deadlines, the first period, multiple resets and missing
     history with tests (ca. 1 hour)
-37. (proposal) Add configurable usage thresholds for visibly marking accounts as blocked in the Agent ETA
-    modal, requested on 2026-11-12. An account intentionally left at 99% while another account is used can
-    otherwise look usable throughout the remaining quota window. Reuse the widget settings and allow separate
-    cutoffs for short and weekly usage windows. Mark the account visibly blocked when any applicable window
-    reaches its configured cutoff, and show which window triggered it and when that window resets. Explain in
-    a tooltip that the configured cutoff was reached, distinct from a provider-reported hard limit. Re-evaluate
-    the display after settings changes, fresh usage readings and resets; preserve unknown or stale usage states.
-    Cover threshold boundaries, multiple windows, saved settings and reset handling with tests (ca. 1 hour)
+37. (next) Configurable block cutoffs per usage window, requested on 2026-11-12 and again on 2026-11-19, so an
+    account deliberately parked at 99% weekly counts as blocked everywhere, not only in the modal (ca. 1 hour).
+    Pre-plan from measured code on 2026-11-19:
+    - **Where.** `reached` is computed once in `agent_eta_model.usage_view()` (`used >= 100`) and drives
+      `usage_sections()`, `usage_groups()`, `limit_stops()` (session stopped with `resume_at`), the `reset:` signal
+      and the CLI usage table. So the cutoff lives in `~/.config/agent-eta/config.json`, read through
+      `AccountStore().settings()` like `codex_handoff`, not in the widget's `main.xml`, which only the widget sees.
+      A widget settings field that writes it stays out of scope
+    - **Config.** `{"usage_block": {"five_hour_percent": 100, "weekly_percent": 99}}`. Defaults 100 and 100 keep
+      today's behaviour. A new `usage_block_settings()` in `agent-eta` beside `handoff_trigger_settings()` takes
+      ints or floats in 1..100, rejects bools and other types per key, and maps the keys to window minutes
+      `{300: …, 10080: …}`. `codex_handoff` stays separate, since it triggers a handoff, not a block
+    - **Model.** `usage_view(now, windows, block_at=None)` sets `window["block_at"]` (the cutoff, 100 without
+      one), `reached = used is not None and used >= block_at` and `window["blocked_by"]` as `"limit"` at
+      `used >= 100`, `"cutoff"` below 100 but at the cutoff, else `None`. Unknown, stale and past-reset windows
+      keep `used = None` and so never block. `quota_exhaustion()` keeps 100. `agent-eta`'s `usage_view()` passes
+      the settings in, so `list --json`, the CLI table and remote merges after local recomputation all agree.
+      Check in `agent_eta_remote.py` that a peer's windows are re-viewed locally and not taken with their
+      `reached`
+    - **JSON.** `block_at` and `blocked_by` are additive fields of each usage window in contract v1; extend
+      `test_fixtures/contract-v1/mixed.json` with one cutoff-blocked window
+    - **Widget.** `logic.mjs` `usageHeadline()` reads `blocked at 99% cutoff · resets in …` for `"cutoff"` and
+      keeps `blocked · resets in …` for `"limit"`. `UsageRow.qml` gets a tooltip naming the window, its cutoff and
+      that the provider limit is not reached yet. Bar colours keep following `reached`
+    - **CLI.** The usage table marks a cutoff block as `cutoff 99%` next to the reset time
+    - **Tests.** `test_model.py`: 98.9, 99 and 100 against a 99 cutoff, only the weekly window over its cutoff,
+      both windows, `used None`, a reset in the past, and `limit_stops()` stopping a session until the weekly
+      reset. `test_agent_eta.py`: settings parsing with missing, bool, string and out-of-range values.
+      `test_plasmoid.mjs`: both headline variants. Run `python3 -m unittest` and `node --test test_plasmoid.mjs`
+    - **Docs.** `docs/agent-eta.md` config section next to `codex_handoff`, README line, CHANGELOG, minor bump
 38. (low, proposal) Rename the project to Agent Desk and the repository slug to `agent-desk`, requested on
     2026-11-13. The name should cover sessions, accounts, usage limits and handoffs. Verify the GitHub repository
     and any GitLab mirror mapping before renaming either service. Introduce `agent-desk` as the primary command
