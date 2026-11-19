@@ -96,15 +96,27 @@ ColumnLayout {
                     font: Kirigami.Theme.smallFont
                     opacity: 0.7
                 }
+                // The exhaustion estimate shares the line with the reset and gives way to it when narrow.
+                PlasmaComponents3.Label {
+                    objectName: "usageExhaustion"
+                    Layout.fillWidth: true
+                    text: Logic.exhaustionShort(modelData, usageRow.now)
+                    elide: Text.ElideRight
+                    font: Kirigami.Theme.smallFont
+                    textFormat: Text.PlainText
+                    opacity: 0.8
+                    Accessible.description: Logic.exhaustionText(modelData, usageRow.now)
+                    HoverHandler { id: estimateHover }
+                    PlasmaComponents3.ToolTip.text: Accessible.description
+                    PlasmaComponents3.ToolTip.visible: estimateHover.hovered
+                }
                 PlasmaComponents3.Label {
                     objectName: "usageReset"
-                    Layout.fillWidth: true
                     horizontalAlignment: Text.AlignRight
                     text: modelData.remaining === null || modelData.remaining === undefined
                         ? i18n("%1 · no reading", Logic.percent(modelData.used))
                         : i18n("%1 · resets %2", Logic.percent(modelData.used),
                                Logic.resetText(modelData.resets_at, usageRow.now))
-                    wrapMode: Text.Wrap
                     font: Kirigami.Theme.smallFont
                     textFormat: Text.PlainText
                 }
@@ -122,15 +134,6 @@ ColumnLayout {
                 Layout.fillWidth: true
                 visible: usageRow.timeLabels && marks.length > 0
                 marks: timeMarks
-            }
-            PlasmaComponents3.Label {
-                objectName: "usageExhaustion"
-                Layout.fillWidth: true
-                text: Logic.exhaustionText(modelData, usageRow.now)
-                wrapMode: Text.Wrap
-                font: Kirigami.Theme.smallFont
-                textFormat: Text.PlainText
-                opacity: 0.8
             }
         }
     }

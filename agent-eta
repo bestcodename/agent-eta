@@ -129,6 +129,9 @@ PHPSTORM_RECENT_PROJECTS = "JetBrains/PhpStorm*/options/recentProjects.xml"
 JETBRAINS_ACCOUNT = "jetbrains-ai"
 PHPSTORM_LOG = "JetBrains/PhpStorm*/log/idea.log"
 JETBRAINS_LOG_TAIL = 16 * 1024 * 1024
+# PhpStorm logs the quota after a turn and at least every 30 minutes while a chat is used, measured on
+# 2026-11-19, so a younger reading is current and an older one stale.
+JETBRAINS_FRESH = 3600
 JETBRAINS_QUOTA = re.compile(
     rb"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),\d+ .*QuotaManager2Impl - New quota state is: \w+\(quota=JbaiQuota\("
     rb"[^)]*?current=([\d.]+), maximum=([\d.]+)", re.M)
@@ -1183,11 +1186,12 @@ def last_matches(path, patterns, limit=JETBRAINS_LOG_TAIL, chunk=1024 * 1024):
     return found
 
 
-def jetbrains_usage(pattern=None):
+def jetbrains_usage(pattern=None, now=None):
     """The JetBrains AI quota as one usage window of the account PhpStorm's AI chats run on, from the
     latest quota and refill lines in the log of the PhpStorm version written last. `current` and
-    `maximum` of the quota cover the monthly tariff and any top-up together. Measured on PhpStorm
-    2026.3 on 2026-11-19; the log format is internal, and a missing line yields no window."""
+    `maximum` of the quota cover the monthly tariff and any top-up together. The reading is current
+    for JETBRAINS_FRESH seconds and stale after, which the exhaustion estimate needs. Measured on
+    PhpStorm 2026.3 on 2026-11-19; the log format is internal, and a missing line yields no window."""
     pattern = pattern or os.path.join(xdg_home("XDG_CACHE_HOME", "~/.cache"), PHPSTORM_LOG)
     logs = sorted(glob.glob(os.path.expanduser(pattern)), key=modified, reverse=True)
     if not logs:
@@ -1199,7 +1203,9 @@ def jetbrains_usage(pattern=None):
     days = int(refill.group(1)) if refill else 30
     resets_at = parse_stamp(refill.group(2).decode()) if refill else None
     used = 100.0 * float(quota.group(2)) / float(quota.group(3))
-    return [usage_window(agent_label("claude", JETBRAINS_ACCOUNT), days * 1440, used, resets_at, seen_at)]
+    window = usage_window(agent_label("claude", JETBRAINS_ACCOUNT), days * 1440, used, resets_at, seen_at)
+    fresh = (time.time() if now is None else now) - seen_at <= JETBRAINS_FRESH
+    return [dict(window, usage_status="current" if fresh else "stale")]
 
 
 def codex_usage():

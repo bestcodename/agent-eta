@@ -419,6 +419,24 @@ export function exhaustionText(window, now) {
     }
 }
 
+// The short form of exhaustionText() for the line above a usage bar, beside the reset; the full
+// sentence is its tooltip.
+export function exhaustionShort(window, now) {
+    const estimate = window && window.exhaustion;
+    switch (estimate && estimate.state) {
+    case "before_reset":
+        if (!Number.isFinite(estimate.at)) return "no estimate";
+        return estimate.at > now ? `runs out ${resetText(estimate.at, now)}`
+            : `run-out passed (${formatClock(estimate.at, now)})`;
+    case "until_reset": return "lasts until reset";
+    case "exhausted": return "exhausted";
+    case "no_usage": return "no usage yet";
+    case "insufficient": return "estimate needs history";
+    case "stale": return "stale, no estimate";
+    default: return "no estimate";
+    }
+}
+
 // Authentication and missing readings describe accounts, not inferred session states.
 export function accountStatus(account, now) {
     if (!account) return "";

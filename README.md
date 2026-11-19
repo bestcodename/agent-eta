@@ -17,7 +17,8 @@ the source automatically. Confirm the destination has stopped before using the r
 Account-menu handoffs preserve the selected Claude directory even when the account has no registered name.
 Usage bars show local hours for five-hour windows and weekdays for seven-day windows, anchored to each reset.
 **Time labels on usage bars** is enabled by default. Labels adapt to the bar width and can be hidden in settings.
-Each usage window also shows estimated exhaustion at its current average rate, separately from its reset.
+Each usage window also shows estimated exhaustion at its current average rate on the line above its bar, beside
+its reset.
 `usage_block` in `~/.config/agent-eta/config.json` lets a window count as blocked below 100 %, such as at 99 %
 of the week.
 The widget's usage block and its *Room left* and *Blocked* parts fold by a click on their headings.
