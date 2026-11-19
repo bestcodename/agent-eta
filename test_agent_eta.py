@@ -39,6 +39,7 @@ _spec.loader.exec_module(eta)
 
 # The host's own PhpStorm projects must not decide a project in these tests.
 eta.PHPSTORM_RECENT_PROJECTS = "/nonexistent/agent-eta-test/recentProjects.xml"
+eta.PHPSTORM_LOG = "/nonexistent/agent-eta-test/idea.log"
 
 AGENT_VARS = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SANDBOX",
               "CODEX_SANDBOX_NETWORK_DISABLED", "AGENT_ETA_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
@@ -137,7 +138,8 @@ class StateTest(unittest.TestCase):
         self.accounts = self.root / "accounts.json"
         self.env.update(AGENT_ETA_DIR=self.dir, CLAUDE_CONFIG_DIR=str(self.claude),
                         CODEX_HOME=str(self.codex), CLAUDE_ACCOUNTS_FILE=str(self.accounts),
-                        DSH_HOME=str(self.dsh), PYTHONDONTWRITEBYTECODE="1", AGENT_ETA_NO_REFRESH="1")
+                        DSH_HOME=str(self.dsh), PYTHONDONTWRITEBYTECODE="1", AGENT_ETA_NO_REFRESH="1",
+                        XDG_CACHE_HOME=str(self.root / "xdg-cache"), XDG_CONFIG_HOME=str(self.root / "xdg-config"))
         self.saved = {k: os.environ.get(k) for k in AGENT_VARS}
         for key in AGENT_VARS:
             os.environ.pop(key, None)
@@ -515,6 +517,14 @@ class Sessions(StateTest):
         sessions = self.view()
         self.assertEqual([(s["agent"], s["state"], s["waiting_for"]) for s in sessions],
                          [("claude", "waiting", "dialog open")])
+
+    def test_a_phpstorm_chat_runs_on_the_jetbrains_ai_account(self):
+        self.register(status="idle")
+        with mock.patch.object(eta, "ide_client", return_value="phpstorm"):
+            [chat] = self.view()
+        self.assertEqual((chat["account"], chat["client"]), ("jetbrains-ai", "phpstorm"))
+        [plain] = self.view()
+        self.assertEqual((plain["account"], plain["client"]), (None, None))
 
     def test_every_registered_account_is_read_and_labelled(self):
         self.register(status="idle")
@@ -1462,11 +1472,13 @@ class UsageBlock(unittest.TestCase):
             return eta.usage_block_settings()
 
     def test_only_numbers_from_1_to_100_replace_the_defaults(self):
-        self.assertEqual(self.settings(None), {300: 100, 10080: 100})
-        self.assertEqual(self.settings("99"), {300: 100, 10080: 100})
-        self.assertEqual(self.settings({"weekly_percent": 99.5, "five_hour_percent": 95}), {300: 95, 10080: 99.5})
+        self.assertEqual(self.settings(None), {300: 100, 10080: 100, 43200: 100})
+        self.assertEqual(self.settings("99"), {300: 100, 10080: 100, 43200: 100})
+        self.assertEqual(self.settings({"weekly_percent": 99.5, "five_hour_percent": 95, "monthly_percent": 90}),
+                         {300: 95, 10080: 99.5, 43200: 90})
         for bad in (True, "99", 0, 101, None):
-            self.assertEqual(self.settings({"weekly_percent": bad, "other": 50}), {300: 100, 10080: 100}, bad)
+            self.assertEqual(self.settings({"weekly_percent": bad, "other": 50}), {300: 100, 10080: 100, 43200: 100},
+                             bad)
 
     def test_the_usage_table_names_the_cutoff_of_a_blocked_window(self):
         [blocked] = eta.model.usage_view(NOW, [{"agent": "claude", "minutes": 10080, "used": 99.0,
@@ -1474,6 +1486,49 @@ class UsageBlock(unittest.TestCase):
         self.assertEqual(eta.usage_cells(blocked, NOW)[3], "2h00 (cutoff 99%)")
         [limit] = eta.model.usage_view(NOW, [dict(blocked, used=100.0)], {10080: 99})
         self.assertNotIn("cutoff", eta.usage_cells(limit, NOW)[3])
+
+
+class JetBrainsUsage(unittest.TestCase):
+    """The JetBrains AI quota comes from PhpStorm's log as one 30-day window."""
+
+    QUOTA = ("2026-11-19 13:10:40,691 [48630787]   INFO - #c.i.m.l.c.q.QuotaManager2Impl - New quota state is: "
+             "Available(quota=JbaiQuota(license=L, current=%s, maximum=27800000, quotaID=JbaiQuotaId(quotaId=Q, "
+             "userId=null), until=2027-09-30T23:59:59.999Z, tariffQuota=Details(current=1, maximum=2, available=1), "
+             "topUpQuota=Details(current=0, maximum=0, available=0)))\n")
+    REFILL = ("2026-11-19 13:10:19,728 [48609824]   INFO - #c.i.m.l.c.q.QuotaManager2Impl - New quota refill state is: "
+              "Known(refill=JbaiQuotaRefill(tariff=JbaiQuotaTariff(amount=27800000, period=30d), "
+              "next=2026-11-30T23:59:59.999Z, last=2026-11-01T00:00:00Z))\n")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = pathlib.Path(self.tmp.name) / "PhpStorm2026.3" / "log" / "idea.log"
+        self.log.parent.mkdir(parents=True)
+        self.pattern = str(pathlib.Path(self.tmp.name) / "PhpStorm*" / "log" / "idea.log")
+
+    def test_the_latest_quota_and_refill_make_one_window(self):
+        noise = "2026-11-19 13:00:00,000 [1]   INFO - #c.i.Other - line\n" * 50
+        self.log.write_text(self.REFILL + noise + self.QUOTA % "1000000" + noise + self.QUOTA % "13900000" + noise)
+        [window] = eta.jetbrains_usage(self.pattern)
+        stamp = time.mktime(time.strptime("2026-11-19 13:10:40", "%Y-%m-%d %H:%M:%S"))
+        self.assertEqual(window, {"agent": "claude/jetbrains-ai", "minutes": 43200, "used": 50.0,
+                                  "resets_at": eta.parse_stamp("2026-11-30T23:59:59.999Z"), "seen_at": stamp})
+
+    def test_lines_split_across_chunks_are_still_found(self):
+        noise = "x" * 37 + "\n"
+        self.log.write_text(noise * 30 + self.REFILL + noise * 30 + self.QUOTA % "2780000" + noise * 30)
+        quota, refill = eta.last_matches(str(self.log), (eta.JETBRAINS_QUOTA, eta.JETBRAINS_REFILL), chunk=64)
+        self.assertEqual((quota.group(2), refill.group(1)), (b"2780000", b"30"))
+
+    def test_no_log_or_no_quota_line_gives_no_window(self):
+        self.assertEqual(eta.jetbrains_usage(self.pattern), [])
+        self.log.write_text(self.REFILL)
+        self.assertEqual(eta.jetbrains_usage(self.pattern), [])
+
+    def test_a_quota_without_refill_has_no_reset(self):
+        self.log.write_text(self.QUOTA % "2780000")
+        [window] = eta.jetbrains_usage(self.pattern)
+        self.assertEqual((window["minutes"], window["used"], window["resets_at"]), (43200, 10.0, None))
 
 
 class HandoffInspect(unittest.TestCase):

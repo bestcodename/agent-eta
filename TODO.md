@@ -218,15 +218,12 @@ priority.
     by hover, so tooltips (#32) and context menus still expose it. In the usage section, also remove redundant
     labels and repeated values across account rows. Inventory every row element first and sort it into
     essential, hover and wide; cover both layouts and hover or focus states with QML tests (ca. 1 hour 30 minutes)
-51. (medium) Finish PhpStorm AI chat support, requested on 2026-11-19 (ca. 1 Stunde). Claude chats are listed and
-    marked `client: "phpstorm"` since 2.17.0; see `docs/agent-eta.md`, *PhpStorm AI chats*. Open:
-    - **Account.** The ACP `claude` gets `--settings` with `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`,
-      `ANTHROPIC_AUTH_TOKEN=acp-proxy` and empty `CLAUDE_CODE_OAUTH_TOKEN`, so its requests go through PhpStorm's
-      proxy (measured on pid 211146, 2026-11-19). `list` still files it under `claude/sri@ndcom.de` and derives
-      `stopped` from that account's limit. Check which budget the proxy bills (JetBrains AI quota in
-      `AIAssistantQuotaManager2.xml` or a linked Claude account) before keeping that state (ca. 30 Minuten)
+51. (low) Cover Codex and Junie chats in PhpStorm, requested on 2026-11-19 (ca. 45 Minuten). Claude chats are
+    listed since 2.17.0 and run on the account `jetbrains-ai` since 2.19.0; see `docs/agent-eta.md`, *PhpStorm AI
+    chats*. Open:
     - **Codex and Junie.** The four `codex:` chats from 2026-11-05 have no rollout under `~/.codex/sessions`, so check
-      where the IDE's Codex keeps them before covering Codex. Junie (`~/.junie/instances/`, `history.jsonl`) and the
+      where the IDE's Codex keeps them before covering Codex. If it bills the JetBrains AI quota as well, the window
+      `claude/jetbrains-ai` needs a provider-neutral name shared by both. Junie (`~/.junie/instances/`, `history.jsonl`) and the
       other ACP registry agents stay out until someone uses them. PhpStorm's own records per chat are
       `~/.config/JetBrains/<IDE>/aia-task-history/<chat uuid>.*`: `.agentsession` holds `<agent>:<session id>`
       (`acp.registry.claude-acp:<claude session>` or `codex:<thread>`), `.events` is `AUI_EVENTS_V1` plus one base64

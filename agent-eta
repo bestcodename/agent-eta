@@ -122,7 +122,19 @@ SESSION_STALE = 6 * 3600
 # Where PhpStorm projects live. A session belongs to the deepest project PhpStorm lists in its
 # recent projects, and otherwise, below PROJECTS_ROOT, to the project at its first level.
 PROJECTS_ROOT = "~/PhpstormProjects"
-PHPSTORM_RECENT_PROJECTS = "~/.config/JetBrains/PhpStorm*/options/recentProjects.xml"
+# Below $XDG_CONFIG_HOME and $XDG_CACHE_HOME, which JetBrains IDEs follow on Linux.
+PHPSTORM_RECENT_PROJECTS = "JetBrains/PhpStorm*/options/recentProjects.xml"
+# PhpStorm's AI chats bill the JetBrains AI quota, which PhpStorm logs but keeps nowhere else current.
+# Its options file AIAssistantQuotaManager2.xml was two months stale on 2026-11-19.
+JETBRAINS_ACCOUNT = "jetbrains-ai"
+PHPSTORM_LOG = "JetBrains/PhpStorm*/log/idea.log"
+JETBRAINS_LOG_TAIL = 16 * 1024 * 1024
+JETBRAINS_QUOTA = re.compile(
+    rb"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),\d+ .*QuotaManager2Impl - New quota state is: \w+\(quota=JbaiQuota\("
+    rb"[^)]*?current=([\d.]+), maximum=([\d.]+)", re.M)
+JETBRAINS_REFILL = re.compile(
+    rb"QuotaManager2Impl - New quota refill state is: Known\(refill=JbaiQuotaRefill\("
+    rb"tariff=JbaiQuotaTariff\(amount=[\d.]+, period=(\d+)d\), next=([0-9T:.+\-]+Z?)", re.M)
 # How many processes up from a session's own one --json lists, for the tray to find its window.
 LINEAGE_DEPTH = 12
 # The line between the sections of the session table.
@@ -143,8 +155,8 @@ TURN_ENDS = ("UserPromptSubmit", "Stop", "Interrupt", "SessionEnd")
 HANDOFF_TRIGGER = {"enabled": True, "five_hour_percent": 90, "weekly_percent": 98}
 # The usage at which a window counts as blocked, overridden by `usage_block` in the same config.
 # Below 100 it blocks an account that still has a sliver left, which no session can use anyway.
-USAGE_BLOCK = {"five_hour_percent": 100, "weekly_percent": 100}
-USAGE_BLOCK_WINDOWS = {"five_hour_percent": 300, "weekly_percent": 10080}
+USAGE_BLOCK = {"five_hour_percent": 100, "weekly_percent": 100, "monthly_percent": 100}
+USAGE_BLOCK_WINDOWS = {"five_hour_percent": 300, "weekly_percent": 10080, "monthly_percent": 43200}
 HANDOFF_WAIT = 1800
 # Codex tools that put a question to the user. No hook sees them, and none sees a plan waiting
 # for approval either, so the reader looks for both in the thread's rollout transcript.
@@ -779,9 +791,11 @@ def account_sessions(account, directory):
         # status, and until its first prompt it has no transcript either, so it never ran a turn.
         # Measured on claude-agent-sdk 2.1.220 on 2026-10-15.
         unused = not status and not claude_transcript_paths(record.get("sessionId"))
+        client = ide_client(pid)
         found.append({
             "agent": "claude",
-            "account": account,
+            # A PhpStorm AI chat shares the config directory but bills the JetBrains AI quota.
+            "account": JETBRAINS_ACCOUNT if client == "phpstorm" else account,
             "id": record.get("sessionId"),
             "pid": pid,
             "name": claude_name(record),
@@ -790,7 +804,7 @@ def account_sessions(account, directory):
             "since": since / 1000 if isinstance(since, (int, float)) else None,
             "cwd": record.get("cwd"),
             "unused": unused,
-            "client": ide_client(pid),
+            "client": client,
         })
     return found
 
@@ -1143,6 +1157,51 @@ def claude_usage():
     return found
 
 
+def last_matches(path, patterns, limit=JETBRAINS_LOG_TAIL, chunk=1024 * 1024):
+    """The last match of each pattern in a log file, read backwards in chunks up to `limit` bytes,
+    so a large log costs only its tail. A pattern without a match within the limit maps to None."""
+    found = [None] * len(patterns)
+    try:
+        with open(path, "rb") as handle:
+            position = handle.seek(0, os.SEEK_END)
+            carry, read = b"", 0
+            while position > 0 and read < limit and None in found:
+                size = min(chunk, position)
+                position -= size
+                handle.seek(position)
+                data = handle.read(size) + carry
+                read += size
+                # The first line may continue in the chunk before; it is searched with that one.
+                cut = data.find(b"\n") + 1 if position > 0 else 0
+                carry, region = data[:cut], data[cut:]
+                for index, pattern in enumerate(patterns):
+                    if found[index] is None:
+                        matches = list(pattern.finditer(region))
+                        found[index] = matches[-1] if matches else None
+    except OSError:
+        return [None] * len(patterns)
+    return found
+
+
+def jetbrains_usage(pattern=None):
+    """The JetBrains AI quota as one usage window of the account PhpStorm's AI chats run on, from the
+    latest quota and refill lines in the log of the PhpStorm version written last. `current` and
+    `maximum` of the quota cover the monthly tariff and any top-up together. Measured on PhpStorm
+    2026.3 on 2026-11-19; the log format is internal, and a missing line yields no window."""
+    pattern = pattern or os.path.join(xdg_home("XDG_CACHE_HOME", "~/.cache"), PHPSTORM_LOG)
+    logs = sorted(glob.glob(os.path.expanduser(pattern)), key=modified, reverse=True)
+    if not logs:
+        return []
+    quota, refill = last_matches(logs[0], (JETBRAINS_QUOTA, JETBRAINS_REFILL))
+    if not quota or not float(quota.group(3)):
+        return []
+    seen_at = time.mktime(time.strptime(quota.group(1).decode(), "%Y-%m-%d %H:%M:%S"))
+    days = int(refill.group(1)) if refill else 30
+    resets_at = parse_stamp(refill.group(2).decode()) if refill else None
+    used = 100.0 * float(quota.group(2)) / float(quota.group(3))
+    return [usage_window(agent_label("claude", JETBRAINS_ACCOUNT), days * 1440, used, resets_at, seen_at)]
+
+
 def codex_usage():
     """The Codex usage windows of the latest `token_count` reading that carries windows, from
     the most recently written rollout transcripts that hold such a reading."""
@@ -1189,7 +1248,7 @@ def usage_window(agent, minutes, used, resets_at, seen_at):
 def usage_view(now, windows=None):
     """Every usage window as model.usage_view() describes it, read from both agents unless given,
     with the configured block cutoffs."""
-    return model.usage_view(now, claude_usage() + codex_usage() if windows is None else windows,
+    return model.usage_view(now, claude_usage() + codex_usage() + jetbrains_usage() if windows is None else windows,
                             usage_block_settings())
 
 
@@ -1431,10 +1490,17 @@ def session_lines(sessions, now):
     return lines
 
 
+def xdg_home(variable, default):
+    """An XDG base directory, absolute, from its variable or the default."""
+    value = os.environ.get(variable)
+    return value if value and os.path.isabs(value) else os.path.expanduser(default)
+
+
 def phpstorm_projects(pattern=None):
     """The project roots PhpStorm lists in the recent projects of every installed version, as
     absolute paths. An unreadable or garbled file is skipped, so a missing IDE yields nothing."""
-    return _phpstorm_projects(os.path.expanduser(pattern or PHPSTORM_RECENT_PROJECTS), os.path.expanduser("~"))
+    pattern = pattern or os.path.join(xdg_home("XDG_CONFIG_HOME", "~/.config"), PHPSTORM_RECENT_PROJECTS)
+    return _phpstorm_projects(os.path.expanduser(pattern), os.path.expanduser("~"))
 
 
 @functools.lru_cache(maxsize=4)
@@ -1599,6 +1665,8 @@ def cmd_list(args):
     require_process_view(directory)
     store = accounts_api.AccountStore()
     account_data = store.snapshot(claude_usage() + codex_usage(), now)
+    # The JetBrains AI quota is no account of the store, which keeps only its own inventory.
+    account_data = dict(account_data, usage=list(account_data["usage"]) + jetbrains_usage())
     if not args.local:
         account_data = remote_api.shared_usage(account_data, remote_api.read_cache(store), now)
     store.maybe_refresh(os.path.realpath(__file__), now)

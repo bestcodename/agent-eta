@@ -109,6 +109,16 @@ while the chat goes on. The widget shows `PhpStorm` after the agent, and a hando
 continue it in PhpStorm", since only the IDE can pause or resume it. Measured on PhpStorm 2026.3 with claude-agent-acp
 0.108.1 on 2026-11-19. Codex and Junie chats in PhpStorm are not covered yet.
 
+The chat's requests go through PhpStorm's local proxy and bill the JetBrains AI quota (`idea.log`:
+`acp.registry.claude-acp: get auth JETBRAINS_AI`), not the Claude account of `~/.claude`. Such a session is therefore
+listed under the account `jetbrains-ai` as `claude/jetbrains-ai`, and only that quota can stop it. The quota is the
+usage window `claude/jetbrains-ai` of 30 days, read from the last `QuotaManager2Impl - New quota state is` and
+`New quota refill state is` lines in the `idea.log` of the PhpStorm version written last
+(`$XDG_CACHE_HOME/JetBrains/PhpStorm*/log/`, searched backwards over at most 16 MiB). Its share is `current` over
+`maximum`, which cover the monthly tariff and any top-up together, and it resets at the next refill. PhpStorm's
+`options/AIAssistantQuotaManager2.xml` is not used, since it was two months stale while the IDE ran. Without a quota
+line in the log there is no window.
+
 `agent-eta --tasks` prints the flat task list of version 0.61.0, overdue first. `agent-eta --json` prints both, as
 `sessions` with the ids of their tasks and `tasks` with every field, for the tray widget and for the phone notification
 and the web app that TODO.md proposes. Since 0.67.0 it carries what the widget would otherwise have to work out itself.
@@ -129,7 +139,7 @@ and the web app that TODO.md proposes. Since 0.67.0 it carries what the widget w
   ancestry, independently of the transcript's original client. An `app-server` alone proves no desktop or terminal
   association. This is additive in contract schema 1; an older listing without the field keeps its thread links.
 - A session has `project_root` and `project_name`. The root is the deepest project in PhpStorm's recent projects
-  (`~/.config/JetBrains/PhpStorm*/options/recentProjects.xml`, every version) that contains the working directory, so
+  (`$XDG_CONFIG_HOME/JetBrains/PhpStorm*/options/recentProjects.xml`, every version) that contains the working directory, so
   a nested project such as `private/bestcodename/ai` names the window PhpStorm opened for it. Without one it is the
   first directory below `~/PhpstormProjects`, else the nearest repository root, else the working directory. An
   unreadable recent-projects file falls back to these rules. The name is PhpStorm's `.idea/.name` when the project was
@@ -620,8 +630,10 @@ else keeps 100. Each usage window of `list --json` carries `block_at`, its cutof
 time, and the widget reads `blocked at 99% cutoff`. Remote readings are viewed with the local cutoff.
 
 ```json
-{"usage_block": {"five_hour_percent": 100, "weekly_percent": 99}}
+{"usage_block": {"five_hour_percent": 100, "weekly_percent": 99, "monthly_percent": 100}}
 ```
+
+`monthly_percent` applies to the 30-day JetBrains AI window.
 
 ## Install
 
