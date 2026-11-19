@@ -141,10 +141,14 @@ Item {
             const reset = root.named(row, "usageReset")[0];
             verify(estimate);
             verify(reset);
-            compare(estimate.text, Logic.exhaustionText(window, end - 14400));
+            compare(estimate.text, Logic.exhaustionShort(window, end - 14400));
+            compare(estimate.Accessible.description, Logic.exhaustionText(window, end - 14400));
             verify(reset.text.indexOf("resets") >= 0);
             verify(estimate.text !== reset.text);
-            verify(estimate.paintedWidth <= estimate.width + 1);
+            // Both share the line above the bar, the estimate left of the reset and never over it.
+            compare(estimate.mapToItem(row, 0, 0).y, reset.mapToItem(row, 0, 0).y);
+            verify(estimate.mapToItem(row, 0, 0).x + estimate.width <= reset.mapToItem(row, 0, 0).x + 1);
+            verify(reset.mapToItem(row, 0, 0).x + reset.width <= row.width + 1);
             verify(estimate.implicitHeight > 0);
         }
     }

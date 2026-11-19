@@ -765,7 +765,12 @@ and what the hook did. The command text never goes there. The log rotates at 256
   ends the block.
   Each window separately estimates exhaustion at the average rate since its inferred start (`resets_at - minutes * 60`).
   The calculation uses its latest current `seen_at`, so cached readings do not appear to slow down between polls.
-  A projection at or beyond reset reads "Estimated to last until reset". Zero usage, no elapsed time, exhausted quotas, stale readings and missing data have explicit states. A passed projection remains an estimate.
+  A projection at or beyond reset reads "lasts until reset". Zero usage, no elapsed time, exhausted quotas, stale readings and missing data have explicit states. A passed projection remains an estimate.
+  The estimate stands in short form on the line above the bar, between the window length and the reset, as in
+  `5h  runs out in 15m (04:39)  80% · resets in 4h 0m (08:24)`, and gives way to the reset when the popup is narrow.
+  Hovering it shows the full sentence, such as "Estimated exhaustion in 15m (04:39) at current average rate." The
+  JetBrains AI window counts as current while its log line is at most an hour old, since PhpStorm logged the quota at
+  least every 30 minutes during use on 2026-11-19, and as stale after that.
 - **Account rows** remain visible without usage windows. They show authentication and reading freshness. Logged-out
   accounts offer Login and Remove controls. A left or right click anywhere on an account's row opens its menu, with
   **New session in the default directory**, **New session in…**, **Set default directory…**, **Log in** and, for a

@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-11-19
+
+### Changed
+
+- Widget: the exhaustion estimate moves to the line above the usage bar, beside the reset, in short form with the full
+  sentence on hover
+
+### Fixed
+
+- The JetBrains AI window carries `usage_status`, current for an hour after PhpStorm logged it, so it gets an
+  exhaustion estimate instead of "No estimate. No current reading."
+
 ## [2.20.0] - 2026-11-19
 
 ### Added

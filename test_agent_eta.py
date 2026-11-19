@@ -1509,10 +1509,14 @@ class JetBrainsUsage(unittest.TestCase):
     def test_the_latest_quota_and_refill_make_one_window(self):
         noise = "2026-11-19 13:00:00,000 [1]   INFO - #c.i.Other - line\n" * 50
         self.log.write_text(self.REFILL + noise + self.QUOTA % "1000000" + noise + self.QUOTA % "13900000" + noise)
-        [window] = eta.jetbrains_usage(self.pattern)
         stamp = time.mktime(time.strptime("2026-11-19 13:10:40", "%Y-%m-%d %H:%M:%S"))
+        [window] = eta.jetbrains_usage(self.pattern, now=stamp + 3600)
         self.assertEqual(window, {"agent": "claude/jetbrains-ai", "minutes": 43200, "used": 50.0,
-                                  "resets_at": eta.parse_stamp("2026-11-30T23:59:59.999Z"), "seen_at": stamp})
+                                  "resets_at": eta.parse_stamp("2026-11-30T23:59:59.999Z"), "seen_at": stamp,
+                                  "usage_status": "current"})
+        self.assertEqual(eta.jetbrains_usage(self.pattern, now=stamp + 3601)[0]["usage_status"], "stale")
+        [viewed] = eta.model.usage_view(stamp + 60, [window])
+        self.assertEqual(viewed["exhaustion"]["state"], "until_reset")
 
     def test_lines_split_across_chunks_are_still_found(self):
         noise = "x" * 37 + "\n"

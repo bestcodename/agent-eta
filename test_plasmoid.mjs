@@ -422,6 +422,21 @@ test("exhaustion estimates stay distinct from resets and handle unavailable rate
     }
 });
 
+test("the short estimate beside the reset names the same outcome", () => {
+    const at = new Date("2026-11-13T08:24:00+01:00").getTime() / 1000;
+    const text = (state, time = null, now = at - 3600) => logic.exhaustionShort({exhaustion: {state, at: time}}, now);
+    assert.equal(text("before_reset", at), "runs out in 1h 0m (08:24)");
+    assert.equal(text("before_reset", at, at + 60), "run-out passed (08:24)");
+    assert.equal(text("until_reset"), "lasts until reset");
+    assert.equal(text("exhausted"), "exhausted");
+    assert.equal(text("no_usage"), "no usage yet");
+    assert.equal(text("insufficient"), "estimate needs history");
+    assert.equal(text("stale"), "stale, no estimate");
+    for (const value of [null, {}, {exhaustion: {state: "before_reset", at: NaN}}]) {
+        assert.equal(logic.exhaustionShort(value, at), "no estimate");
+    }
+});
+
 test("signals notify a new wait, an ETA that ran over and a reset limit, once each", () => {
     const before = fixture("signals-before");
     const after = fixture("signals-after");
