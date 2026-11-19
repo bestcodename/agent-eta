@@ -236,3 +236,17 @@ priority.
     transcript open. A graceful SIGTERM to the old node ended both. Proposal: when two live processes share a
     session id, mark the one whose ACP node is parented by `systemd --user` and whose stdio pipes have no other
     holder as `orphaned` in `list` and the widget, and offer the stop as an action rather than doing it
+53. (next) Show per account how many resets of each usage window are left, for Codex and Claude, requested on
+    2026-11-19 with raised priority (ca. 45 Minuten). Pure calculation, no history: the resets of a window from
+    now up to a horizon are the `k >= 0` with `resets_at + k * minutes * 60 <= horizon`, 0 when `resets_at` lies
+    past it, none for a window without a known reset. Example on 2026-11-19 with the calendar month as horizon:
+    codex `7d` resets on 24.11., so 1 left; `5h` resets at 14:24, so 63 left
+    - **Horizon, open.** Proposal: end of the current calendar month in local time. Alternatives are each
+      account's subscription renewal, which no reading carries and would need a per-account date in
+      `~/.config/agent-eta/config.json`, or one configured date
+    - **Where.** `agent_eta_model.usage_view()` adds `resets_left` (int or null) per window, so `list --json`,
+      the CLI and the widget agree. Widget: the line above the bar reads e.g. `7d · 1 reset left`; CLI: a
+      `LEFT` column in the usage table. The 30-day JetBrains AI window shows its refill instead of a count
+    - **Tests.** `test_model.py`: reset exactly at the horizon, reset past it, `resets_at` None, a window
+      across the DST change on 2026-10-25, month end in local time; `test_plasmoid.mjs`: the label
+
