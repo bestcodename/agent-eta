@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-11-19
+
+### Added
+
+- `usage_block` in `~/.config/agent-eta/config.json` sets per window the usage at which it counts as blocked, such as
+  99 % weekly; usage windows carry `block_at` and `blocked_by`, the CLI names the cutoff at the reset time, and the
+  widget reads `blocked at 99% cutoff` with a tooltip
+
 ## [2.17.0] - 2026-11-19
 
 ### Added

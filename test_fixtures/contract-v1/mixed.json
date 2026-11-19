@@ -697,6 +697,8 @@
     {
       "agent": "claude",
       "ahead": false,
+      "block_at": 100,
+      "blocked_by": null,
       "elapsed": 83.33333333333334,
       "exhaustion": {
         "at": null,
@@ -714,6 +716,8 @@
     {
       "agent": "claude",
       "ahead": false,
+      "block_at": 100,
+      "blocked_by": null,
       "elapsed": 33.86243386243386,
       "exhaustion": {
         "at": null,
@@ -731,6 +735,8 @@
     {
       "agent": "claude/work",
       "ahead": false,
+      "block_at": 100,
+      "blocked_by": null,
       "elapsed": 50.0,
       "exhaustion": {
         "at": null,
@@ -748,6 +754,8 @@
     {
       "agent": "codex",
       "ahead": true,
+      "block_at": 100,
+      "blocked_by": "limit",
       "elapsed": 93.33333333333333,
       "exhaustion": {
         "at": null,
@@ -765,6 +773,8 @@
     {
       "agent": "codex",
       "ahead": true,
+      "block_at": 100,
+      "blocked_by": null,
       "elapsed": 50.39682539682539,
       "exhaustion": {
         "at": null,

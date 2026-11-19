@@ -390,6 +390,11 @@ test("usage groups resolve agent-eta's window and account keys", () => {
     assert.match(logic.usageHeadline(groups[0], mixed.now), /^55% · resets in 50m \(/);
     assert.match(logic.usageHeadline(groups[2], mixed.now), /^blocked · resets in 20m \(/);
     assert.equal(logic.usageHeadline({reached: false, used: null, resetBy: null, windows: []}, mixed.now), "?");
+    const cutoff = {...groups[2], resetBy: {...groups[2].resetBy, blocked_by: "cutoff", block_at: 99}};
+    assert.match(logic.usageHeadline(cutoff, mixed.now), /^blocked at 99% cutoff · resets in 20m \(/);
+    assert.equal(logic.usageHeadlineTip(cutoff), "Configured cutoff reached; the provider limit is not reached yet.");
+    assert.equal(logic.usageHeadlineTip(groups[2]), "");
+    assert.equal(logic.usageHeadlineTip(groups[0]), "");
     assert.equal(logic.accountStatus({auth_state: "logged_out"}, NOW), "Not logged in");
 });
 

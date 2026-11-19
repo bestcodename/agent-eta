@@ -63,6 +63,9 @@ ColumnLayout {
             text: Logic.usageHeadline(usageRow.group, usageRow.now)
             color: usageRow.group.reached ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
             textFormat: Text.PlainText
+            HoverHandler { id: headlineHover }
+            PlasmaComponents3.ToolTip.text: Logic.usageHeadlineTip(usageRow.group)
+            PlasmaComponents3.ToolTip.visible: headlineHover.hovered && PlasmaComponents3.ToolTip.text !== ""
         }
         PlasmaComponents3.ToolButton {
             text: i18n("Log in")

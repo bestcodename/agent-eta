@@ -17,6 +17,8 @@ Account-menu handoffs preserve the selected Claude directory even when the accou
 Usage bars show local hours for five-hour windows and weekdays for seven-day windows, anchored to each reset.
 **Time labels on usage bars** is enabled by default. Labels adapt to the bar width and can be hidden in settings.
 Each usage window also shows estimated exhaustion at its current average rate, separately from its reset.
+`usage_block` in `~/.config/agent-eta/config.json` lets a window count as blocked below 100 %, such as at 99 %
+of the week.
 Stale readings have no estimate; windows projected to last until reset say so.
 Configured remote hosts contribute newer Claude usage when both hosts authenticate the same login fingerprint.
 Readings expire after five minutes and peers after one minute. Login state, account actions and Codex usage stay local.

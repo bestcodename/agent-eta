@@ -247,6 +247,8 @@
     {
       "agent": "codex",
       "ahead": true,
+      "block_at": 100,
+      "blocked_by": "limit",
       "elapsed": 99.66666666666667,
       "exhaustion": {
         "at": null,

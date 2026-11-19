@@ -474,10 +474,19 @@ export function usageBands(window, fade = 0, yellow = 0.66) {
     return [band(0, start, "green"), middle, band(end, used, "red")].filter(each => each.to > each.from);
 }
 
+// Whether a blocked agent's block comes from the configured cutoff below 100 %, not the provider limit.
+function cutoffBlock(group) {
+    return !!(group.reached && group.resetBy && group.resetBy.blocked_by === "cutoff");
+}
+
 // The line beside an agent's name in the usage block. An agent with room left shows its highest
 // used share and the reset that comes first, as in `56% · resets in 49m (18:30)`, and a blocked one
-// the reset that ends the block. Without a known reset the share stands alone.
+// the reset that ends the block, naming a configured cutoff that blocks it. Without a known reset
+// the share stands alone.
 export function usageHeadline(group, now) {
+    if (cutoffBlock(group)) {
+        return `blocked at ${group.resetBy.block_at}% cutoff · resets ${resetText(group.resetBy.resets_at, now)}`;
+    }
     if (group.reached && group.resetBy) {
         return `blocked · resets ${resetText(group.resetBy.resets_at, now)}`;
     }
@@ -485,6 +494,11 @@ export function usageHeadline(group, now) {
     return known(next)
         ? `${percent(group.used)} · resets ${resetText(next.resets_at, now)}`
         : percent(group.used);
+}
+
+// The tooltip of the usage headline, which only a cutoff block has.
+export function usageHeadlineTip(group) {
+    return cutoffBlock(group) ? "Configured cutoff reached; the provider limit is not reached yet." : "";
 }
 
 function titleProject(title) {
