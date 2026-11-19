@@ -11,7 +11,8 @@ import org.kde.kirigami as Kirigami
 import "../code/logic.mjs" as Logic
 
 // The popup. Sessions come in agent-eta's own order and sections, the ones that need you first and
-// stopped and dormant ones independently folded away, followed by every monitored account.
+// stopped and dormant ones independently folded away, followed by every monitored account, split
+// into those with room left and blocked ones. The usage block and both parts fold by their headers.
 PlasmaExtras.Representation {
     id: full
 
@@ -128,27 +129,59 @@ PlasmaExtras.Representation {
                 }
             }
 
-            PlasmaExtras.ListSectionHeader {
+            // The usage block and its two sub-sections fold on a click on their header.
+            FoldHeader {
                 Layout.fillWidth: true
                 visible: Plasmoid.configuration.showUsage && full.usage.length > 0
-                text: i18n("Usage")
+                text: i18n("Usage") + " (" + full.usage.length + ")"
+                collapsed: Plasmoid.configuration.usageCollapsed
+                onFoldRequested: Plasmoid.configuration.usageCollapsed = !Plasmoid.configuration.usageCollapsed
             }
             Repeater {
-                model: Plasmoid.configuration.showUsage ? full.usage : []
+                model: Plasmoid.configuration.showUsage && !Plasmoid.configuration.usageCollapsed
+                    ? Logic.usageSections(full.usage) : []
 
-                delegate: UsageRow {
+                delegate: ColumnLayout {
+                    id: usageSection
                     required property var modelData
+                    readonly property bool blocked: modelData.key === "blocked"
+                    readonly property bool collapsed: blocked ? Plasmoid.configuration.usageBlockedCollapsed
+                        : Plasmoid.configuration.usageOpenCollapsed
                     Layout.fillWidth: true
-                    Layout.leftMargin: Kirigami.Units.largeSpacing
-                    Layout.rightMargin: Kirigami.Units.largeSpacing
-                    Layout.bottomMargin: Kirigami.Units.largeSpacing
-                    group: modelData
-                    now: full.now
-                    fade: Plasmoid.configuration.blendYellow ? Plasmoid.configuration.blendWidth / 100 : 0
-                    yellow: Plasmoid.configuration.yellowWidth / 100
-                    timeLabels: Plasmoid.configuration.showUsageTimeLabels
-                    onAccountActionRequested: (action, account) => root.accountAction(action, account)
-                    onMenuRequested: (account, item, x, y) => accountMenu.show(account, item, x, y)
+                    spacing: 0
+
+                    FoldHeader {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Kirigami.Units.largeSpacing
+                        text: (usageSection.blocked ? i18n("Blocked") : i18n("Room left"))
+                            + " (" + usageSection.modelData.groups.length + ")"
+                        collapsed: usageSection.collapsed
+                        onFoldRequested: {
+                            if (usageSection.blocked) {
+                                Plasmoid.configuration.usageBlockedCollapsed = !Plasmoid.configuration.usageBlockedCollapsed;
+                            } else {
+                                Plasmoid.configuration.usageOpenCollapsed = !Plasmoid.configuration.usageOpenCollapsed;
+                            }
+                        }
+                    }
+                    Repeater {
+                        model: usageSection.collapsed ? [] : usageSection.modelData.groups
+
+                        delegate: UsageRow {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Layout.leftMargin: Kirigami.Units.largeSpacing
+                            Layout.rightMargin: Kirigami.Units.largeSpacing
+                            Layout.bottomMargin: Kirigami.Units.largeSpacing
+                            group: modelData
+                            now: full.now
+                            fade: Plasmoid.configuration.blendYellow ? Plasmoid.configuration.blendWidth / 100 : 0
+                            yellow: Plasmoid.configuration.yellowWidth / 100
+                            timeLabels: Plasmoid.configuration.showUsageTimeLabels
+                            onAccountActionRequested: (action, account) => root.accountAction(action, account)
+                            onMenuRequested: (account, item, x, y) => accountMenu.show(account, item, x, y)
+                        }
+                    }
                 }
             }
         }

@@ -7,7 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-11-19
+
+### Added
+
+- Widget: the usage block splits into *Room left* and *Blocked*; the block and both parts fold by a click, Space or
+  Enter on their headings, kept across plasmashell restarts
+
 ### Changed
+
 - TODO: flag orphaned PhpStorm ACP agents that share a session id.
 
 ## [2.19.0] - 2026-11-19

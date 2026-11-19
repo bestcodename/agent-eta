@@ -20,6 +20,7 @@ Usage bars show local hours for five-hour windows and weekdays for seven-day win
 Each usage window also shows estimated exhaustion at its current average rate, separately from its reset.
 `usage_block` in `~/.config/agent-eta/config.json` lets a window count as blocked below 100 %, such as at 99 %
 of the week.
+The widget's usage block and its *Room left* and *Blocked* parts fold by a click on their headings.
 Stale readings have no estimate; windows projected to last until reset say so.
 Configured remote hosts contribute newer Claude usage when both hosts authenticate the same login fingerprint.
 Readings expire after five minutes and peers after one minute. Login state, account actions and Codex usage stay local.

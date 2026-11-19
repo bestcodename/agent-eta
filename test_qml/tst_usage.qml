@@ -14,6 +14,8 @@ Item {
 
     Component { id: rowComponent; UI.UsageRow {} }
     Component { id: axisComponent; UI.UsageTimeAxis {} }
+    Component { id: foldComponent; UI.FoldHeader {} }
+    Component { id: signalSpy; SignalSpy {} }
 
     function named(item, name) {
         let found = item.objectName === name ? [item] : [];
@@ -26,6 +28,23 @@ Item {
         when: windowShown
 
         readonly property real end: new Date("2026-11-13T08:24:00+01:00").getTime() / 1000
+
+        function test_a_fold_header_toggles_on_click_and_return() {
+            const header = createTemporaryObject(foldComponent, root, {width: 400, text: "Usage (3)"});
+            verify(header);
+            const toggled = createTemporaryObject(signalSpy, root, {target: header, signalName: "foldRequested"});
+            waitForRendering(header);
+            mouseClick(header);
+            compare(toggled.count, 1);
+            header.forceActiveFocus();
+            keyClick(Qt.Key_Return);
+            compare(toggled.count, 2);
+            const arrow = root.named(header, "foldArrow")[0];
+            verify(arrow);
+            compare(String(arrow.source), "go-down");
+            header.collapsed = true;
+            compare(String(arrow.source), "go-next");
+        }
 
         function test_time_label_setting_loads_and_saves() {
             const component = Qt.createComponent("../plasmoid/contents/ui/configGeneral.qml");
