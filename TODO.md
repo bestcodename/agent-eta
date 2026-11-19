@@ -270,6 +270,11 @@ priority.
       `client: "phpstorm"` field for a `claude` binary under `acp-agents/` with a `phpstorm` ancestor (`host`
       already means the remote machine), an own handoff reason and a widget label. Executable plan in
       `~/.claude/plans/agent-eta-phpstorm-chats-and-usage-cutoff.md`
+    - **Account.** The ACP `claude` gets `--settings` with `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`,
+      `ANTHROPIC_AUTH_TOKEN=acp-proxy` and empty `CLAUDE_CODE_OAUTH_TOKEN`, so its requests go through PhpStorm's
+      proxy (measured on pid 211146, 2026-11-19). `list` still files it under `claude/sri@ndcom.de` and derives
+      `stopped` from that account's limit. Check which budget the proxy bills (JetBrains AI quota in
+      `AIAssistantQuotaManager2.xml` or a linked Claude account) before keeping that state (ca. 30 Minuten)
     - **Open.** The four `codex:` chats from 2026-11-05 have no rollout under `~/.codex/sessions`, so check where the
       IDE's Codex keeps them before covering Codex. Junie (`~/.junie/instances/`, `history.jsonl`) and the other
       ACP registry agents stay out until someone uses them

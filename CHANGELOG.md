@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - TODO #37 pre-planned: configurable block cutoffs per usage window in `config.json`
 - TODO #51 pre-planned: PhpStorm AI chats run Claude over ACP; project root from PhpStorm, client marker, handoff reason
 - TODO #50 widened to a modal-wide declutter: details on hover, focus or a large popup
+- TODO #51 checks which budget an ACP chat bills, since it runs through the JetBrains proxy
 
 ## [2.16.1] - 2026-11-17
 
