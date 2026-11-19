@@ -242,7 +242,29 @@ priority.
 50. (proposal) Simplify the usage section of the Agent ETA modal. Review the account rows for redundant
     labels and repeated information, and remove duplication while keeping account identity, quota usage,
     and reset times easy to scan.
-51. (medium) Support PhpStorm's JetBrains AI agents (AI Assistant, Junie) like Claude Code and Codex, requested on
-    2026-11-19. First check which supported route reports a session's state, turns and waiting questions, such as
-    hooks, a log or transcript directory, or the IDE's MCP server, then add an integration on that route with the
-    same list, ETA and *Jump to window* behaviour (ca. 2 Stunden)
+51. (medium) Support PhpStorm's JetBrains AI agents like Claude Code and Codex, requested on 2026-11-19, with the
+    same list, ETA and *Jump to window* behaviour (ca. 2 Stunden). Pre-plan from PhpStorm 2026.3 on 2026-11-19:
+    - **Route.** The AI chat runs agents over ACP. A Claude chat is `npm exec @agentclientprotocol/claude-agent-acp`
+      → `node claude-agent-acp` → the SDK's own `claude` binary under
+      `~/.cache/JetBrains/PhpStorm2026.3/acp-agents/claude-acp/<version>/`, a child of `phpstorm`. It writes a normal
+      transcript to `~/.claude/projects/<dir>/<session>.jsonl` and runs the Claude hooks (`session-start/` record
+      seen), so the Claude integration already covers turns, waiting questions and ETAs. No new provider is needed
+      for Claude
+    - **IDE side.** `~/.config/JetBrains/<IDE>/aia-task-history/<chat uuid>.*` per chat: `.agentsession` holds
+      `<agent>:<session id>` (`acp.registry.claude-acp:<claude session>` or `codex:<thread>`), `.events` is
+      `AUI_EVENTS_V1` plus one base64 JSON event per line (`ChatSessionUserPromptEvent`,
+      `ChatSessionMessageBlockEvent`), `.unread` holds `true` while the chat has unread output, `.usage` holds
+      `{"used", "size", "cost"}` of the context window. Treat the format as internal and unversioned
+    - **Gaps measured.** `list --json` showed the 12:03 ACP chat as `claude:161500` with `title: null`,
+      `window: null` and `state: stopped`, and did not list the 23:50 one (pid 3459920) at all. First step: find why
+      in the process scan and the state derivation, with a fixture of this process chain
+    - **Changes.** Mark a `claude` process whose binary lies under `acp-agents/` or whose ancestor is a JetBrains
+      IDE as `host: "phpstorm"`. *Jump to window* raises the IDE window whose caption names the project of the
+      session's `cwd`, through the existing KWin path. The title comes from the transcript like for CLI sessions,
+      else from the first `ChatSessionUserPromptEvent` of the chat whose `.agentsession` names the session.
+      `.unread = true` on an idle chat puts it under Needs you. Launch and handoff stay CLI-only
+    - **Open.** The four `codex:` chats from 2026-11-05 have no rollout under `~/.codex/sessions`, so check where the
+      IDE's Codex keeps them before covering Codex. Junie (`~/.junie/instances/`, `history.jsonl`) and the other
+      ACP registry agents stay out until someone uses them
+    - **Tests.** Fixtures of the ACP process chain and an `aia-task-history` folder with one Claude chat; host
+      detection, title fallback, the `.unread` mapping, a missing or garbled `.events` file, the IDE window match
