@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - TODO: 32 notes that its settings-page part suits a local run
+- TODO #3 becomes the web app proposal with peer sync, an optional server-only instance and phone access
 
 ## [2.22.0] - 2026-11-19
 
