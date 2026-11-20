@@ -289,20 +289,35 @@ class Usage(unittest.TestCase):
                                   ("claude", True, "window:claude:300")])
         self.assertEqual(snap.usage_groups[0]["window_keys"], ["window:codex:300", "window:codex:10080"])
 
-    def test_a_cutoff_blocks_a_window_below_the_provider_limit(self):
-        cutoff = {10080: 99}
-        views = model.usage_view(NOW, [window(minutes=10080, used=used) for used in (98.9, 99.0, 100.0)]
+    def test_a_cutoff_blocks_the_whole_percent_shown_below_the_provider_limit(self):
+        def cutoff(found):
+            return {10080: 99}.get(found["minutes"])
+
+        views = model.usage_view(NOW, [window(minutes=10080, used=used) for used in (98.4, 98.5, 100.0)]
                                  + [window(minutes=300, used=99.5), window(minutes=10080, used=99.5, resets_in=-10)],
                                  cutoff)
         self.assertEqual([(w["reached"], w["blocked_by"], w["block_at"]) for w in views],
                          [(False, None, 99), (True, "cutoff", 99), (True, "limit", 99), (False, None, 100),
                           (False, None, 99)])
-        self.assertEqual([w["reached"] for w in model.usage_view(NOW, [window(minutes=10080, used=99.0)])], [False])
+
+    def test_without_a_cutoff_only_the_provider_limit_blocks(self):
+        self.assertEqual([w["reached"] for w in model.usage_view(NOW, [window(minutes=10080, used=99.9)])], [False])
+        views = model.usage_view(NOW, [window(minutes=10080, used=99.5), window(minutes=10080, used=100.0)],
+                                 lambda found: 100)
+        self.assertEqual([(w["reached"], w["blocked_by"]) for w in views], [(False, None), (True, "limit")])
+
+    def test_each_agent_carries_its_own_cutoff(self):
+        def cutoff(found):
+            return {"codex": 95, "claude/jetbrains-ai": 97}.get(found["agent"])
+
+        views = model.usage_view(NOW, [window("codex", minutes=300, used=95.0),
+                                       window("claude/jetbrains-ai", minutes=43200, used=96.0)], cutoff)
+        self.assertEqual([(w["reached"], w["block_at"]) for w in views], [(True, 95), (False, 97)])
 
     def test_a_weekly_cutoff_alone_blocks_the_agent_and_stops_its_idle_sessions(self):
         usage = [window(minutes=300, used=20.0, resets_in=600), window(minutes=10080, used=99.0, resets_in=90000)]
         snap = build(sessions=[session(pid=1, state="idle"), session(pid=2, state="working")], usage=usage,
-                     block_at={10080: 99})
+                     block_at=lambda found: 99 if found["minutes"] == 10080 else None)
         found = by_key(snap)
         self.assertEqual((found["claude:1"]["state"], found["claude:1"]["resume_at"]), ("stopped", NOW + 90000))
         self.assertEqual(found["claude:2"]["state"], "working")

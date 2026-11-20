@@ -7,10 +7,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-11-20
+
+### Added
+
+- Usage limits per agent: `usage_block` and `handoff` take overrides for `claude`, `codex` and `jetbrains` and an
+  `enabled` switch each, beside the section's own
+- `agent-eta config get [--json]` and `agent-eta config set KEY=VALUE…`
+- Widget settings page *Usage limits*
+- `handoff.monthly_percent` for the JetBrains AI window, read by bestcodename/ai's usage guard
+
 ### Changed
 
+- Block cutoff default 99 % for every window
+- A blocked row shows only the bar of the window whose reset ends the block
+- The cutoff compares the whole percent shown
+- Codex 5-hour handoff default 100 %
 - TODO: 32 notes that its settings-page part suits a local run
 - TODO #3 becomes the web app proposal with peer sync, an optional server-only instance and phone access
+- TODO #51 widened with JetBrains AI outside PhpStorm; #50 and #32 note the new page; #55 filed for decimal places
+
+### Removed
+
+- `codex_handoff`, replaced by `handoff.agents.codex`
+
+### Fixed
+
+- The CLI rounds percents half up like the widget
 
 ## [2.22.0] - 2026-11-19
 

@@ -320,16 +320,21 @@ def quota_exhaustion(window, now):
     return result
 
 
+def whole_percent(value):
+    """A share rounded half up to the whole percent the CLI and the widget show."""
+    return math.floor(value + 0.5)
+
+
 def usage_view(now, windows, block_at=None):
     """Every usage window, copied, with the share of it that has passed, both in percent, how far
     the usage runs ahead of the time in percentage points, the time left until its reset and
     whether its limit is reached. A window whose reset lies in the past has started over since
     its reading, so none of that is known then.
 
-    `block_at` maps a window length in minutes to the usage in percent at which it counts as
-    reached, 100 by default. `block_at` holds that cutoff, and `blocked_by` says why a reached
-    window is reached: "limit" at 100 and "cutoff" below, or None while it has room."""
-    block_at = block_at or {}
+    `block_at` maps a window to the usage in percent at which it counts as reached, or to None for
+    100, the default (agent_eta_limits.block_at()). Below 100 the whole percent the user sees is
+    compared, so 98.97 % reaches a 99 % cutoff. `block_at` holds that cutoff, and `blocked_by` says
+    why a reached window is reached: "limit" at 100 and "cutoff" below, or None while it has room."""
     found = []
     for window in windows:
         window = dict(window)
@@ -341,8 +346,11 @@ def usage_view(now, windows, block_at=None):
         else:
             window["used"] = window["elapsed"] = window["pace"] = window["remaining"] = None
         window["ahead"] = window["pace"] is not None and window["pace"] > 0
-        window["block_at"] = block_at.get(window["minutes"], 100)
-        window["reached"] = window["used"] is not None and window["used"] >= window["block_at"]
+        cutoff = block_at(window) if block_at else None
+        window["block_at"] = 100 if cutoff is None else cutoff
+        used = window["used"]
+        window["reached"] = used is not None and (
+            used >= 100 or (window["block_at"] < 100 and whole_percent(used) >= window["block_at"]))
         window["blocked_by"] = (None if not window["reached"]
                                 else "limit" if window["used"] >= 100 else "cutoff")
         window["exhaustion"] = quota_exhaustion(window, now)

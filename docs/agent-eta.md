@@ -611,29 +611,57 @@ Every chat of the Codex desktop app runs in one shared app-server, so pausing on
 thread is refused with "desktop chats cannot be gated", and only a Codex thread with a process of its own can move.
 The listing's `handoff` field says per session whether it can move, where to, why not and how its latest move went.
 
-Two triggers start a handoff by themselves, each detached and once per tripped window and session.
+Two triggers start a handoff by themselves, each detached and once per tripped window and session. Their
+thresholds are the `handoff` usage limits below.
 
-- **Claude Code**: bestcodename/ai's usage guard hands each session that prompts to Codex when no other Claude account
-  is free and its `codex_handoff` setting allows it.
-- **Codex**: the Stop hook hands the thread to Claude Code at 90 % of its 5-hour window or 98 % of its weekly window.
-  A reset never moves a session back. The settings live in `~/.config/agent-eta/config.json`:
+- **Claude Code**: bestcodename/ai's usage guard hands each session that prompts to another free Claude account, else
+  to Codex. In a PhpStorm AI chat, which cannot move, it adds a warning to the chat at the JetBrains AI threshold.
+- **Codex**: the Stop hook hands the thread to Claude Code once a window reaches its threshold. A reset never moves a
+  session back.
 
-  ```json
-  {"codex_handoff": {"enabled": true, "five_hour_percent": 90, "weekly_percent": 98}}
-  ```
+### Usage limits
 
-**Usage block cutoff.** A usage window counts as reached at 100 % by default. `usage_block` in the same config lowers
-that per window length, so an account parked at 99 % of its week counts as blocked in the usage table, the widget and
-the session list, which stops its resting sessions until the reset. A value must be a number from 1 to 100; anything
-else keeps 100. Each usage window of `list --json` carries `block_at`, its cutoff, and `blocked_by`, which is
-`"limit"` at 100 %, `"cutoff"` below and `null` while the window has room. The CLI adds `(cutoff 99%)` to the reset
-time, and the widget reads `blocked at 99% cutoff`. Remote readings are viewed with the local cutoff.
+Two settings in `~/.config/agent-eta/config.json` share one shape. `usage_block` sets the cutoff at which a usage
+window counts as blocked, before the provider's own limit at 100 %. `handoff` sets the thresholds of the two triggers
+above.
 
 ```json
-{"usage_block": {"five_hour_percent": 100, "weekly_percent": 99, "monthly_percent": 100}}
+{
+  "usage_block": {"enabled": true, "five_hour_percent": 99, "weekly_percent": 99, "monthly_percent": 99,
+                  "agents": {"jetbrains": {"monthly_percent": 97}}},
+  "handoff":     {"enabled": true, "agents": {"codex": {"five_hour_percent": 90}}}
+}
 ```
 
-`monthly_percent` applies to the 30-day JetBrains AI window.
+- **Built-ins.** Both are on. Blocking starts at 99 % for every window; handoffs at 100 % of 5 hours and 98 % of 7
+  and 30 days.
+- **Agents.** `claude` has the 5-hour and 7-day windows of every Claude Code account, `codex` the same for Codex, and
+  `jetbrains` the 30-day JetBrains AI window (`monthly_percent`). An agent's own value wins over the section's, which
+  wins over the built-in. A value must be a number from 1 to 100; anything else is ignored.
+- **Switches.** An agent is on when both the section's `enabled` and its own are, each true by default. With
+  `usage_block` off only the provider limit blocks. With `handoff` off for `claude` the usage guard neither warns nor
+  hands over.
+- **Rounding.** A cutoff compares the whole percent shown, rounded half up, so 98.97 % reaches 99 %.
+- **Effect.** A blocked account moves to the *Blocked* part of the usage table and the widget, where its row shows
+  only the bar of the window whose reset ends the block, and its resting sessions count as stopped until that reset.
+  Each usage window of `list --json` carries `block_at`, its cutoff, and `blocked_by`, which is `"limit"` at 100 %,
+  `"cutoff"` below and `null` while the window has room. The CLI adds `(cutoff 99%)` to the reset time, and the widget
+  reads `blocked at 99% cutoff`. Remote readings are viewed with the local cutoff. Raising a cutoff above the current
+  share notifies once that the window has room again.
+
+`agent-eta config get` prints the effective values, `--json` adds the built-ins and the raw sections for the widget
+and the usage guard. `agent-eta config set KEY=VALUE…` changes them under the config lock, all pairs or none, where
+KEY is `<section>.<field>` or `<section>.agents.<agent>.<field>` and VALUE `default` removes a key, an agent or a
+section:
+
+```sh
+agent-eta config set handoff.agents.codex.five_hour_percent=90
+agent-eta config set usage_block.agents.jetbrains.enabled=false
+agent-eta config set handoff.agents.codex=default
+```
+
+The widget's settings page *Usage limits* runs the same commands. `codex_handoff`, the Codex trigger's setting before
+2.23.0, is no longer read.
 
 ## Install
 
@@ -814,11 +842,12 @@ and what the hook did. The command text never goes there. The log rotates at 256
   state and notifies nothing. A remote host's waiting and overdue signals notify as well, with "on HOST" after the
   session or task in the title.
 
-The settings have four pages. **General** holds the command, which defaults to `"$HOME/.local/bin/agent-eta"`
+The settings have five pages. **General** holds the command, which defaults to `"$HOME/.local/bin/agent-eta"`
 because plasmashell's `PATH` lacks `~/.local/bin`, and the two poll intervals. **Sessions and Launching** holds
 **Use CLI by default** and **Restore Codex monitoring**. **Appearance** holds whether the usage block shows, its time
 labels, the half-width of a usage bar's yellow band and whether that band fades, together with the width of the
-fade. **Notifications** holds the three notification switches. The logic that needs no QML lives in
+fade. **Notifications** holds the three notification switches. **Usage limits** holds the block cutoffs and
+handoff thresholds of [Usage limits](#usage-limits), which it reads and writes through `agent-eta config`. The logic that needs no QML lives in
 `contents/code/logic.mjs`, which the tests run under node.
 
 ```sh

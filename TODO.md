@@ -147,8 +147,8 @@ priority.
     notification rules and the model, effort and permission settings in #21. Reuse native client settings and
     existing environment overrides; keep process ownership and live-writer checks mandatory. Propose the remaining
     options and their implementation effort after this audit (ca. 1 hour)
-32. (next, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize the four
-    settings pages (`plasmoid/contents/ui/config*.qml`), plus account and session context-menu actions in
+32. (next, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize the
+    settings pages (`plasmoid/contents/ui/config*.qml`; *Usage limits* has its tooltips since 2.23.0), plus account and session context-menu actions in
     `FullRepresentation.qml`; then cover remaining controls and unclear icons, status indicators and abbreviations.
     Explain purpose, effect or disabled state instead of repeating labels. Keep essential information visible and
     provide accessible names. Reuse Qt/Plasma tooltip facilities and native timing, with pointer hover and keyboard
@@ -230,7 +230,8 @@ priority.
     the popup is wide or tall enough. Take the breakpoints from the popup's own width and height (`FullRepresentation.qml`)
     instead of a fixed screen size, keep one place per piece of information, and leave nothing reachable only
     by hover, so tooltips (#32) and context menus still expose it. In the usage section, also remove redundant
-    labels and repeated values across account rows. Inventory every row element first and sort it into
+    labels and repeated values across account rows; a blocked row already shows only the bar that ends its block
+    since 2.23.0. Inventory every row element first and sort it into
     essential, hover and wide; cover both layouts and hover or focus states with QML tests (ca. 1 hour 30 minutes)
 51. (low) Cover Codex and Junie chats in PhpStorm, requested on 2026-11-19 (ca. 45 Minuten). Claude chats are
     listed since 2.17.0 and run on the account `jetbrains-ai` since 2.19.0; see `docs/agent-eta.md`, *PhpStorm AI
@@ -243,6 +244,18 @@ priority.
       (`acp.registry.claude-acp:<claude session>` or `codex:<thread>`), `.events` is `AUI_EVENTS_V1` plus one base64
       JSON event per line, `.usage` holds `{"used", "size", "cost"}` of the context window. The format is internal
       and unversioned; `.unread` stays `true` on dead chats and is no signal
+    - **JetBrains AI is not tied to PhpStorm.** Researched on 2026-11-20 from JetBrains docs, not measured here; no
+      `junie` binary is installed. Junie CLI signs in with the JetBrains account and bills the AI subscription
+      ([quickstart](https://junie.jetbrains.com/docs/junie-cli.html)), with Claude Opus/Sonnet 5.5 among its models
+      ([models](https://junie.jetbrains.com/docs/junie-cli-model-selection.html)). The JetBrains Air app's Claude
+      Agent chat needs JetBrains AI or an API key ([Air](https://www.jetbrains.com/air/ides/)), and every JetBrains
+      IDE shares the quota ([activate agents](https://www.jetbrains.com/help/ai-assistant/activate-agents.html))
+    - **Consequences.** agent-eta reads the quota only from PhpStorm's `idea.log`, so use elsewhere shows late or
+      never. `ide_client()` and bestcodename/ai's usage guard match only `PhpStorm*`. A Junie CLI session is
+      neither listed nor a handoff target
+    - **Proposal.** Install Junie CLI and log in, then measure where it keeps the quota and its sessions. Decide on a
+      provider-neutral `jetbrains-ai` reading, the ACP rule widened to `JetBrains/[^/]+/acp-agents/`, and Junie CLI
+      as a managed CLI and handoff target under the 30-day `handoff` thresholds
 52. (proposal, bug) Flag an orphaned PhpStorm ACP agent that still holds a chat's session (ca. 1 Stunde). A second
     variant on 2026-11-19 16:17: a `claude-agent-acp` 0.108.1 pair started 45 s before the chat's 0.109.0 pair and
     stayed idle under `systemd --user` with its own session id, which no `aia-task-history/*.agentsession` and no
@@ -284,3 +297,11 @@ priority.
     `.git` file leads to its main repository) before the first-level fallback; the jump of a pid-only local row
     raises the terminal or PhpStorm window of the session that started it, which needs a `parent` field.
     Jump not clicked yet; the wrong target is read from `list --json`
+
+55. (proposal) Configurable decimal places for the shown usage percent, requested on 2026-11-20 (ca. 20 Minuten).
+    Only the JetBrains AI window carries a fraction: `list --json` on 2026-11-20 read `98.96986633093525` for
+    `claude/jetbrains-ai`, while Claude (`46.0`, `8.0`, `100.0`) and Codex (`0`, `100`) report whole percents, so
+    a decimal there would only print `.0`. Proposal: one `usage_decimals` setting (0 to 2, default 0) in
+    `~/.config/agent-eta/config.json`, settable with `agent-eta config set` and on the widget page *Usage limits*,
+    applied by the CLI `percent()` and the widget `percent()` to fractional readings only. The block cutoff keeps
+    comparing the whole percent, so a shown `98.97%` against a 99 % cutoff still counts as blocked

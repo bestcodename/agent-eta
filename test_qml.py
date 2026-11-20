@@ -41,6 +41,9 @@ class Qml(unittest.TestCase):
         self.assertIn("Usage::test_a_fold_header_toggles_on_click_and_return", result.stdout)
         self.assertIn("Usage::test_usage_rows_at_popup_widths", result.stdout)
         self.assertIn("Usage::test_estimates_stay_separate_from_resets", result.stdout)
+        self.assertIn("Usage::test_a_blocked_account_shows_only_the_window_that_ends_its_block", result.stdout)
+        self.assertIn("Usage::test_an_open_account_shows_every_window", result.stdout)
+        self.assertIn("Usage::test_limits_page_loads_and_saves_through_the_cli", result.stdout)
 
 
 if __name__ == "__main__":
