@@ -19,8 +19,8 @@ Usage bars show local hours for five-hour windows and weekdays for seven-day win
 **Time labels on usage bars** is enabled by default. Labels adapt to the bar width and can be hidden in settings.
 Each usage window also shows estimated exhaustion at its current average rate on the line above its bar, beside
 its reset.
-`usage_block` in `~/.config/agent-eta/config.json` lets a window count as blocked below 100 %, such as at 99 %
-of the week.
+Usage limits count an account as blocked from 99 % of a window and set the handoff thresholds, per window and per
+agent, with `agent-eta config` or the widget's *Usage limits* page.
 The widget's usage block and its *Room left* and *Blocked* parts fold by a click on their headings.
 Stale readings have no estimate; windows projected to last until reset say so.
 Configured remote hosts contribute newer Claude usage when both hosts authenticate the same login fingerprint.

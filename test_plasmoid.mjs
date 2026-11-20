@@ -524,3 +524,41 @@ test("attachSource prefers the session id and falls back to the pid", () => {
     assert.equal(logic.attachSource({agent: "claude", id: "s1", pid: 42}), "claude:s1");
     assert.equal(logic.attachSource({agent: "claude", id: null, pid: 42}), "claude:42");
 });
+
+test("the usage limits form reads agent modes and effective values", () => {
+    const form = logic.limitsForm(JSON.parse(readFileSync(new URL("./test_qml/limits.json", import.meta.url))));
+    assert.deepEqual(form.sections.handoff.defaults, {five_hour_percent: 100, weekly_percent: 95, monthly_percent: 98});
+    assert.equal(form.sections.handoff.enabled, true);
+    assert.deepEqual(form.sections.handoff.agents.claude, {mode: "own", values: {five_hour_percent: 90, weekly_percent: 95}});
+    assert.deepEqual(form.sections.handoff.agents.codex, {mode: "default", values: {five_hour_percent: 100, weekly_percent: 95}});
+    assert.equal(form.sections.handoff.agents.jetbrains.mode, "off");
+    assert.equal(form.sections.usage_block.agents.codex.mode, "default");
+});
+
+test("usage limits arguments write the whole form and collapse built-ins", () => {
+    const form = logic.limitsForm(JSON.parse(readFileSync(new URL("./test_qml/limits.json", import.meta.url))));
+    const pairs = logic.limitsArguments(form);
+    assert.deepEqual(pairs.filter(pair => pair.startsWith("usage_block.") && !pair.includes(".agents.")).sort(),
+                     ["usage_block.enabled=default", "usage_block.five_hour_percent=default",
+                      "usage_block.monthly_percent=default", "usage_block.weekly_percent=default"]);
+    assert.ok(pairs.includes("handoff.weekly_percent=95"));
+    assert.deepEqual(pairs.filter(pair => pair.startsWith("handoff.agents.")),
+                     ["handoff.agents.claude=default", "handoff.agents.claude.five_hour_percent=90",
+                      "handoff.agents.claude.weekly_percent=95", "handoff.agents.codex=default",
+                      "handoff.agents.jetbrains=default", "handoff.agents.jetbrains.enabled=false"]);
+});
+
+test("usage limits edits copy the form, off writes only the switch and own every window", () => {
+    const form = logic.limitsForm(JSON.parse(readFileSync(new URL("./test_qml/limits.json", import.meta.url))));
+    let edited = logic.limitsWith(form, "usage_block", "codex", "mode", "own");
+    edited = logic.limitsWith(edited, "usage_block", "codex", "five_hour_percent", 95);
+    edited = logic.limitsWith(edited, "handoff", "claude", "mode", "off");
+    edited = logic.limitsWith(edited, "handoff", null, "enabled", false);
+    assert.equal(form.sections.usage_block.agents.codex.mode, "default");
+    const pairs = logic.limitsArguments(edited);
+    assert.ok(pairs.includes("usage_block.agents.codex.five_hour_percent=95"));
+    assert.ok(pairs.includes("usage_block.agents.codex.weekly_percent=99"));
+    assert.ok(pairs.includes("handoff.enabled=false"));
+    assert.ok(pairs.includes("handoff.agents.claude.enabled=false"));
+    assert.ok(!pairs.some(pair => pair.startsWith("handoff.agents.claude.five_hour")));
+});

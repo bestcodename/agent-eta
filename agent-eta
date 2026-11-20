@@ -97,6 +97,7 @@ from zoneinfo import ZoneInfo
 # The executable is installed through a symlink; its shared helpers live beside its real path.
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import agent_eta_accounts as accounts_api
+import agent_eta_limits as limits_api
 import agent_eta_handoff as handoff_api
 import agent_eta_tmux as tmux_api
 import agent_eta_konsole as konsole_api
@@ -126,7 +127,7 @@ PROJECTS_ROOT = "~/PhpstormProjects"
 PHPSTORM_RECENT_PROJECTS = "JetBrains/PhpStorm*/options/recentProjects.xml"
 # PhpStorm's AI chats bill the JetBrains AI quota, which PhpStorm logs but keeps nowhere else current.
 # Its options file AIAssistantQuotaManager2.xml was two months stale on 2026-11-19.
-JETBRAINS_ACCOUNT = "jetbrains-ai"
+JETBRAINS_ACCOUNT = limits_api.JETBRAINS_ACCOUNT
 PHPSTORM_LOG = "JetBrains/PhpStorm*/log/idea.log"
 JETBRAINS_LOG_TAIL = 16 * 1024 * 1024
 # PhpStorm logs the quota after a turn and at least every 30 minutes while a chat is used, measured on
@@ -154,12 +155,6 @@ CLAUDE_STATES = {"busy": "working", "shell": "working", "waiting": "waiting", "i
 CODEX_STATES = {"UserPromptSubmit": "working", "PreToolUse": "working", "PostToolUse": "working",
                 "PermissionRequest": "waiting", "Stop": "idle", "Interrupt": "idle"}
 TURN_ENDS = ("UserPromptSubmit", "Stop", "Interrupt", "SessionEnd")
-# The Codex limit trigger's defaults, overridden by `codex_handoff` in ~/.config/agent-eta/config.json.
-HANDOFF_TRIGGER = {"enabled": True, "five_hour_percent": 90, "weekly_percent": 98}
-# The usage at which a window counts as blocked, overridden by `usage_block` in the same config.
-# Below 100 it blocks an account that still has a sliver left, which no session can use anyway.
-USAGE_BLOCK = {"five_hour_percent": 100, "weekly_percent": 100, "monthly_percent": 100}
-USAGE_BLOCK_WINDOWS = {"five_hour_percent": 300, "weekly_percent": 10080, "monthly_percent": 43200}
 HANDOFF_WAIT = 1800
 # Codex tools that put a question to the user. No hook sees them, and none sees a plan waiting
 # for approval either, so the reader looks for both in the thread's rollout transcript.
@@ -1255,7 +1250,7 @@ def usage_view(now, windows=None):
     """Every usage window as model.usage_view() describes it, read from both agents unless given,
     with the configured block cutoffs."""
     return model.usage_view(now, claude_usage() + codex_usage() + jetbrains_usage() if windows is None else windows,
-                            usage_block_settings())
+                            usage_block())
 
 
 def render_usage(windows, now, notes=None):
@@ -1335,7 +1330,7 @@ def format_window(minutes):
 
 
 def percent(value):
-    return "?" if value is None else "%d%%" % round(value)
+    return "?" if value is None else "%d%%" % model.whole_percent(value)
 
 
 def turn_path(directory, agent, session):
@@ -1424,7 +1419,7 @@ def snapshot(directory, now, tasks=None, usage=None, accounts=()):
     result = model.build_snapshot(now=now, sessions=sessions, tasks=list(tasks) + dsh_tasks,
                                   usage=usage_view(now) if usage is None else usage, accounts=accounts,
                                   turns=turns, handoffs=handoff_records(),
-                                  reminders_need_you=reminders_need_you(), block_at=usage_block_settings())
+                                  reminders_need_you=reminders_need_you(), block_at=usage_block())
     for task_id in result.prune_tasks:
         remove(entry_path(directory, task_id))
     return result
@@ -1885,26 +1880,9 @@ def reminders_need_you():
     return accounts_api.AccountStore().settings().get("reminder_sessions") == "needs_you"
 
 
-def handoff_trigger_settings():
-    """The Codex limit trigger's settings from the agent-eta config, over its defaults."""
-    raw = accounts_api.AccountStore().settings().get("codex_handoff")
-    settings = dict(HANDOFF_TRIGGER)
-    for key, value in (raw.items() if isinstance(raw, dict) else ()):
-        if key in settings and type(value) in ((bool,) if key == "enabled" else (int, float)):
-            settings[key] = value
-    return settings
-
-
-def usage_block_settings():
-    """The usage per window length in minutes at which a window counts as blocked, from
-    `usage_block` in the agent-eta config over USAGE_BLOCK. A value must be a number from 1 to 100;
-    anything else keeps the default."""
-    raw = accounts_api.AccountStore().settings().get("usage_block")
-    settings = dict(USAGE_BLOCK)
-    for key, value in (raw.items() if isinstance(raw, dict) else ()):
-        if key in settings and type(value) in (int, float) and 1 <= value <= 100:
-            settings[key] = value
-    return {USAGE_BLOCK_WINDOWS[key]: value for key, value in settings.items()}
+def usage_block():
+    """The configured block cutoff per usage window, see agent_eta_limits.block_at()."""
+    return limits_api.block_at(accounts_api.AccountStore().settings())
 
 
 def codex_limit_trigger(directory, thread, now, usage=None, start=None):
@@ -1914,10 +1892,9 @@ def codex_limit_trigger(directory, thread, now, usage=None, start=None):
     tripped windows. A thread that shares its process with others, as every desktop chat does, cannot
     be paused and is skipped. A reset clears the trip and never moves a session back.
     """
-    settings = handoff_trigger_settings()
-    if not settings["enabled"]:
+    enabled, thresholds = limits_api.handoff_thresholds(accounts_api.AccountStore().settings(), "codex")
+    if not enabled:
         return "handoff-off"
-    thresholds = {300: settings["five_hour_percent"], 10080: settings["weekly_percent"]}
     tripped = sorted("%d@%s" % (w["minutes"], w["resets_at"]) for w in (codex_usage() if usage is None else usage)
                      if w["minutes"] in thresholds and w["used"] >= thresholds[w["minutes"]]
                      and (not isinstance(w["resets_at"], (int, float)) or w["resets_at"] > now))
@@ -2279,6 +2256,7 @@ def build_parser():
     setter.add_argument("--eta", type=eta_type, required=True)
     setter.add_argument("--label")
     accounts_api.add_parser(sub)
+    limits_api.add_parser(sub)
     remote_api.add_parser(sub)
     handoff_api.add_parser(sub)
     konsole_api.add_parser(sub)
@@ -2304,7 +2282,7 @@ def main(argv=None):
                 "set": cmd_set, "turn": cmd_turn, "handoff": cmd_handoff,
                 "account": lambda args: accounts_api.account_action(args, handoff_batch, handoff_inspect, register_launch),
                 "tab": konsole_api.tab_action, "attach": cmd_attach, "viewer-guard": cmd_viewer_guard, "remote": remote_api.remote_action,
-                "account-tabs": cmd_account_tabs, "workspace": cmd_workspace}
+                "account-tabs": cmd_account_tabs, "workspace": cmd_workspace, "config": limits_api.config_action}
     try:
         return handlers[args.cmd](args)
     except (StateDirError, AccountError, handoff_api.HandoffError, tmux_api.TmuxError, remote_api.RemoteError,

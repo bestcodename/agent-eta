@@ -15,7 +15,8 @@ import "../code/logic.mjs" as Logic
 // red where the usage runs far ahead of the time, `yellow` sets the half-width
 // of the yellow band and `fade` blends it. Every reset
 // carries its countdown, as in `resets in 49m (18:30)`, and the status line under the agent's name
-// names its highest share with the reset that comes first, beside the freshness of the reading. A click
+// names its highest share with the reset that comes first, beside the freshness of the reading. A blocked
+// agent shows only the bar of the window whose reset ends its block, `resetBy`. A click
 // anywhere on the row opens the account menu of FullRepresentation.qml.
 ColumnLayout {
     id: usageRow
@@ -81,7 +82,7 @@ ColumnLayout {
     }
 
     Repeater {
-        model: usageRow.group.windows
+        model: usageRow.group.reached && usageRow.group.resetBy ? [usageRow.group.resetBy] : usageRow.group.windows
 
         delegate: ColumnLayout {
             required property var modelData
@@ -122,6 +123,7 @@ ColumnLayout {
                 }
             }
             ProgressLine {
+                objectName: "usageBar"
                 Layout.fillWidth: true
                 value: (modelData.used || 0) / 100
                 marker: modelData.elapsed === null || modelData.elapsed === undefined ? -1 : modelData.elapsed / 100

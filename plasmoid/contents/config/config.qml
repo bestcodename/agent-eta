@@ -23,4 +23,9 @@ ConfigModel {
         icon: "preferences-desktop-notification"
         source: "configNotifications.qml"
     }
+    ConfigCategory {
+        name: i18nc("@title", "Usage limits")
+        icon: "speedometer"
+        source: "configLimits.qml"
+    }
 }

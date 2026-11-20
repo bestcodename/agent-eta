@@ -1,0 +1,93 @@
+{
+  "agents": {
+    "claude": [
+      "five_hour_percent",
+      "weekly_percent"
+    ],
+    "codex": [
+      "five_hour_percent",
+      "weekly_percent"
+    ],
+    "jetbrains": [
+      "monthly_percent"
+    ]
+  },
+  "handoff": {
+    "builtin": {
+      "enabled": true,
+      "five_hour_percent": 100,
+      "monthly_percent": 98,
+      "weekly_percent": 98
+    },
+    "configured": {
+      "agents": {
+        "claude": {
+          "five_hour_percent": 90
+        },
+        "jetbrains": {
+          "enabled": false
+        }
+      },
+      "weekly_percent": 95
+    },
+    "defaults": {
+      "enabled": true,
+      "five_hour_percent": 100,
+      "monthly_percent": 98,
+      "weekly_percent": 95
+    },
+    "effective": {
+      "claude": {
+        "enabled": true,
+        "five_hour_percent": 90,
+        "weekly_percent": 95
+      },
+      "codex": {
+        "enabled": true,
+        "five_hour_percent": 100,
+        "weekly_percent": 95
+      },
+      "jetbrains": {
+        "enabled": false,
+        "monthly_percent": 98
+      }
+    }
+  },
+  "names": {
+    "claude": "Claude Code",
+    "codex": "Codex",
+    "jetbrains": "JetBrains AI"
+  },
+  "schema": 1,
+  "usage_block": {
+    "builtin": {
+      "enabled": true,
+      "five_hour_percent": 99,
+      "monthly_percent": 99,
+      "weekly_percent": 99
+    },
+    "configured": {},
+    "defaults": {
+      "enabled": true,
+      "five_hour_percent": 99,
+      "monthly_percent": 99,
+      "weekly_percent": 99
+    },
+    "effective": {
+      "claude": {
+        "enabled": true,
+        "five_hour_percent": 99,
+        "weekly_percent": 99
+      },
+      "codex": {
+        "enabled": true,
+        "five_hour_percent": 99,
+        "weekly_percent": 99
+      },
+      "jetbrains": {
+        "enabled": true,
+        "monthly_percent": 99
+      }
+    }
+  }
+}

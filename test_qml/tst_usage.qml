@@ -16,6 +16,7 @@ Item {
     Component { id: axisComponent; UI.UsageTimeAxis {} }
     Component { id: foldComponent; UI.FoldHeader {} }
     Component { id: signalSpy; SignalSpy {} }
+    Component { id: runnerComponent; UI.Runner {} }
 
     function named(item, name) {
         let found = item.objectName === name ? [item] : [];
@@ -84,6 +85,43 @@ Item {
             compare(settings[data.key], data.second);
         }
 
+        // The page reads and writes through the CLI; fake-agent-eta.sh answers with limits.json and logs
+        // what `config set` gets. The save runs detached, so the test waits for the log.
+        function test_limits_page_loads_and_saves_through_the_cli() {
+            const shell = createTemporaryObject(runnerComponent, root);
+            let log = "";
+            shell.run("mktemp", (code, stdout) => { log = stdout.trim(); });
+            tryVerify(() => log !== "", 5000);
+            const script = Qt.resolvedUrl("fake-agent-eta.sh").toString().replace("file://", "");
+            const component = Qt.createComponent("../plasmoid/contents/ui/configLimits.qml");
+            compare(component.status, Component.Ready, component.errorString());
+            const settings = createTemporaryObject(component, root, {width: 700, height: 500,
+                cfg_command: "env AGENT_ETA_FAKE_LOG=" + log + " " + script});
+            verify(settings);
+            tryVerify(() => settings.form !== null, 5000);
+            const changed = createTemporaryObject(signalSpy, root, {target: settings, signalName: "configurationChanged"});
+            const mode = root.named(settings, "handoff.codex.mode")[0];
+            verify(mode);
+            compare(mode.currentIndex, 0);
+            mode.currentIndex = 2;
+            mode.activated(2);
+            const spin = root.named(settings, "handoff.codex.five_hour_percent")[0];
+            verify(spin);
+            tryVerify(() => spin.visible);
+            spin.value = 90;
+            spin.valueModified();
+            verify(changed.count >= 2);
+            compare(root.named(settings, "handoff.jetbrains.mode")[0].currentIndex, 1);
+            settings.saveConfig();
+            let written = "";
+            tryVerify(() => {
+                shell.run("cat " + log, (code, stdout) => { written = stdout; });
+                return written.indexOf("handoff.agents.codex.five_hour_percent=90") >= 0;
+            }, 5000);
+            verify(written.indexOf("handoff.agents.jetbrains.enabled=false") >= 0);
+            shell.run("rm -f " + log);
+        }
+
         function test_axis_labels_fit_actual_font_widths_data() {
             return [
                 {tag: "narrow hours", minutes: 300, width: 180},
@@ -144,6 +182,29 @@ Item {
                 verify(root.named(axis, "usageTimeLabel").length >= 2);
             }
             grabImage(row).save("/tmp/agent-eta-usage-labels-" + data.tag + ".png");
+        }
+
+        function test_a_blocked_account_shows_only_the_window_that_ends_its_block() {
+            const weekly = {minutes: 10080, resets_at: end + 86400, used: 99, elapsed: 83.33, remaining: 100800,
+                            block_at: 99, reached: true, blocked_by: "cutoff"};
+            const row = createTemporaryObject(rowComponent, root, {width: 380, now: end - 14400, group: {
+                agent: "claude", account: null, reached: true, used: 99, resetBy: weekly,
+                windows: [{minutes: 300, resets_at: end, used: 0, elapsed: 20, remaining: 14400}, weekly]}});
+            verify(row);
+            waitForRendering(row);
+            const bars = root.named(row, "usageBar");
+            compare(bars.length, 1);
+            fuzzyCompare(bars[0].value, 0.99, 0.001);
+        }
+
+        function test_an_open_account_shows_every_window() {
+            const row = createTemporaryObject(rowComponent, root, {width: 380, now: end - 14400, group: {
+                agent: "claude", account: null, reached: false, used: 40, resetBy: null,
+                windows: [{minutes: 300, resets_at: end, used: 40, elapsed: 20, remaining: 14400},
+                          {minutes: 10080, resets_at: end + 86400, used: 30, elapsed: 83.33, remaining: 100800}]}});
+            verify(row);
+            waitForRendering(row);
+            compare(root.named(row, "usageBar").length, 2);
         }
 
         function test_estimates_stay_separate_from_resets_data() {

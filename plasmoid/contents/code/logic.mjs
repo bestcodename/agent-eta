@@ -699,3 +699,78 @@ export function signalEvents(previous, next) {
     }
     return events;
 }
+
+// The two sections of the Usage limits settings page, by their key in agent-eta's config.
+export const LIMIT_SECTIONS = ["usage_block", "handoff"];
+
+// The Usage limits page's state from `agent-eta config get --json`: per section its switch, its
+// per-window defaults and every agent's mode, "default" following the defaults, "off" or "own"
+// with values of its own. The values shown are the effective ones, so Own starts from them.
+export function limitsForm(described) {
+    const sections = {};
+    const builtin = {};
+    for (const name of LIMIT_SECTIONS) {
+        const section = described[name];
+        const configured = (section.configured && section.configured.agents) || {};
+        const agents = {};
+        for (const [agent, keys] of Object.entries(described.agents)) {
+            const own = configured[agent] || {};
+            const values = {};
+            for (const key of keys) {
+                values[key] = section.effective[agent][key];
+            }
+            const mode = own.enabled === false ? "off" : keys.some(key => key in own) ? "own" : "default";
+            agents[agent] = {mode, values};
+        }
+        const defaults = Object.assign({}, section.defaults);
+        delete defaults.enabled;
+        sections[name] = {enabled: section.defaults.enabled, defaults, agents};
+        builtin[name] = section.builtin;
+    }
+    return {agents: described.agents, names: described.names, builtin, sections};
+}
+
+// A copy of the form with one value changed: a section's `enabled` or default when `agent` is null,
+// else the agent's `mode` or one of its values.
+export function limitsWith(form, section, agent, key, value) {
+    const sections = JSON.parse(JSON.stringify(form.sections));
+    if (agent === null) {
+        if (key === "enabled") {
+            sections[section].enabled = value;
+        } else {
+            sections[section].defaults[key] = value;
+        }
+    } else if (key === "mode") {
+        sections[section].agents[agent].mode = value;
+    } else {
+        sections[section].agents[agent].values[key] = value;
+    }
+    return Object.assign({}, form, {sections});
+}
+
+// The `agent-eta config set` pairs for the whole form, so a save is the same however often it runs.
+// A section value equal to the built-in becomes `default`, so a later built-in reaches it. Every
+// agent is reset first and then gets `enabled=false` when off or each of its values when own.
+export function limitsArguments(form) {
+    const pairs = [];
+    for (const name of LIMIT_SECTIONS) {
+        const section = form.sections[name];
+        const builtin = form.builtin[name];
+        const put = (key, value) => pairs.push(`${name}.${key}=${value === builtin[key] ? "default" : value}`);
+        put("enabled", section.enabled);
+        for (const [key, value] of Object.entries(section.defaults)) {
+            put(key, value);
+        }
+        for (const [agent, {mode, values}] of Object.entries(section.agents)) {
+            pairs.push(`${name}.agents.${agent}=default`);
+            if (mode === "off") {
+                pairs.push(`${name}.agents.${agent}.enabled=false`);
+            } else if (mode === "own") {
+                for (const [key, value] of Object.entries(values)) {
+                    pairs.push(`${name}.agents.${agent}.${key}=${value}`);
+                }
+            }
+        }
+    }
+    return pairs;
+}

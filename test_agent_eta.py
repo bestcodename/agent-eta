@@ -1463,28 +1463,26 @@ class PhpStormChats(unittest.TestCase):
 
 
 class UsageBlock(unittest.TestCase):
-    """`usage_block` in the config sets the usage at which a window counts as blocked."""
+    """`usage_block` in the config sets the usage at which a window counts as blocked, see test_limits."""
 
-    def settings(self, raw):
+    def cutoff(self, raw, window):
         store = mock.Mock()
         store.return_value.settings.return_value = {} if raw is None else {"usage_block": raw}
         with mock.patch.object(eta.accounts_api, "AccountStore", store):
-            return eta.usage_block_settings()
+            return eta.usage_block()(window)
 
-    def test_only_numbers_from_1_to_100_replace_the_defaults(self):
-        self.assertEqual(self.settings(None), {300: 100, 10080: 100, 43200: 100})
-        self.assertEqual(self.settings("99"), {300: 100, 10080: 100, 43200: 100})
-        self.assertEqual(self.settings({"weekly_percent": 99.5, "five_hour_percent": 95, "monthly_percent": 90}),
-                         {300: 95, 10080: 99.5, 43200: 90})
-        for bad in (True, "99", 0, 101, None):
-            self.assertEqual(self.settings({"weekly_percent": bad, "other": 50}), {300: 100, 10080: 100, 43200: 100},
-                             bad)
+    def test_the_config_sets_the_cutoff_per_agent_and_window(self):
+        jetbrains = {"agent": "claude/jetbrains-ai", "minutes": 43200}
+        self.assertEqual(self.cutoff(None, jetbrains), 99)
+        self.assertEqual(self.cutoff({"monthly_percent": 95}, jetbrains), 95)
+        self.assertIsNone(self.cutoff({"agents": {"jetbrains": {"enabled": False}}}, jetbrains))
+        self.assertEqual(self.cutoff({"agents": {"jetbrains": {"enabled": False}}}, {"agent": "codex", "minutes": 300}), 99)
 
     def test_the_usage_table_names_the_cutoff_of_a_blocked_window(self):
         [blocked] = eta.model.usage_view(NOW, [{"agent": "claude", "minutes": 10080, "used": 99.0,
-                                               "resets_at": NOW + 7200, "seen_at": NOW}], {10080: 99})
+                                               "resets_at": NOW + 7200, "seen_at": NOW}], lambda window: 99)
         self.assertEqual(eta.usage_cells(blocked, NOW)[3], "2h00 (cutoff 99%)")
-        [limit] = eta.model.usage_view(NOW, [dict(blocked, used=100.0)], {10080: 99})
+        [limit] = eta.model.usage_view(NOW, [dict(blocked, used=100.0)], lambda window: 99)
         self.assertNotIn("cutoff", eta.usage_cells(limit, NOW)[3])
 
 
@@ -1821,10 +1819,10 @@ class CodexLimitTrigger(unittest.TestCase):
         return eta.codex_limit_trigger(self.dir, "t1", 1000, usage, lambda command, log: self.started.append(command))
 
     def test_a_window_at_its_threshold_starts_one_handoff(self):
-        self.assertEqual(self.fire(89), "handoff-below")
-        self.assertEqual(self.fire(90), "handoff-started")
+        self.assertEqual(self.fire(99), "handoff-below")
+        self.assertEqual(self.fire(100), "handoff-started")
         self.assertEqual(self.started[0][2:], ["handoff", "codex:t1", "--to", "claude", "--wait", "1800"])
-        self.assertEqual(self.fire(95), "handoff-known")
+        self.assertEqual(self.fire(100), "handoff-known")
         self.assertEqual(self.fire(97, minutes=10080), "handoff-below")
         self.assertEqual(self.fire(98, minutes=10080), "handoff-started")
         self.assertEqual(len(self.started), 2)
@@ -1834,16 +1832,17 @@ class CodexLimitTrigger(unittest.TestCase):
 
     def test_the_config_sets_thresholds_and_can_switch_it_off(self):
         with open(self.config, "w") as handle:
-            json.dump({"codex_handoff": {"five_hour_percent": 80, "weekly_percent": "x"}}, handle)
+            json.dump({"handoff": {"weekly_percent": "x", "agents": {"codex": {"five_hour_percent": 80}}}}, handle)
         self.assertEqual(self.fire(85), "handoff-started")
-        self.assertEqual(eta.handoff_trigger_settings()["weekly_percent"], 98)
-        with open(self.config, "w") as handle:
-            json.dump({"codex_handoff": {"enabled": False}}, handle)
-        self.assertEqual(self.fire(99, resets_at=3000), "handoff-off")
+        self.assertEqual(self.fire(97, minutes=10080), "handoff-below")
+        for off in ({"agents": {"codex": {"enabled": False}}}, {"enabled": False}):
+            with open(self.config, "w") as handle:
+                json.dump({"handoff": off}, handle)
+            self.assertEqual(self.fire(100, resets_at=3000), "handoff-off")
 
     def test_a_desktop_chat_is_skipped(self):
         self.record({})
-        self.assertEqual(self.fire(99), "handoff-ungated")
+        self.assertEqual(self.fire(100), "handoff-ungated")
         self.assertEqual(self.started, [])
 
 if __name__ == "__main__":
