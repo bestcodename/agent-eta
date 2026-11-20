@@ -9,8 +9,25 @@ priority.
 2. (low) Match a Codex task to its process through `CODEX_THREAD_ID` in `/proc/*/environ`. Only worth it if Codex
    entries whose process ended unpolled stay listed until they expire often enough to mislead, see
    [docs/agent-eta.md](docs/agent-eta.md) "Limits" (ca. 1 Stunde 30 Minuten)
-3. (low) Further surfaces for `agent-eta list --json`, proposed and not evaluated yet. They are phone notifications
-   when a task turns overdue (ca. 1 Stunde) and a web app (ca. 4 Stunden)
+3. (proposal) Offer the Agent ETA modal as a web app, requested on 2026-11-20 (ca. 8 Stunden). It should stay open
+   in a maximized Firefox window and also reach the phone browser and the other workstation. Proposal:
+   - **Server.** `agent-eta serve` on every workstation renders the same data as the modal from `list --json`,
+     with live updates, and installs as a `systemd --user` unit through `install.sh`; feature parity with the
+     modal, including the declutter rules of #50
+   - **Peers instead of a central server.** Each host stays the source of its own sessions, so instances only
+     pull each other and need no replication. Today `remote add` already pulls `agent-eta list --json --local`
+     over SSH with an 8 second timeout and a 60 second cache; add HTTP between instances as a second transport
+     for the same merge, so every instance shows every host's rows. The only shared state worth syncing is
+     notification acknowledgement and dismissal, so check first whether the dedupe keys already suffice
+   - **Server-only instance.** An instance on a host without agents that only pulls its peers, for example on a
+     VPS, works as an optional aggregator without being required
+   - **Phone and access.** Bind to localhost and a private network such as WireGuard or Tailscale only, never a
+     public port, and require a token or client certificate. Actions that need a terminal, such as attach, stay
+     on the desktop at first; the phone gets read-only rows plus overdue notifications through the browser's
+     Web Push (the phone notification part of the former item, ca. 1 Stunde included)
+   - **Open.** Framework choice (the repository is Python, so check the standard library's `http.server` plus
+     Server-Sent Events against a small maintained framework), the auth scheme, and whether the plasmoid later
+     becomes a thin client of the local server
 4. (low) Show a turn that ends with a question in plain text as waiting rather than idle. Neither agent marks such a
    turn, so the candidate is a `Stop` hook that reads the last assistant message from `transcript_path` and checks
    whether it ends with a question mark. It is a heuristic and was left out of 0.62.0 on purpose (ca. 1 Stunde)
