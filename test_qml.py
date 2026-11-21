@@ -38,6 +38,7 @@ class Qml(unittest.TestCase):
         self.assertIn("Contract::test_a_question_during_a_turn_reads_as_such", result.stdout)
         self.assertIn("Runner::test_a_late_answer_never_reaches_the_next_run", result.stdout)
         self.assertIn("Usage::test_time_label_setting_loads_and_saves", result.stdout)
+        self.assertIn("Usage::test_settings_controls_explain_themselves", result.stdout)
         self.assertIn("Usage::test_a_fold_header_toggles_on_click_and_return", result.stdout)
         self.assertIn("Usage::test_usage_rows_at_popup_widths", result.stdout)
         self.assertIn("Usage::test_estimates_stay_separate_from_resets", result.stdout)

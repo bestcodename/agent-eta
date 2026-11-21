@@ -44,14 +44,25 @@ KCM.SimpleKCM {
     Kirigami.FormLayout {
         QQC2.CheckBox {
             id: launchInCli
+            objectName: "launchInCli"
             Kirigami.FormData.label: i18nc("@title:group", "New Codex sessions:")
             text: i18nc("@option:check", "Use CLI by default")
+            QQC2.ToolTip.text: i18n("Start new Codex sessions in the Codex CLI in a terminal instead of the Codex app. An account's menu offers the other one for a single launch.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
         QQC2.Button {
+            id: restoreCodex
+            objectName: "restoreCodex"
             text: i18n("Restore Codex monitoring")
             onClicked: runner.run(config.cfg_command + " account enable codex", (code, stdout, stderr) => {
                 restoreStatus.text = code === 0 ? i18n("Codex monitoring is enabled") : (stderr || i18n("Restore failed")).trim();
             })
+            QQC2.ToolTip.text: i18n("Turn local Codex monitoring back on after the account was removed from the widget. It does not log in again.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
         QQC2.Label {
             id: restoreStatus

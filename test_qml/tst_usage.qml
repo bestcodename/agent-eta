@@ -1,5 +1,7 @@
 import QtQuick
 import QtTest
+import QtQuick.Controls as QQC2
+import org.kde.kirigami as Kirigami
 
 import "../plasmoid/contents/ui" as UI
 import "../plasmoid/contents/code/logic.mjs" as Logic
@@ -83,6 +85,35 @@ Item {
             compare(settings[data.key], data.first);
             settings[data.key] = data.second;
             compare(settings[data.key], data.second);
+        }
+        function test_settings_controls_explain_themselves_data() {
+            return [
+                {tag: "general", file: "configGeneral.qml", props: {}, enabled: true, names: ["command", "pollClosed", "pollOpen"]},
+                {tag: "notifications", file: "configNotifications.qml", props: {}, enabled: true, names: ["notifyWaiting", "notifyOverdue", "notifyReset"]},
+                {tag: "appearance", file: "configAppearance.qml", props: {}, enabled: true, names: ["showUsage", "showUsageTimeLabels", "yellowWidth", "blendYellow", "blendWidth"]},
+                {tag: "appearance_usage_off", file: "configAppearance.qml", props: {cfg_showUsage: false}, enabled: false, names: ["showUsageTimeLabels", "yellowWidth", "blendYellow", "blendWidth"]},
+                {tag: "appearance_blend_off", file: "configAppearance.qml", props: {cfg_blendYellow: false}, enabled: false, names: ["blendWidth"]},
+                {tag: "sessions", file: "configSessions.qml", props: {}, enabled: true, names: ["launchInCli", "restoreCodex"]}
+            ];
+        }
+        function test_settings_controls_explain_themselves(data) {
+            const component = Qt.createComponent("../plasmoid/contents/ui/" + data.file);
+            compare(component.status, Component.Ready, component.errorString());
+            const settings = createTemporaryObject(component, root, Object.assign({width: 500, height: 400, cfg_command: "agent-eta", cfg_showUsage: true, cfg_blendYellow: true}, data.props));
+            verify(settings);
+            waitForRendering(settings);
+            for (const name of data.names) {
+                const control = root.named(settings, name)[0];
+                verify(control, name);
+                compare(control.enabled, data.enabled, name);
+                verify(control.Accessible.description.length > 0, name);
+                compare(control.Accessible.description.startsWith("Enable "), !data.enabled, name);
+                compare(control.QQC2.ToolTip.delay, Kirigami.Units.toolTipDelay, name);
+                if (data.enabled) {
+                    control.forceActiveFocus();
+                    tryVerify(() => control.QQC2.ToolTip.visible, 2000, name + " shows its tooltip on keyboard focus");
+                }
+            }
         }
 
         // The page reads and writes through the CLI; fake-agent-eta.sh answers with limits.json and logs

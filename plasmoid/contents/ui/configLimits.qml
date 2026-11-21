@@ -131,6 +131,7 @@ KCM.SimpleKCM {
                     onToggled: config.edit(sectionColumn.modelData, null, "enabled", checked)
                     QQC2.ToolTip.text: config.switchTips[sectionColumn.modelData]
                     QQC2.ToolTip.visible: hovered || activeFocus
+                    QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                     Accessible.description: QQC2.ToolTip.text
                 }
                 RowLayout {
@@ -155,6 +156,7 @@ KCM.SimpleKCM {
                                 onValueModified: config.edit(sectionColumn.modelData, null, defaultValue.modelData, value)
                                 QQC2.ToolTip.text: config.valueTip
                                 QQC2.ToolTip.visible: hovered || activeFocus
+                                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                                 Accessible.description: QQC2.ToolTip.text
                             }
                         }
@@ -181,6 +183,7 @@ KCM.SimpleKCM {
                             onActivated: index => config.edit(sectionColumn.modelData, agentRow.modelData, "mode", config.modes[index])
                             QQC2.ToolTip.text: config.modeTip
                             QQC2.ToolTip.visible: hovered || activeFocus
+                            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                             Accessible.description: QQC2.ToolTip.text
                         }
                         Repeater {
@@ -200,6 +203,7 @@ KCM.SimpleKCM {
                                     onValueModified: config.edit(sectionColumn.modelData, agentRow.modelData, ownValue.modelData, value)
                                     QQC2.ToolTip.text: config.valueTip
                                     QQC2.ToolTip.visible: hovered || activeFocus
+                                    QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                                     Accessible.description: QQC2.ToolTip.text
                                 }
                             }

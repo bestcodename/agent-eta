@@ -42,8 +42,13 @@ KCM.SimpleKCM {
     Kirigami.FormLayout {
         QQC2.CheckBox {
             id: showUsage
+            objectName: "showUsage"
             Kirigami.FormData.label: i18nc("@title:group", "Show:")
             text: i18nc("@option:check", "Usage windows")
+            QQC2.ToolTip.text: i18n("Show each account's usage windows as bars with their resets in the popup.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
         QQC2.CheckBox {
             id: showUsageTimeLabels
@@ -54,27 +59,51 @@ KCM.SimpleKCM {
                 ? i18n("Show local hours or weekdays along each usage window. Labels adapt to the available width.")
                 : i18n("Enable usage windows to change their time labels.")
             QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             Accessible.description: QQC2.ToolTip.text
         }
         QQC2.SpinBox {
             id: yellowWidth
+            objectName: "yellowWidth"
             Kirigami.FormData.label: i18nc("@label:spinbox", "Yellow band (% of the usage past the tick, each side):")
             enabled: showUsage.checked
             from: 0
             to: 100
+            QQC2.ToolTip.text: enabled
+                ? i18n("Half-width of the yellow band around the pace tick, as a share of how far the usage runs past the tick. 0 leaves only green and red.")
+                : i18n("Enable usage windows to change the yellow band.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
         QQC2.CheckBox {
             id: blendYellow
+            objectName: "blendYellow"
             enabled: showUsage.checked
             text: i18nc("@option:check", "Blend the yellow band of a usage bar")
+            QQC2.ToolTip.text: enabled
+                ? i18n("Fade the yellow band into green and red instead of hard edges.")
+                : i18n("Enable usage windows to change the yellow band.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
         QQC2.SpinBox {
             id: blendWidth
+            objectName: "blendWidth"
             Kirigami.FormData.label: i18nc("@label:spinbox", "Fade width (% of each half of the yellow band):")
             enabled: showUsage.checked && blendYellow.checked
             from: 10
             to: 100
             stepSize: 10
+            QQC2.ToolTip.text: enabled
+                ? i18n("Share of each half of the yellow band that fades. 100 leaves pure yellow only at the tick.")
+                : !showUsage.checked
+                    ? i18n("Enable usage windows to change the fade.")
+                    : i18n("Enable blending to change the fade width.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
     }
 }

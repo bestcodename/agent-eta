@@ -42,16 +42,31 @@ KCM.SimpleKCM {
     Kirigami.FormLayout {
         QQC2.CheckBox {
             id: notifyWaiting
+            objectName: "notifyWaiting"
             Kirigami.FormData.label: i18nc("@title:group", "Notify when:")
             text: i18nc("@option:check", "A session starts waiting for you")
+            QQC2.ToolTip.text: i18n("Notify when a session ends its turn and waits for you. The red pulsing orb shows this as well.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
         QQC2.CheckBox {
             id: notifyOverdue
+            objectName: "notifyOverdue"
             text: i18nc("@option:check", "An ETA runs over")
+            QQC2.ToolTip.text: i18n("Notify when a session or task is still running after its ETA.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
         QQC2.CheckBox {
             id: notifyReset
+            objectName: "notifyReset"
             text: i18nc("@option:check", "A usage limit resets")
+            QQC2.ToolTip.text: i18n("Notify when a reached usage limit resets and the account works again.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
     }
 }

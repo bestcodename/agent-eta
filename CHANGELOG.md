@@ -7,6 +7,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-11-21
+
+### Added
+
+- Tooltips and accessible descriptions on the settings pages *General*, *Sessions and Launching*, *Appearance* and
+  *Notifications*
+- QML test that every settings control explains itself, enabled and disabled
+
+### Changed
+
+- Settings tooltips, including those of *Usage limits*, wait for Plasma's tooltip delay
+- TODO #32 narrowed to the context menus and the remaining controls
+
+### Fixed
+
+- `test_handoff.py` commits unsigned, so a signing setup no longer stalls it locally
+
 ## [2.23.0] - 2026-11-20
 
 ### Added
