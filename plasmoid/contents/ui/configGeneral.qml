@@ -42,19 +42,34 @@ KCM.SimpleKCM {
     Kirigami.FormLayout {
         QQC2.TextField {
             id: command
+            objectName: "command"
             Kirigami.FormData.label: i18nc("@label:textbox", "agent-eta command:")
+            QQC2.ToolTip.text: i18n("The agent-eta command the widget runs for every refresh and action. Keep the full path, because plasmashell's PATH lacks ~/.local/bin.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
         QQC2.SpinBox {
             id: pollClosed
+            objectName: "pollClosed"
             Kirigami.FormData.label: i18nc("@label:spinbox", "Refresh every (seconds), closed:")
             from: 1
             to: 300
+            QQC2.ToolTip.text: i18n("How often the widget reads the sessions while the popup is closed.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
         QQC2.SpinBox {
             id: pollOpen
+            objectName: "pollOpen"
             Kirigami.FormData.label: i18nc("@label:spinbox", "Refresh every (seconds), open:")
             from: 1
             to: 60
+            QQC2.ToolTip.text: i18n("How often the widget reads the sessions while the popup is open.")
+            QQC2.ToolTip.visible: hovered || activeFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.description: QQC2.ToolTip.text
         }
     }
 }

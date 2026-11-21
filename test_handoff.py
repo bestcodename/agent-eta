@@ -126,7 +126,8 @@ class Base(unittest.TestCase):
         os.makedirs(self.root)
         self.repo = os.path.join(self.tmp, "repo with 'quotes'")
         os.makedirs(self.repo)
-        git = ["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@example.org"]
+        git = ["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@example.org",
+               "-c", "commit.gpgsign=false"]
         subprocess.run(git + ["init", "-q", "-b", "feature/x"], check=True)
         write(os.path.join(self.repo, "a.txt"), "a\n")
         subprocess.run(git + ["add", "a.txt"], check=True)

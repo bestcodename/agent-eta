@@ -842,12 +842,14 @@ and what the hook did. The command text never goes there. The log rotates at 256
   state and notifies nothing. A remote host's waiting and overdue signals notify as well, with "on HOST" after the
   session or task in the title.
 
-The settings have five pages. **General** holds the command, which defaults to `"$HOME/.local/bin/agent-eta"`
-because plasmashell's `PATH` lacks `~/.local/bin`, and the two poll intervals. **Sessions and Launching** holds
-**Use CLI by default** and **Restore Codex monitoring**. **Appearance** holds whether the usage block shows, its time
-labels, the half-width of a usage bar's yellow band and whether that band fades, together with the width of the
-fade. **Notifications** holds the three notification switches. **Usage limits** holds the block cutoffs and
-handoff thresholds of [Usage limits](#usage-limits), which it reads and writes through `agent-eta config`. The logic that needs no QML lives in
+The settings have five pages. **General** holds the command, which defaults to `"$HOME/.local/bin/agent-eta"` because
+plasmashell's `PATH` lacks `~/.local/bin`, and the two poll intervals. **Sessions and Launching** holds **Use CLI by
+default** and **Restore Codex monitoring**. **Appearance** holds whether the usage block shows, its time labels, the
+half-width of a usage bar's yellow band and whether that band fades, together with the width of the fade.
+**Notifications** holds the three notification switches. **Usage limits** holds the block cutoffs and handoff thresholds
+of [Usage limits](#usage-limits), which it reads and writes through `agent-eta config`. Every control on these pages
+explains its effect in a tooltip on hover and keyboard focus after Plasma's tooltip delay, which screen readers read as
+its description, and a disabled control says what enables it. The logic that needs no QML lives in
 `contents/code/logic.mjs`, which the tests run under node.
 
 ```sh

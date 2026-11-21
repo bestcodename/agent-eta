@@ -147,14 +147,14 @@ priority.
     notification rules and the model, effort and permission settings in #21. Reuse native client settings and
     existing environment overrides; keep process ownership and live-writer checks mandatory. Propose the remaining
     options and their implementation effort after this audit (ca. 1 hour)
-32. (next, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. Prioritize the
-    settings pages (`plasmoid/contents/ui/config*.qml`; *Usage limits* has its tooltips since 2.23.0), plus account and session context-menu actions in
-    `FullRepresentation.qml`; then cover remaining controls and unclear icons, status indicators and abbreviations.
+32. (next, proposal) Apply the global tooltip rule across Agent ETA, requested on 2026-11-11. The settings pages have
+    their tooltips since 2.24.0, with the pattern of `configAppearance.qml` and the test
+    `test_settings_controls_explain_themselves`. Open are the account and session context-menu actions in
+    `FullRepresentation.qml`, then the remaining controls and unclear icons, status indicators and abbreviations.
     Explain purpose, effect or disabled state instead of repeating labels. Keep essential information visible and
-    provide accessible names. Reuse Qt/Plasma tooltip facilities and native timing, with pointer hover and keyboard
-    focus; verify that disabled-action explanations remain discoverable. Add focused QML coverage for settings and both
-    context menus, including focus and disabled states, and check them in Plasma. The settings-page part suits a local
-    `prompt-split.py` run once the plan holds the tooltip texts, see item 36.12 of `bestcodename/ai` (ca. 1 hour)
+    provide accessible names. Use `QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay` for native timing, with pointer
+    hover and keyboard focus. Add focused QML coverage for both context menus, including focus and disabled states,
+    and check them in Plasma (ca. 1 hour)
 33. (low, proposal) Offer Claude the same configurable CLI/desktop launch default and one-launch context-menu
     override as Codex, requested on 2026-11-11. Support both the saved default directory and a chosen directory,
     keep CLI as the initial default, and store each provider's preference independently. First verify the native
